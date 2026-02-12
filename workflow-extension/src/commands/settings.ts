@@ -1,20 +1,22 @@
 // commands/settings.ts — /workflow-settings command
-// Interactive UI for configuring verification models, timeout, retries.
+// Interactive UI for configuring verification models, timeout, retries,
+// thinking level, and bash blocking.
 
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@mariozechner/pi-coding-agent';
 import { loadSettings, saveSettings } from '../storage/settings';
+import type { ThinkingLevel } from '../types';
 
 /**
  * Register the /workflow-settings command.
- * Provides an interactive menu to configure verification settings.
+ * Provides an interactive menu to configure all workflow settings.
  */
 export function registerSettingsCommand(pi: ExtensionAPI) {
   pi.registerCommand('workflow-settings', {
     description:
-      'Configure workflow settings (verification models, timeout, retries)',
+      'Configure workflow settings (models, timeout, retries, thinking, bash)',
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       const settings = loadSettings(ctx.cwd);
       const availableModels = ctx.modelRegistry.getAvailable();
@@ -23,9 +25,9 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
         `Verify models (current: ${settings.verifyModels.length > 0 ? settings.verifyModels.join(', ') : 'none'})`,
         `Verify timeout (current: ${settings.verifyTimeout / 1000}s)`,
         `Max retries (current: ${settings.maxRetries})`,
-        'View current settings',
         `Thinking level (current: ${settings.thinkingLevel})`,
         `Block bash in plan/verify (current: ${settings.blockBash ? 'ON' : 'OFF'})`,
+        'View current settings',
       ];
 
       const choice = await ctx.ui.select('Workflow Settings', menuItems);
@@ -127,13 +129,55 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           break;
         }
 
-        // ── Display current settings ─────────────────────────────
+        // ── Thinking level selection ─────────────────────────────
         case menuItems[3]: {
+          const levels: ThinkingLevel[] = [
+            'off',
+            'minimal',
+            'low',
+            'medium',
+            'high',
+            'xhigh',
+          ];
+          const pick = await ctx.ui.select('Thinking level:', levels);
+          if (pick) {
+            settings.thinkingLevel = pick as ThinkingLevel;
+            const err = saveSettings(ctx.cwd, settings);
+            if (err) ctx.ui.notify(`Save failed: ${err}`, 'error');
+            else ctx.ui.notify(`Thinking level: ${pick}`, 'info');
+          }
+          break;
+        }
+
+        // ── Bash blocking toggle ─────────────────────────────────
+        case menuItems[4]: {
+          const options = ['ON', 'OFF'];
+          const pick = await ctx.ui.select(
+            'Block bash in plan/verify stages:',
+            options,
+          );
+          if (pick) {
+            settings.blockBash = pick === 'ON';
+            const err = saveSettings(ctx.cwd, settings);
+            if (err) ctx.ui.notify(`Save failed: ${err}`, 'error');
+            else
+              ctx.ui.notify(
+                `Block bash: ${settings.blockBash ? 'ON' : 'OFF'}`,
+                'info',
+              );
+          }
+          break;
+        }
+
+        // ── Display current settings ─────────────────────────────
+        case menuItems[5]: {
           const info =
             '🔧 Workflow Settings\n\n' +
             `Verify models: ${settings.verifyModels.length > 0 ? settings.verifyModels.join(', ') : '(none)'}\n` +
             `Timeout: ${settings.verifyTimeout / 1000}s\n` +
-            `Max retries: ${settings.maxRetries}`;
+            `Max retries: ${settings.maxRetries}\n` +
+            `Thinking level: ${settings.thinkingLevel}\n` +
+            `Block bash: ${settings.blockBash ? 'ON' : 'OFF'}`;
           ctx.ui.notify(info, 'info');
           break;
         }
