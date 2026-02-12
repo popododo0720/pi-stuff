@@ -18,6 +18,10 @@ const CONVENTIONS_DIR = "conventions";
 const MAX_MODULES = 20;
 const MAX_MODULE_CONVENTIONS = 30;
 
+// Parallel verification models
+const VERIFY_MODELS = ["codex/codex-mini-latest", "anthropic/claude-sonnet-4-20250514"];
+const VERIFY_TIMEOUT = 120_000; // 120 seconds
+
 const DEFAULT_CONVENTIONS: string[] = [
 	"클린 코드 원칙을 따를 것 — 함수는 하나의 책임만, 이름은 의도를 드러내게, 중복 제거",
 	"SOLID 원칙 준수 — SRP, OCP, LSP, ISP, DIP",
@@ -32,6 +36,14 @@ const STATE_EMOJI: Record<WorkflowState, string> = {
 	done: "🎉",
 };
 
+const STATE_LABELS: Record<WorkflowState, string> = {
+	plan: "Plan",
+	verify_plan: "Verify Plan",
+	implement: "Implement",
+	verify_impl: "Verify Impl",
+	done: "Done",
+};
+
 const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
 	approve_plan: ["plan"],
 	plan_verified: ["verify_plan"],
@@ -39,6 +51,7 @@ const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
 	impl_done: ["implement"],
 	impl_verified: ["verify_impl"],
 	impl_failed: ["verify_impl"],
+	replan: ["implement"],
 };
 
 // 각 단계별 시스템 프롬프트에 주입할 가이드
@@ -63,7 +76,7 @@ const STAGE_GUIDES: Record<WorkflowState, string> = {
 
 	verify_plan:
 		`## 현재 단계: 🔍 계획 검증\n\n` +
-		`승인된 계획을 검증하고 있습니다.\n` +
+		`자동 병렬 검증이 실패하여 수동 검증이 필요합니다.\n` +
 		`- 계획이 명확하고 구체적인지, 빠진 단계가 없는지, 검증 기준이 측정 가능한지 확인하세요.\n` +
 		`- 사용자와 논의하며 검증하세요.\n` +
 		`- 통과하면 workflow_transition(action: "plan_verified")를 호출하세요.\n` +
@@ -74,11 +87,12 @@ const STAGE_GUIDES: Record<WorkflowState, string> = {
 		`검증된 계획을 기반으로 구현하고 있습니다.\n` +
 		`- 계획의 각 항목을 순서대로 구현하세요.\n` +
 		`- 사용자의 피드백을 받으며 진행하세요.\n` +
+		`- 사용자가 방향 변경이나 계획 수정을 요청하면 workflow_transition(action: "replan", reason: "...")를 호출하여 계획 단계로 돌아가세요.\n` +
 		`- 모든 구현이 완료되면 workflow_transition(action: "impl_done")을 호출하세요.`,
 
 	verify_impl:
 		`## 현재 단계: ✅ 구현 검증\n\n` +
-		`구현 결과가 계획과 일치하는지 검증하고 있습니다.\n` +
+		`자동 병렬 검증이 실패하여 수동 검증이 필요합니다.\n` +
 		`- 계획의 모든 항목이 구현되었는지, 코드가 정상 동작하는지 확인하세요.\n` +
 		`- 통과하면 workflow_transition(action: "impl_verified")를 호출하세요.\n` +
 		`- 문제가 있으면 workflow_transition(action: "impl_failed", reason: "...")를 호출하세요.`,
@@ -115,6 +129,11 @@ interface ProjectMemory {
 	workflows: Array<{ name: string; description: string }>;
 	currentWork: Array<{ what: string; why: string; startedAt: string }>;
 	notes: string[];
+}
+
+interface VerificationResult {
+	passed: boolean;
+	results: Array<{ model: string; passed: boolean; output: string }>;
 }
 
 // ── Project Memory ────────────────────────────────────────────────────────────
@@ -266,10 +285,52 @@ function extractRecentFilePaths(ctx: ExtensionContext, limit = 20): string[] {
 	return [...paths];
 }
 
+// ── Plan Document ─────────────────────────────────────────────────────────────
+
+function toSlug(text: string): string {
+	return (
+		text
+			.slice(0, 50)
+			.trim()
+			.replace(/[^\w가-힣\s-]/g, "")
+			.replace(/\s+/g, "-")
+			.toLowerCase() || "plan"
+	);
+}
+
+function savePlanDocument(cwd: string, description: string, content: string): string | null {
+	try {
+		const dateStr = new Date().toISOString().slice(0, 10);
+		const slug = toSlug(description);
+		const dirPath = resolve(join(cwd, "docs", "plans"));
+		if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+		const filePath = join(dirPath, `${dateStr}-${slug}.md`);
+		const frontmatter = `---\ntitle: "${description}"\ndate: ${dateStr}\nworkflow: true\n---\n\n`;
+		writeFileSync(filePath, frontmatter + content, "utf-8");
+		return filePath;
+	} catch {
+		return null;
+	}
+}
+
+// ── Status Bar ────────────────────────────────────────────────────────────────
+
+function updateStatusBar(ctx: ExtensionContext, s: WorkflowSession | null): void {
+	if (!s || s.state === "done") {
+		ctx.ui.setStatus("workflow", undefined);
+		return;
+	}
+	const emoji = STATE_EMOJI[s.state];
+	const label = STATE_LABELS[s.state];
+	const desc = s.description.length > 30 ? s.description.slice(0, 30) + "..." : s.description;
+	ctx.ui.setStatus("workflow", `${emoji} ${label} | ${desc}`);
+}
+
+// ── Memory Context ────────────────────────────────────────────────────────────
+
 function memoryToContext(memory: ProjectMemory, recentFiles: string[] = [], matchedModules: Array<{ name: string; data: ModuleConventions }> = []): string {
 	const parts: string[] = [];
 
-	// 기본 컨벤션은 항상 주입 (사용자 수정 불가)
 	parts.push("### 기본 컨벤션\n" + DEFAULT_CONVENTIONS.map((c) => `- ${c}`).join("\n"));
 
 	if (memory.conventions.length > 0) {
@@ -285,7 +346,7 @@ function memoryToContext(memory: ProjectMemory, recentFiles: string[] = [], matc
 			);
 		}
 	}
-	// 모듈별 컨벤션 (매칭된 모듈만)
+
 	for (const { name, data } of matchedModules) {
 		const moduleParts: string[] = [];
 		if (data.conventions.length > 0) {
@@ -332,6 +393,68 @@ function memoryToContext(memory: ProjectMemory, recentFiles: string[] = [], matc
 export default function (pi: ExtensionAPI) {
 	let session: WorkflowSession | null = null;
 
+	// ── Parallel verification ───────────────────────────────────────────────
+
+	async function runParallelVerification(
+		type: "plan" | "impl",
+		planContent: string,
+		description: string,
+		signal?: AbortSignal,
+	): Promise<VerificationResult> {
+		const prompt =
+			type === "plan"
+				? `당신은 코드 구현 계획 검증자입니다. 다음 계획을 검증하세요:\n\n` +
+					`작업: ${description}\n\n` +
+					`계획:\n${planContent}\n\n` +
+					`검증 항목:\n` +
+					`1. 계획이 명확하고 구체적인가?\n` +
+					`2. 빠진 단계가 없는가?\n` +
+					`3. 파일 변경 목록이 현실적인가?\n` +
+					`4. 검증 기준이 측정 가능한가?\n\n` +
+					`상세한 검증 결과를 작성하고, 마지막 줄에 반드시 "VERDICT: PASS" 또는 "VERDICT: FAIL"을 적으세요.`
+				: `당신은 코드 구현 검증자입니다. 다음 계획에 따른 구현이 올바른지 검증하세요:\n\n` +
+					`작업: ${description}\n\n` +
+					`계획:\n${planContent}\n\n` +
+					`프로젝트 파일을 읽고 다음을 확인하세요:\n` +
+					`1. 계획의 모든 항목이 구현되었는가?\n` +
+					`2. 코드가 정상적인가? (가능하면 테스트 실행)\n` +
+					`3. 누락된 부분이 없는가?\n\n` +
+					`상세한 검증 결과를 작성하고, 마지막 줄에 반드시 "VERDICT: PASS" 또는 "VERDICT: FAIL"을 적으세요.`;
+
+		const promises = VERIFY_MODELS.map(async (model) => {
+			try {
+				const result = await pi.exec("pi", ["-p", prompt, "-m", model], {
+					signal,
+					timeout: VERIFY_TIMEOUT,
+				});
+				const output = (result.stdout + "\n" + result.stderr).trim();
+				const upperOutput = output.toUpperCase();
+				const passed = upperOutput.includes("VERDICT: PASS") || upperOutput.includes("VERDICT:PASS");
+				return { model, passed, output };
+			} catch (e) {
+				return {
+					model,
+					passed: false,
+					output: `프로세스 실행 실패: ${e instanceof Error ? e.message : "알 수 없는 오류"}`,
+				};
+			}
+		});
+
+		const results = await Promise.all(promises);
+		const passed = results.every((r) => r.passed);
+		return { passed, results };
+	}
+
+	function formatVerificationSummary(results: VerificationResult): string {
+		return results.results
+			.map((r) => {
+				const status = r.passed ? "✅ PASS" : "❌ FAIL";
+				const output = r.output.length > 300 ? r.output.slice(0, 300) + "..." : r.output;
+				return `[${r.model}] ${status}\n${output}`;
+			})
+			.join("\n\n");
+	}
+
 	// ── State reconstruction from session history ────────────────────────────
 
 	const reconstruct = (ctx: ExtensionContext) => {
@@ -342,6 +465,7 @@ export default function (pi: ExtensionAPI) {
 			if (msg.role !== "toolResult" || msg.toolName !== TOOL_NAME) continue;
 			if (msg.details) session = msg.details as WorkflowSession;
 		}
+		updateStatusBar(ctx, session);
 	};
 
 	for (const event of ["session_start", "session_switch", "session_fork", "session_tree"] as const) {
@@ -390,6 +514,8 @@ export default function (pi: ExtensionAPI) {
 				// ignore
 			}
 
+			updateStatusBar(ctx, session);
+
 			ctx.ui.notify(
 				hasMemory
 					? "📝 계획 모드로 진입했습니다. 무엇을 만들지 이야기해주세요."
@@ -407,7 +533,8 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"현재 워크플로우 단계를 완료하고 다음 단계로 전환합니다. " +
 			"계획 승인(approve_plan), 계획 검증 통과/실패(plan_verified/plan_failed), " +
-			"구현 완료(impl_done), 구현 검증 통과/실패(impl_verified/impl_failed) 액션을 지원합니다.",
+			"구현 완료(impl_done), 구현 검증 통과/실패(impl_verified/impl_failed), " +
+			"구현 중 계획 재수립(replan) 액션을 지원합니다.",
 		parameters: Type.Object({
 			action: StringEnum([
 				"approve_plan",
@@ -416,11 +543,12 @@ export default function (pi: ExtensionAPI) {
 				"impl_done",
 				"impl_verified",
 				"impl_failed",
+				"replan",
 			] as const),
 			content: Type.Optional(Type.String({ description: "단계 결과물 (계획 내용, 검증 결과 등)" })),
 			reason: Type.Optional(Type.String({ description: "실패 사유" })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!session) {
 				return { content: [{ type: "text" as const, text: "활성 워크플로우가 없습니다. /workflow 로 시작하세요." }] };
 			}
@@ -441,8 +569,67 @@ export default function (pi: ExtensionAPI) {
 						return { content: [{ type: "text" as const, text: "계획 내용(content)이 비어있습니다." }] };
 					}
 					session.planContent = params.content;
+
+					// 계획 문서 자동 저장
+					const savedPath = savePlanDocument(ctx.cwd, session.description, params.content);
+
+					// 자동 병렬 검증
 					session.state = "verify_plan";
-					break;
+					updateStatusBar(ctx, session);
+					onUpdate?.({
+						content: [{ type: "text" as const, text: `🔍 계획 검증 중... (${VERIFY_MODELS.join(" + ")})${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}` }],
+					});
+
+					try {
+						const result = await runParallelVerification("plan", session.planContent, session.description, signal);
+
+						if (result.passed) {
+							session.state = "implement";
+							session.retryCount = 0;
+							session.verifyPlanResult = "자동 검증 통과";
+							updateStatusBar(ctx, session);
+							return {
+								content: [{
+									type: "text" as const,
+									text: `✅ 계획 검증 통과! 구현 단계로 진입합니다.${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}\n\n${formatVerificationSummary(result)}`,
+								}],
+								details: session,
+							};
+						} else {
+							session.retryCount++;
+							if (session.retryCount >= MAX_RETRIES) {
+								session.state = "done";
+								updateStatusBar(ctx, session);
+								return {
+									content: [{
+										type: "text" as const,
+										text: `계획 검증이 ${MAX_RETRIES}회 실패하여 워크플로우를 중단합니다.\n\n${formatVerificationSummary(result)}`,
+									}],
+									details: session,
+								};
+							}
+							session.state = "plan";
+							session.verifyPlanResult = formatVerificationSummary(result);
+							updateStatusBar(ctx, session);
+							return {
+								content: [{
+									type: "text" as const,
+									text: `❌ 계획 검증 실패 (${session.retryCount}/${MAX_RETRIES}). 계획을 수정하세요.\n\n${formatVerificationSummary(result)}`,
+								}],
+								details: session,
+							};
+						}
+					} catch {
+						// 자동 검증 프로세스 오류 → verify_plan 상태 유지, 수동 검증으로 폴백
+						updateStatusBar(ctx, session);
+						return {
+							content: [{
+								type: "text" as const,
+								text: `⚠️ 자동 검증 프로세스 오류. 수동 검증으로 전환합니다.${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}`,
+							}],
+							details: session,
+						};
+					}
 				}
 
 				case "plan_verified":
@@ -455,6 +642,7 @@ export default function (pi: ExtensionAPI) {
 					session.retryCount++;
 					if (session.retryCount >= MAX_RETRIES) {
 						session.state = "done";
+						updateStatusBar(ctx, session);
 						return {
 							content: [{
 								type: "text" as const,
@@ -467,9 +655,62 @@ export default function (pi: ExtensionAPI) {
 					session.verifyPlanResult = params.reason || "검증 실패";
 					break;
 
-				case "impl_done":
+				case "impl_done": {
+					// 자동 병렬 검증
 					session.state = "verify_impl";
-					break;
+					updateStatusBar(ctx, session);
+					onUpdate?.({
+						content: [{ type: "text" as const, text: `✅ 구현 검증 중... (${VERIFY_MODELS.join(" + ")})` }],
+					});
+
+					try {
+						const result = await runParallelVerification("impl", session.planContent, session.description, signal);
+
+						if (result.passed) {
+							session.state = "done";
+							updateStatusBar(ctx, session);
+							return {
+								content: [{
+									type: "text" as const,
+									text: `🎉 구현 검증 통과! 워크플로우 완료! 작업: "${session.description}"\n\n${formatVerificationSummary(result)}`,
+								}],
+								details: session,
+							};
+						} else {
+							session.retryCount++;
+							if (session.retryCount >= MAX_RETRIES) {
+								session.state = "done";
+								updateStatusBar(ctx, session);
+								return {
+									content: [{
+										type: "text" as const,
+										text: `구현 검증이 ${MAX_RETRIES}회 실패하여 워크플로우를 중단합니다.\n\n${formatVerificationSummary(result)}`,
+									}],
+									details: session,
+								};
+							}
+							session.state = "implement";
+							updateStatusBar(ctx, session);
+							return {
+								content: [{
+									type: "text" as const,
+									text: `❌ 구현 검증 실패 (${session.retryCount}/${MAX_RETRIES}). 문제를 수정하세요.\n\n${formatVerificationSummary(result)}`,
+								}],
+								details: session,
+							};
+						}
+					} catch {
+						// 자동 검증 프로세스 오류 → verify_impl 상태 유지, 수동 검증으로 폴백
+						updateStatusBar(ctx, session);
+						return {
+							content: [{
+								type: "text" as const,
+								text: `⚠️ 자동 검증 프로세스 오류. 수동 검증으로 전환합니다.`,
+							}],
+							details: session,
+						};
+					}
+				}
 
 				case "impl_verified":
 					session.state = "done";
@@ -479,6 +720,7 @@ export default function (pi: ExtensionAPI) {
 					session.retryCount++;
 					if (session.retryCount >= MAX_RETRIES) {
 						session.state = "done";
+						updateStatusBar(ctx, session);
 						return {
 							content: [{
 								type: "text" as const,
@@ -489,7 +731,16 @@ export default function (pi: ExtensionAPI) {
 					}
 					session.state = "implement";
 					break;
+
+				case "replan": {
+					session.state = "plan";
+					session.verifyPlanResult = "";
+					// planContent 유지 — 기존 계획을 참고하여 수정할 수 있도록
+					break;
+				}
 			}
+
+			updateStatusBar(ctx, session);
 
 			const statusText =
 				session.state === "done"
@@ -750,7 +1001,6 @@ export default function (pi: ExtensionAPI) {
 				const recentFiles = extractRecentFilePaths(ctx);
 				const matchedModules = loadMatchingModules(ctx.cwd, recentFiles);
 				memoryContext = memoryToContext(memory, recentFiles, matchedModules);
-				// 사용자가 아무것도 추가하지 않았으면 온보딩
 				needsOnboarding =
 					memory.conventions.length === 0 &&
 					memory.rules.length === 0 &&
@@ -770,13 +1020,11 @@ export default function (pi: ExtensionAPI) {
 			return undefined;
 		}
 
-		// 온보딩 가이드 (plan 단계 + 메모리가 기본값만 있을 때)
 		const onboardingContext =
 			needsOnboarding && session.state === "plan" && !session.planContent
 				? "\n\n" + ONBOARDING_GUIDE
 				: "";
 
-		// 현재 단계 가이드 주입
 		const stageGuide = STAGE_GUIDES[session.state] || "";
 		const planContext = session.planContent
 			? `\n\n### 승인된 계획\n<plan_content>\n${session.planContent}\n</plan_content>`
@@ -820,6 +1068,7 @@ export default function (pi: ExtensionAPI) {
 		if (s.state === "done") {
 			memory.currentWork = memory.currentWork.filter((w) => w.what !== s.description);
 			saveMemory(ctx.cwd, memory);
+			updateStatusBar(ctx, null);
 		}
 	});
 }
