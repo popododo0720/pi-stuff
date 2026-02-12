@@ -154,12 +154,17 @@ export function buildSystemPromptInjection(
     // Silently ignore memory load errors
   }
 
-  // No active workflow — only inject memory if available
-  if (!session || session.state === 'done') {
-    if (memoryContext) {
-      return basePrompt + memoryContext;
-    }
-    return undefined;
+  // No active workflow
+  if (!session) {
+    return `${basePrompt}\n\nWorkflow Status: ⚠️ NO ACTIVE WORKFLOW\n${memoryContext}`;
+  }
+
+  // Done state — show status indicator
+  if (session.state === 'done') {
+    const status = session.completed
+      ? '\n\nWorkflow Status: 🎉 COMPLETED — send a message to start a new plan cycle\n'
+      : '\n\nWorkflow Status: ⏸️ PAUSED — send a message to return to planning\n';
+    return basePrompt + status + memoryContext;
   }
 
   // Onboarding guide for first-time users (no conventions set yet)

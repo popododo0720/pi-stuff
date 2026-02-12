@@ -82,11 +82,12 @@ export default function (pi: ExtensionAPI) {
 
   // ── System prompt injection ────────────────────────────────────
   pi.on('before_agent_start', async (event, ctx) => {
-    // Auto-recover: paused workflow resumes as plan on next user message
-    if (session && session.state === 'done' && !session.completed) {
+    // Auto-recover: any done workflow resumes as plan on next user message
+    if (session && session.state === 'done') {
       session.state = 'plan';
       session.retryCount = 0;
       session.verifyPlanResult = '';
+      cleanupVerificationResults(ctx.cwd);
       updateStatusBar(ctx, session);
     }
     const result = buildSystemPromptInjection(session, ctx, event.systemPrompt);
@@ -120,14 +121,6 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Clean up completed workflow (only truly completed, not paused)
-    if (session.state === 'done' && session.completed) {
-      memory.currentWork = memory.currentWork.filter(
-        (w) => !w.what.startsWith(`[${session?.id}]`),
-      );
-      saveMemory(ctx.cwd, memory);
-      cleanupVerificationResults(ctx.cwd);
-      updateStatusBar(ctx, null);
-    }
+    // Done workflows persist — cleanup only via /workflow-cancel or /workflow replacement
   });
 }

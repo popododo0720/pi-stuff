@@ -6,6 +6,7 @@ import type {
   ExtensionCommandContext,
 } from '@mariozechner/pi-coding-agent';
 import { updateStatusBar } from '../context/status';
+import { loadMemory, saveMemory } from '../storage/memory';
 import type { WorkflowSession } from '../types';
 import { cleanupVerificationResults } from '../verification';
 
@@ -22,7 +23,7 @@ export function registerCancelCommand(
     description: 'Cancel the active workflow',
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       const session = getSession();
-      if (!session || session.state === 'done') {
+      if (!session) {
         ctx.ui.notify('No active workflow to cancel.', 'info');
         return;
       }
@@ -33,7 +34,20 @@ export function registerCancelCommand(
       );
       if (!confirmed) return;
 
+      // Clean up verification files
       cleanupVerificationResults(ctx.cwd);
+
+      // Remove currentWork entry for this workflow
+      try {
+        const memory = loadMemory(ctx.cwd);
+        memory.currentWork = memory.currentWork.filter(
+          (w) => !w.what.startsWith(`[${session?.id}]`),
+        );
+        saveMemory(ctx.cwd, memory);
+      } catch {
+        // Ignore memory cleanup errors
+      }
+
       setSession(null);
       updateStatusBar(ctx, null);
       ctx.ui.notify('Workflow cancelled.', 'info');

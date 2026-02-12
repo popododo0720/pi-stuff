@@ -8,7 +8,7 @@ import type {
 } from '@mariozechner/pi-coding-agent';
 import { generateWorkflowId } from '../constants';
 import { updateStatusBar } from '../context/status';
-import { resolveMemoryPath, saveMemory } from '../storage/memory';
+import { loadMemory, resolveMemoryPath, saveMemory } from '../storage/memory';
 import type { WorkflowSession } from '../types';
 import { cleanupVerificationResults } from '../verification';
 
@@ -37,8 +37,19 @@ export function registerWorkflowCommand(
         if (!confirmed) return;
       }
 
-      // Clean up previous verification files
+      // Clean up previous workflow
       cleanupVerificationResults(ctx.cwd);
+      if (currentSession) {
+        try {
+          const memory = loadMemory(ctx.cwd);
+          memory.currentWork = memory.currentWork.filter(
+            (w) => !w.what.startsWith(`[${currentSession.id}]`),
+          );
+          saveMemory(ctx.cwd, memory);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
 
       // Create new session with unique ID
       const id = generateWorkflowId();
