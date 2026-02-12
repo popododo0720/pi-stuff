@@ -1,20 +1,12 @@
 // verification/parallel.ts — Parallel model verification
 // Runs plan/impl verification against multiple models via `pi -p`.
-// Uses staggered starts and retry-on-empty to handle concurrency issues.
+// Retries on empty responses to handle transient failures.
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import type { VerificationResult, WorkflowSettings } from '../types';
 
-/** Delay helper for staggering parallel starts */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /** Max retry attempts when a model returns empty output */
 const MAX_EMPTY_RETRIES = 2;
-
-/** Stagger delay between parallel model launches (ms) */
-const STAGGER_DELAY_MS = 3000;
 
 /**
  * Execute a single model verification with retry on empty response.
@@ -129,14 +121,10 @@ export async function runParallelVerification(
         'Write a detailed verification result. ' +
         'On the last line, write exactly "VERDICT: PASS" or "VERDICT: FAIL".';
 
-  // Launch models in parallel with staggered starts
-  const promises = settings.verifyModels.map(async (model, index) => {
-    // Stagger launches to avoid resource contention
-    if (index > 0) {
-      await delay(STAGGER_DELAY_MS * index);
-    }
-    return runSingleModel(model, prompt, pi, settings.verifyTimeout, signal);
-  });
+  // Launch all models in parallel
+  const promises = settings.verifyModels.map((model) =>
+    runSingleModel(model, prompt, pi, settings.verifyTimeout, signal),
+  );
 
   const results = await Promise.all(promises);
   // All models must pass for overall success
