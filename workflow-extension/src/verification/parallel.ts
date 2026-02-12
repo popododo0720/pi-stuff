@@ -129,7 +129,13 @@ export async function runParallelVerification(
         'Read the project files and check:\n' +
         '1. Are all planned items implemented?\n' +
         '2. Does the code work correctly? (Run tests if possible)\n' +
-        '3. Is anything missing?\n\n' +
+        '3. Is anything missing?\n' +
+        '4. Code quality:\n' +
+        '   - SOLID principles (single responsibility, open-closed, etc.)\n' +
+        '   - No unnecessary complexity (YAGNI, KISS)\n' +
+        '   - Clean separation of concerns and architecture\n' +
+        '   - No security issues (hardcoded secrets, unvalidated input, injection risks)\n' +
+        '   - Extensibility — easy to add features without modifying existing code\n\n' +
         'Write a detailed verification result. ' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.';
 
