@@ -9,7 +9,6 @@ import { join, resolve } from "node:path";
 const TOOL_NAME = "workflow_transition";
 const MEMORY_DIR = ".pi";
 const MEMORY_FILE = "workflow-memory.json";
-const MAX_RETRIES = 3;
 const MAX_MEMORY_ENTRIES = 50;
 const MAX_MEMORY_VALUE_LENGTH = 1000;
 const MAX_RULES = 30;
@@ -18,9 +17,50 @@ const CONVENTIONS_DIR = "conventions";
 const MAX_MODULES = 20;
 const MAX_MODULE_CONVENTIONS = 30;
 
-// Parallel verification models
-const VERIFY_MODELS = ["codex/codex-mini-latest", "anthropic/claude-sonnet-4-20250514"];
-const VERIFY_TIMEOUT = 120_000; // 120 seconds
+// Workflow settings
+const SETTINGS_FILE = "workflow-settings.json";
+
+interface WorkflowSettings {
+	verifyModels: string[];
+	verifyTimeout: number;
+	maxRetries: number;
+}
+
+const DEFAULT_SETTINGS: WorkflowSettings = {
+	verifyModels: [],
+	verifyTimeout: 120_000,
+	maxRetries: 3,
+};
+
+function resolveSettingsPath(cwd: string): string {
+	return resolve(join(cwd, MEMORY_DIR, SETTINGS_FILE));
+}
+
+function loadSettings(cwd: string): WorkflowSettings {
+	try {
+		const path = resolveSettingsPath(cwd);
+		const raw = JSON.parse(readFileSync(path, "utf-8"));
+		return {
+			verifyModels: raw.verifyModels ?? DEFAULT_SETTINGS.verifyModels,
+			verifyTimeout: raw.verifyTimeout ?? DEFAULT_SETTINGS.verifyTimeout,
+			maxRetries: raw.maxRetries ?? DEFAULT_SETTINGS.maxRetries,
+		};
+	} catch {
+		return { ...DEFAULT_SETTINGS };
+	}
+}
+
+function saveSettings(cwd: string, settings: WorkflowSettings): string | null {
+	try {
+		const path = resolveSettingsPath(cwd);
+		const dir = resolve(join(cwd, MEMORY_DIR));
+		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+		writeFileSync(path, JSON.stringify(settings, null, "\t"), { encoding: "utf-8", mode: 0o600 });
+		return null;
+	} catch (e) {
+		return e instanceof Error ? e.message : "저장 실패";
+	}
+}
 
 const DEFAULT_CONVENTIONS: string[] = [
 	"클린 코드 원칙을 따를 것 — 함수는 하나의 책임만, 이름은 의도를 드러내게, 중복 제거",
@@ -399,8 +439,15 @@ export default function (pi: ExtensionAPI) {
 		type: "plan" | "impl",
 		planContent: string,
 		description: string,
+		cwd: string,
 		signal?: AbortSignal,
 	): Promise<VerificationResult> {
+		const settings = loadSettings(cwd);
+
+		if (settings.verifyModels.length === 0) {
+			throw new Error("검증 모델이 설정되지 않았습니다. /workflow-settings 로 모델을 추가하세요.");
+		}
+
 		const prompt =
 			type === "plan"
 				? `당신은 코드 구현 계획 검증자입니다. 다음 계획을 검증하세요:\n\n` +
@@ -421,11 +468,11 @@ export default function (pi: ExtensionAPI) {
 					`3. 누락된 부분이 없는가?\n\n` +
 					`상세한 검증 결과를 작성하고, 마지막 줄에 반드시 "VERDICT: PASS" 또는 "VERDICT: FAIL"을 적으세요.`;
 
-		const promises = VERIFY_MODELS.map(async (model) => {
+		const promises = settings.verifyModels.map(async (model) => {
 			try {
 				const result = await pi.exec("pi", ["-p", prompt, "-m", model], {
 					signal,
-					timeout: VERIFY_TIMEOUT,
+					timeout: settings.verifyTimeout,
 				});
 				const output = (result.stdout + "\n" + result.stderr).trim();
 				const upperOutput = output.toUpperCase();
@@ -525,6 +572,118 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	// ── /workflow-settings command ───────────────────────────────────────────
+
+	pi.registerCommand("workflow-settings", {
+		description: "Configure workflow settings (verification models, timeout, retries)",
+		handler: async (_args: any, ctx: any) => {
+			const settings = loadSettings(ctx.cwd);
+			const availableModels = ctx.modelRegistry.getAvailable();
+
+			const menuItems = [
+				`검증 모델 설정 (현재: ${settings.verifyModels.length > 0 ? settings.verifyModels.join(", ") : "없음"})`,
+				`검증 타임아웃 (현재: ${settings.verifyTimeout / 1000}초)`,
+				`최대 재시도 횟수 (현재: ${settings.maxRetries}회)`,
+				"현재 설정 보기",
+			];
+
+			const choice = await ctx.ui.select("Workflow Settings", menuItems);
+			if (choice === undefined) return;
+
+			switch (choice) {
+				case menuItems[0]: {
+					// 검증 모델 설정
+					const modelOptions = availableModels.map((m: any) => `${m.provider}/${m.id}`);
+					if (modelOptions.length === 0) {
+						ctx.ui.notify("사용 가능한 모델이 없습니다. API 키를 설정하세요.", "error");
+						return;
+					}
+
+					const selected: string[] = [];
+					let picking = true;
+
+					while (picking) {
+						const remaining = modelOptions.filter((m: string) => !selected.includes(m));
+						const options = [
+							...(selected.length > 0 ? [`✅ 완료 (선택: ${selected.join(", ")})`] : []),
+							...remaining,
+						];
+
+						const pick = await ctx.ui.select(
+							`검증 모델 선택 (${selected.length}개 선택됨)`,
+							options,
+						);
+
+						if (pick === undefined) {
+							picking = false;
+						} else if (pick === options[0] && selected.length > 0) {
+							picking = false;
+						} else {
+							selected.push(pick);
+							ctx.ui.notify(`+ ${pick}`, "info");
+						}
+					}
+
+					if (selected.length > 0) {
+						settings.verifyModels = selected;
+						const err = saveSettings(ctx.cwd, settings);
+						if (err) {
+							ctx.ui.notify(`저장 실패: ${err}`, "error");
+						} else {
+							ctx.ui.notify(`검증 모델 설정 완료: ${selected.join(", ")}`, "info");
+						}
+					}
+					break;
+				}
+
+				case menuItems[1]: {
+					// 타임아웃
+					const input = await ctx.ui.input("검증 타임아웃 (초):", String(settings.verifyTimeout / 1000));
+					if (input) {
+						const seconds = parseInt(input, 10);
+						if (!isNaN(seconds) && seconds > 0 && seconds <= 600) {
+							settings.verifyTimeout = seconds * 1000;
+							const err = saveSettings(ctx.cwd, settings);
+							if (err) ctx.ui.notify(`저장 실패: ${err}`, "error");
+							else ctx.ui.notify(`타임아웃: ${seconds}초`, "info");
+						} else {
+							ctx.ui.notify("1~600 사이의 숫자를 입력하세요.", "error");
+						}
+					}
+					break;
+				}
+
+				case menuItems[2]: {
+					// 최대 재시도
+					const input = await ctx.ui.input("최대 재시도 횟수:", String(settings.maxRetries));
+					if (input) {
+						const retries = parseInt(input, 10);
+						if (!isNaN(retries) && retries >= 1 && retries <= 10) {
+							settings.maxRetries = retries;
+							const err = saveSettings(ctx.cwd, settings);
+							if (err) ctx.ui.notify(`저장 실패: ${err}`, "error");
+							else ctx.ui.notify(`최대 재시도: ${retries}회`, "info");
+						} else {
+							ctx.ui.notify("1~10 사이의 숫자를 입력하세요.", "error");
+						}
+					}
+					break;
+				}
+
+				case menuItems[3]: {
+					// 현재 설정 보기
+					const info =
+						`🔧 Workflow Settings\n\n` +
+						`검증 모델: ${settings.verifyModels.length > 0 ? settings.verifyModels.join(", ") : "(없음)"}\n` +
+						`타임아웃: ${settings.verifyTimeout / 1000}초\n` +
+						`최대 재시도: ${settings.maxRetries}회`;
+					ctx.ui.notify(info, "info");
+					break;
+				}
+			}
+		},
+	});
+
 	// ── workflow_transition tool ─────────────────────────────────────────────
 
 	pi.registerTool({
@@ -553,6 +712,9 @@ export default function (pi: ExtensionAPI) {
 				return { content: [{ type: "text" as const, text: "활성 워크플로우가 없습니다. /workflow 로 시작하세요." }] };
 			}
 
+			const settings = loadSettings(ctx.cwd);
+			const maxRetries = settings.maxRetries;
+
 			const allowed = VALID_TRANSITIONS[params.action];
 			if (!allowed || !allowed.includes(session.state)) {
 				return {
@@ -576,12 +738,13 @@ export default function (pi: ExtensionAPI) {
 					// 자동 병렬 검증
 					session.state = "verify_plan";
 					updateStatusBar(ctx, session);
+					const verifySettings = loadSettings(ctx.cwd);
 					onUpdate?.({
-						content: [{ type: "text" as const, text: `🔍 계획 검증 중... (${VERIFY_MODELS.join(" + ")})${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}` }],
+						content: [{ type: "text" as const, text: `🔍 계획 검증 중... (${verifySettings.verifyModels.join(" + ") || "모델 미설정"})${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}` }],
 					});
 
 					try {
-						const result = await runParallelVerification("plan", session.planContent, session.description, signal);
+						const result = await runParallelVerification("plan", session.planContent, session.description, ctx.cwd, signal);
 
 						if (result.passed) {
 							session.state = "implement";
@@ -597,13 +760,13 @@ export default function (pi: ExtensionAPI) {
 							};
 						} else {
 							session.retryCount++;
-							if (session.retryCount >= MAX_RETRIES) {
+							if (session.retryCount >= maxRetries) {
 								session.state = "done";
 								updateStatusBar(ctx, session);
 								return {
 									content: [{
 										type: "text" as const,
-										text: `계획 검증이 ${MAX_RETRIES}회 실패하여 워크플로우를 중단합니다.\n\n${formatVerificationSummary(result)}`,
+										text: `계획 검증이 ${maxRetries}회 실패하여 워크플로우를 중단합니다.\n\n${formatVerificationSummary(result)}`,
 									}],
 									details: session,
 								};
@@ -614,7 +777,7 @@ export default function (pi: ExtensionAPI) {
 							return {
 								content: [{
 									type: "text" as const,
-									text: `❌ 계획 검증 실패 (${session.retryCount}/${MAX_RETRIES}). 계획을 수정하세요.\n\n${formatVerificationSummary(result)}`,
+									text: `❌ 계획 검증 실패 (${session.retryCount}/${maxRetries}). 계획을 수정하세요.\n\n${formatVerificationSummary(result)}`,
 								}],
 								details: session,
 							};
@@ -640,13 +803,13 @@ export default function (pi: ExtensionAPI) {
 
 				case "plan_failed":
 					session.retryCount++;
-					if (session.retryCount >= MAX_RETRIES) {
+					if (session.retryCount >= maxRetries) {
 						session.state = "done";
 						updateStatusBar(ctx, session);
 						return {
 							content: [{
 								type: "text" as const,
-								text: `계획 검증이 ${MAX_RETRIES}회 실패하여 워크플로우를 중단합니다. 사유: ${params.reason || "검증 실패"}`,
+								text: `계획 검증이 ${maxRetries}회 실패하여 워크플로우를 중단합니다. 사유: ${params.reason || "검증 실패"}`,
 							}],
 							details: session,
 						};
@@ -659,12 +822,13 @@ export default function (pi: ExtensionAPI) {
 					// 자동 병렬 검증
 					session.state = "verify_impl";
 					updateStatusBar(ctx, session);
+					const implVerifySettings = loadSettings(ctx.cwd);
 					onUpdate?.({
-						content: [{ type: "text" as const, text: `✅ 구현 검증 중... (${VERIFY_MODELS.join(" + ")})` }],
+						content: [{ type: "text" as const, text: `✅ 구현 검증 중... (${implVerifySettings.verifyModels.join(" + ") || "모델 미설정"})` }],
 					});
 
 					try {
-						const result = await runParallelVerification("impl", session.planContent, session.description, signal);
+						const result = await runParallelVerification("impl", session.planContent, session.description, ctx.cwd, signal);
 
 						if (result.passed) {
 							session.state = "done";
@@ -678,13 +842,13 @@ export default function (pi: ExtensionAPI) {
 							};
 						} else {
 							session.retryCount++;
-							if (session.retryCount >= MAX_RETRIES) {
+							if (session.retryCount >= maxRetries) {
 								session.state = "done";
 								updateStatusBar(ctx, session);
 								return {
 									content: [{
 										type: "text" as const,
-										text: `구현 검증이 ${MAX_RETRIES}회 실패하여 워크플로우를 중단합니다.\n\n${formatVerificationSummary(result)}`,
+										text: `구현 검증이 ${maxRetries}회 실패하여 워크플로우를 중단합니다.\n\n${formatVerificationSummary(result)}`,
 									}],
 									details: session,
 								};
@@ -694,7 +858,7 @@ export default function (pi: ExtensionAPI) {
 							return {
 								content: [{
 									type: "text" as const,
-									text: `❌ 구현 검증 실패 (${session.retryCount}/${MAX_RETRIES}). 문제를 수정하세요.\n\n${formatVerificationSummary(result)}`,
+									text: `❌ 구현 검증 실패 (${session.retryCount}/${maxRetries}). 문제를 수정하세요.\n\n${formatVerificationSummary(result)}`,
 								}],
 								details: session,
 							};
@@ -718,13 +882,13 @@ export default function (pi: ExtensionAPI) {
 
 				case "impl_failed":
 					session.retryCount++;
-					if (session.retryCount >= MAX_RETRIES) {
+					if (session.retryCount >= maxRetries) {
 						session.state = "done";
 						updateStatusBar(ctx, session);
 						return {
 							content: [{
 								type: "text" as const,
-								text: `구현 검증이 ${MAX_RETRIES}회 실패하여 워크플로우를 중단합니다. 사유: ${params.reason || "구현 검증 실패"}`,
+								text: `구현 검증이 ${maxRetries}회 실패하여 워크플로우를 중단합니다. 사유: ${params.reason || "구현 검증 실패"}`,
 							}],
 							details: session,
 						};
