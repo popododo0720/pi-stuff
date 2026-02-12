@@ -58,7 +58,11 @@ export async function runParallelVerification(
   // Run all models in parallel
   const promises = settings.verifyModels.map(async (model) => {
     try {
-      const result = await pi.exec('pi', ['-p', prompt, '-m', model], {
+      // Model format is "provider/model-id" — split for CLI args
+      const [provider, ...modelParts] = model.split('/');
+      const modelId = modelParts.join('/');
+      const args = ['-p', prompt, '--provider', provider, '--model', modelId];
+      const result = await pi.exec('pi', args, {
         signal,
         timeout: settings.verifyTimeout,
       });
