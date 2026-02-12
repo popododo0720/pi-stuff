@@ -15,6 +15,12 @@ const MAX_MEMORY_VALUE_LENGTH = 1000;
 const MAX_RULES = 30;
 const MAX_RULE_PATTERN_LENGTH = 200;
 
+const DEFAULT_CONVENTIONS: string[] = [
+	"클린 코드 원칙을 따를 것 — 함수는 하나의 책임만, 이름은 의도를 드러내게, 중복 제거",
+	"SOLID 원칙 준수 — SRP, OCP, LSP, ISP, DIP",
+	"불필요한 복잡성 금지 — YAGNI, KISS 우선",
+];
+
 const STATE_EMOJI: Record<WorkflowState, string> = {
 	plan: "📝",
 	verify_plan: "🔍",
@@ -115,7 +121,7 @@ function loadMemory(cwd: string): ProjectMemory {
 			notes: raw.notes ?? [],
 		};
 	} catch {
-		return { conventions: [], rules: [], workflows: [], currentWork: [], notes: [] };
+		return { conventions: [...DEFAULT_CONVENTIONS], rules: [], workflows: [], currentWork: [], notes: [] };
 	}
 }
 
