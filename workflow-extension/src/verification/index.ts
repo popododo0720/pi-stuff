@@ -3,4 +3,5 @@
 export {
   formatVerificationSummary,
   runParallelVerification,
+  saveVerificationResult,
 } from './parallel';

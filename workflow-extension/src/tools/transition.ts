@@ -12,6 +12,7 @@ import type { WorkflowSession } from '../types';
 import {
   formatVerificationSummary,
   runParallelVerification,
+  saveVerificationResult,
 } from '../verification';
 
 // Helper to build a text content response
@@ -142,14 +143,16 @@ export function registerTransitionTool(
                 session,
               );
             }
-            // Go back to plan for revision
+            // Go back to plan for revision — save full result to file
             session.state = 'plan';
             session.verifyPlanResult = formatVerificationSummary(result);
+            const resultPath = saveVerificationResult(ctx.cwd, 'plan', result);
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
               `❌ Plan verification failed (${session.retryCount}/${maxRetries}). Please revise.\n\n` +
-                formatVerificationSummary(result),
+                formatVerificationSummary(result) +
+                (resultPath ? `\n\n📋 Full results: ${resultPath}` : ''),
               session,
             );
           } catch (e) {
@@ -243,13 +246,21 @@ export function registerTransitionTool(
                 session,
               );
             }
-            // Go back to implement
+            // Go back to implement — save full result to file
             session.state = 'implement';
+            const implResultPath = saveVerificationResult(
+              ctx.cwd,
+              'impl',
+              result,
+            );
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
               `❌ Implementation verification failed (${session.retryCount}/${maxRetries}). Please fix.\n\n` +
-                formatVerificationSummary(result),
+                formatVerificationSummary(result) +
+                (implResultPath
+                  ? `\n\n📋 Full results: ${implResultPath}`
+                  : ''),
               session,
             );
           } catch (e) {

@@ -2,6 +2,8 @@
 // Runs plan/impl verification against multiple models via `pi -p`.
 // Retries on empty responses to handle transient failures.
 
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import type { VerificationResult, WorkflowSettings } from '../types';
 
@@ -134,7 +136,7 @@ export async function runParallelVerification(
 
 /**
  * Format verification results into a human-readable summary.
- * Truncates long outputs to 300 characters.
+ * Truncates long outputs to 300 characters for inline display.
  */
 export function formatVerificationSummary(results: VerificationResult): string {
   return results.results
@@ -145,4 +147,31 @@ export function formatVerificationSummary(results: VerificationResult): string {
       return `[${r.model}] ${status}\n${output}`;
     })
     .join('\n\n');
+}
+
+/**
+ * Save full verification results to a file for detailed review.
+ * Returns the saved file path, or null on failure.
+ */
+export function saveVerificationResult(
+  cwd: string,
+  type: 'plan' | 'impl',
+  results: VerificationResult,
+): string | null {
+  try {
+    const dir = resolve(join(cwd, '.pi', 'verifications'));
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = join(dir, `${type}-${dateStr}.md`);
+    const content = results.results
+      .map((r) => {
+        const status = r.passed ? '✅ PASS' : '❌ FAIL';
+        return `## [${r.model}] ${status}\n\n${r.output}`;
+      })
+      .join('\n\n---\n\n');
+    writeFileSync(filePath, content, 'utf-8');
+    return filePath;
+  } catch {
+    return null;
+  }
 }
