@@ -15,8 +15,7 @@ import type { ThinkingLevel } from '../types';
  */
 export function registerSettingsCommand(pi: ExtensionAPI) {
   pi.registerCommand('workflow-settings', {
-    description:
-      'Configure workflow settings (models, timeout, retries, thinking)',
+    description: 'Configure workflow settings (models, timeout, thinking)',
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       const settings = loadSettings(ctx.cwd);
       const availableModels = ctx.modelRegistry.getAvailable();
@@ -24,7 +23,6 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
       const menuItems = [
         `Verify models (current: ${settings.verifyModels.length > 0 ? settings.verifyModels.join(', ') : 'none'})`,
         `Verify timeout (current: ${settings.verifyTimeout / 1000}s)`,
-        `Max retries (current: ${settings.maxRetries})`,
         `Thinking level (current: ${settings.thinkingLevel})`,
         'View current settings',
       ];
@@ -108,28 +106,8 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           break;
         }
 
-        // ── Retry limit configuration ────────────────────────────
-        case menuItems[2]: {
-          const input = await ctx.ui.input(
-            'Max retries:',
-            String(settings.maxRetries),
-          );
-          if (input) {
-            const retries = parseInt(input, 10);
-            if (!Number.isNaN(retries) && retries >= 1 && retries <= 10) {
-              settings.maxRetries = retries;
-              const err = saveSettings(ctx.cwd, settings);
-              if (err) ctx.ui.notify(`Save failed: ${err}`, 'error');
-              else ctx.ui.notify(`Max retries: ${retries}`, 'info');
-            } else {
-              ctx.ui.notify('Enter a number between 1 and 10.', 'error');
-            }
-          }
-          break;
-        }
-
         // ── Thinking level selection ─────────────────────────────
-        case menuItems[3]: {
+        case menuItems[2]: {
           const levels: ThinkingLevel[] = [
             'off',
             'minimal',
@@ -149,12 +127,11 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
         }
 
         // ── Display current settings ─────────────────────────────
-        case menuItems[4]: {
+        case menuItems[3]: {
           const info =
             '🔧 Workflow Settings\n\n' +
             `Verify models: ${settings.verifyModels.length > 0 ? settings.verifyModels.join(', ') : '(none)'}\n` +
             `Timeout: ${settings.verifyTimeout / 1000}s\n` +
-            `Max retries: ${settings.maxRetries}\n` +
             `Thinking level: ${settings.thinkingLevel}`;
           ctx.ui.notify(info, 'info');
           break;

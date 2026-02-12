@@ -1,5 +1,5 @@
 // storage/settings.ts — WorkflowSettings load/save
-// Stores verification model config, timeout, and retry limits.
+// Stores verification model config, timeout, and thinking level.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -24,7 +24,6 @@ export function loadSettings(cwd: string): WorkflowSettings {
     return {
       verifyModels: raw.verifyModels ?? DEFAULT_SETTINGS.verifyModels,
       verifyTimeout: raw.verifyTimeout ?? DEFAULT_SETTINGS.verifyTimeout,
-      maxRetries: raw.maxRetries ?? DEFAULT_SETTINGS.maxRetries,
       thinkingLevel: raw.thinkingLevel ?? DEFAULT_SETTINGS.thinkingLevel,
     };
   } catch {

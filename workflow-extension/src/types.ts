@@ -53,7 +53,6 @@ export interface ProjectMemory {
 export interface WorkflowSettings {
   verifyModels: string[];
   verifyTimeout: number;
-  maxRetries: number;
   thinkingLevel: ThinkingLevel;
 }
 
