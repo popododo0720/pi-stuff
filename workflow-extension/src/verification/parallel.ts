@@ -61,7 +61,17 @@ export async function runParallelVerification(
       // Model format is "provider/model-id" — split for CLI args
       const [provider, ...modelParts] = model.split('/');
       const modelId = modelParts.join('/');
-      const args = ['-p', prompt, '--provider', provider, '--model', modelId];
+      // Use high thinking level for thorough verification
+      const args = [
+        '-p',
+        prompt,
+        '--provider',
+        provider,
+        '--model',
+        modelId,
+        '--thinking',
+        'high',
+      ];
       const result = await pi.exec('pi', args, {
         signal,
         timeout: settings.verifyTimeout,
