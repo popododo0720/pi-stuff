@@ -35,7 +35,6 @@ export const DEFAULT_SETTINGS: WorkflowSettings = {
   verifyTimeout: 120_000,
   maxRetries: 3,
   thinkingLevel: 'high',
-  blockBash: false,
 };
 
 // State maps

@@ -46,7 +46,6 @@ export interface WorkflowSettings {
   verifyTimeout: number;
   maxRetries: number;
   thinkingLevel: ThinkingLevel;
-  blockBash: boolean;
 }
 
 export interface VerificationResult {
