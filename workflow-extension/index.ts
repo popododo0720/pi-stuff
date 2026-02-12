@@ -12,6 +12,8 @@ const MEMORY_FILE = "workflow-memory.json";
 const MAX_RETRIES = 3;
 const MAX_MEMORY_ENTRIES = 50;
 const MAX_MEMORY_VALUE_LENGTH = 1000;
+const MAX_RULES = 30;
+const MAX_RULE_PATTERN_LENGTH = 200;
 
 const STATE_EMOJI: Record<WorkflowState, string> = {
 	plan: "📝",
@@ -77,8 +79,14 @@ interface WorkflowSession {
 	retryCount: number;
 }
 
+interface ConditionalRule {
+	pattern: string;
+	rule: string;
+}
+
 interface ProjectMemory {
 	conventions: string[];
+	rules: ConditionalRule[];
 	workflows: Array<{ name: string; description: string }>;
 	currentWork: Array<{ what: string; why: string; startedAt: string }>;
 	notes: string[];
@@ -98,9 +106,16 @@ function resolveMemoryPath(cwd: string): string {
 function loadMemory(cwd: string): ProjectMemory {
 	try {
 		const path = resolveMemoryPath(cwd);
-		return JSON.parse(readFileSync(path, "utf-8")) as ProjectMemory;
+		const raw = JSON.parse(readFileSync(path, "utf-8"));
+		return {
+			conventions: raw.conventions ?? [],
+			rules: raw.rules ?? [],
+			workflows: raw.workflows ?? [],
+			currentWork: raw.currentWork ?? [],
+			notes: raw.notes ?? [],
+		};
 	} catch {
-		return { conventions: [], workflows: [], currentWork: [], notes: [] };
+		return { conventions: [], rules: [], workflows: [], currentWork: [], notes: [] };
 	}
 }
 
@@ -116,11 +131,58 @@ function saveMemory(cwd: string, memory: ProjectMemory): string | null {
 	}
 }
 
-function memoryToContext(memory: ProjectMemory): string {
+function matchesPattern(filePath: string, pattern: string): boolean {
+	if (pattern.endsWith("/")) {
+		return filePath.startsWith(pattern);
+	}
+	if (pattern.startsWith("*.")) {
+		return filePath.endsWith(pattern.slice(1));
+	}
+	const escaped = pattern
+		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+		.replace(/\*\*/g, "\0")
+		.replace(/\*/g, "[^/]*")
+		.replace(/\0/g, ".*");
+	try {
+		return new RegExp("^" + escaped + "$").test(filePath);
+	} catch {
+		return false;
+	}
+}
+
+function extractRecentFilePaths(ctx: ExtensionContext, limit = 20): string[] {
+	const paths = new Set<string>();
+	const branch = ctx.sessionManager.getBranch();
+	const recent = branch.slice(-limit);
+	const pathRegex = /(?:[\s"'`(,:]|^)((?:[\w@.-]+\/)+[\w@.-]+\.[\w]+)/g;
+
+	for (const entry of recent) {
+		if (entry.type !== "message") continue;
+		const content = (entry as any).message?.content;
+		const text = typeof content === "string" ? content : JSON.stringify(content ?? "");
+		let m;
+		while ((m = pathRegex.exec(text)) !== null) {
+			paths.add(m[1]);
+		}
+	}
+	return [...paths];
+}
+
+function memoryToContext(memory: ProjectMemory, recentFiles: string[] = []): string {
 	const parts: string[] = [];
 
 	if (memory.conventions.length > 0) {
-		parts.push("### 프로젝트 컨벤션\n" + memory.conventions.map((c) => `- ${c}`).join("\n"));
+		parts.push("### 프로젝트 컨벤션 (전역)\n" + memory.conventions.map((c) => `- ${c}`).join("\n"));
+	}
+
+	if (memory.rules.length > 0 && recentFiles.length > 0) {
+		const matched = memory.rules.filter((r) => recentFiles.some((f) => matchesPattern(f, r.pattern)));
+		if (matched.length > 0) {
+			parts.push(
+				"### 조건부 규칙 (현재 컨텍스트 매칭)\n" +
+					matched.map((r) => `- [${r.pattern}] ${r.rule}`).join("\n"),
+			);
+		}
 	}
 	if (memory.workflows.length > 0) {
 		parts.push(
@@ -307,13 +369,14 @@ export default function (pi: ExtensionAPI) {
 		name: "project_memory",
 		label: "Project Memory",
 		description:
-			"프로젝트 메모리를 관리합니다. 컨벤션, 주요 워크플로우, 현재 작업, 메모를 저장/조회/삭제합니다. " +
+			"프로젝트 메모리를 관리합니다. 전역 컨벤션, 조건부 규칙(디렉토리/파일 패턴 기반), 주요 워크플로우, 현재 작업, 메모를 저장/조회/삭제합니다. " +
+			"rules 카테고리는 특정 디렉토리나 파일 패턴에만 적용되는 규칙을 등록합니다 (예: 'src/api/**|에러 핸들링 필수'). " +
 			"프로젝트에 대해 기억해둘 만한 정보가 생기면 이 도구로 저장하세요.",
 		parameters: Type.Object({
 			action: StringEnum(["get", "add", "remove", "clear"] as const),
-			category: StringEnum(["conventions", "workflows", "currentWork", "notes"] as const),
+			category: StringEnum(["conventions", "rules", "workflows", "currentWork", "notes"] as const),
 			value: Type.Optional(
-				Type.String({ description: "저장할 내용. conventions/notes: 텍스트. workflows: 'name|description'. currentWork: 'what|why'" }),
+				Type.String({ description: "저장할 내용. conventions/notes: 텍스트. rules: 'pattern|rule' (예: 'src/api/**|에러 핸들링 필수'). workflows: 'name|description'. currentWork: 'what|why'" }),
 			),
 			index: Type.Optional(Type.Number({ description: "삭제할 항목의 인덱스 (0부터)" })),
 		}),
@@ -330,6 +393,7 @@ export default function (pi: ExtensionAPI) {
 								data
 									.map((item, i) => {
 										if (typeof item === "string") return `  ${i}. ${item}`;
+										if ("pattern" in item) return `  ${i}. [${(item as ConditionalRule).pattern}] ${(item as ConditionalRule).rule}`;
 										if ("name" in item) return `  ${i}. ${item.name}: ${item.description}`;
 										if ("what" in item) return `  ${i}. ${item.what} — ${item.why}`;
 										return `  ${i}. ${JSON.stringify(item)}`;
@@ -349,7 +413,18 @@ export default function (pi: ExtensionAPI) {
 						return { content: [{ type: "text" as const, text: `${params.category} 항목이 최대(${MAX_MEMORY_ENTRIES}개)에 도달했습니다.` }] };
 					}
 
-					if (params.category === "conventions" || params.category === "notes") {
+					if (params.category === "rules") {
+						if (memory.rules.length >= MAX_RULES) {
+							return { content: [{ type: "text" as const, text: `rules 항목이 최대(${MAX_RULES}개)에 도달했습니다.` }] };
+						}
+						const sepIdx = value.indexOf("|");
+						if (sepIdx < 0) {
+							return { content: [{ type: "text" as const, text: "rules는 'pattern|rule' 형식으로 입력하세요. (예: 'src/api/**|에러 핸들링 필수')" }] };
+						}
+						const pattern = value.slice(0, sepIdx).slice(0, MAX_RULE_PATTERN_LENGTH);
+						const rule = value.slice(sepIdx + 1);
+						memory.rules.push({ pattern, rule });
+					} else if (params.category === "conventions" || params.category === "notes") {
 						memory[params.category].push(value);
 					} else if (params.category === "workflows") {
 						const sepIdx = value.indexOf("|");
@@ -401,7 +476,8 @@ export default function (pi: ExtensionAPI) {
 		try {
 			const memoryPath = resolveMemoryPath(ctx.cwd);
 			if (existsSync(memoryPath)) {
-				memoryContext = memoryToContext(loadMemory(ctx.cwd));
+				const recentFiles = extractRecentFilePaths(ctx);
+				memoryContext = memoryToContext(loadMemory(ctx.cwd), recentFiles);
 			}
 		} catch {
 			// ignore
