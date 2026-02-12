@@ -66,6 +66,7 @@ export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
   implFailed: ['verifyImpl'],
   replan: ['implement'],
   compoundDone: ['compound'],
+  setTodos: ['plan'],
 };
 
 // Guide texts
@@ -85,6 +86,11 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '⚠️ IMPORTANT: You are ONLY a planner in this stage. Do NOT write or edit any code files. ' +
     'You CAN use bash and read tools to research the codebase. ' +
     'Focus solely on discussing and creating the implementation plan with the user.\n\n' +
+    '### Large Tasks → TODO Breakdown\n' +
+    'For large tasks, break them into smaller TODO items first:\n' +
+    'Call workflow_transition(action: "setTodos", content: \'["item1", "item2", "item3"]\')\n' +
+    'Each TODO will get its own plan→verify→implement→verify→compound cycle.\n' +
+    'After setting TODOs, plan the first item.\n\n' +
     '### Phase 1: Pre-Analysis (before planning)\n' +
     'Analyze the request for:\n' +
     '- Ambiguities or unclear requirements — ask the user to clarify.\n' +

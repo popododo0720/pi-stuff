@@ -14,6 +14,11 @@ export type ThinkingLevel =
   | 'high'
   | 'xhigh';
 
+export interface TodoItem {
+  title: string;
+  status: 'pending' | 'active' | 'done';
+}
+
 export interface WorkflowSession {
   id: string;
   state: WorkflowState;
@@ -22,6 +27,8 @@ export interface WorkflowSession {
   verifyPlanResult: string;
   retryCount: number;
   completed: boolean;
+  todos: TodoItem[];
+  activeTodoIndex: number;
 }
 
 export interface ConditionalRule {

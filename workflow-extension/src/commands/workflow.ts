@@ -61,6 +61,8 @@ export function registerWorkflowCommand(
         verifyPlanResult: '',
         retryCount: 0,
         completed: false,
+        todos: [],
+        activeTodoIndex: -1,
       };
       setSession(session);
 

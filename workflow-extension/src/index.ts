@@ -50,9 +50,13 @@ export default function (pi: ExtensionAPI) {
       if (msg.role !== 'toolResult' || msg.toolName !== TOOL_NAME) continue;
       if (msg.details) session = msg.details as WorkflowSession;
     }
-    // Backward compat: default completed for legacy sessions
+    // Backward compat: default fields for legacy sessions
     if (session && session.completed === undefined) {
       session.completed = session.state === 'done';
+    }
+    if (session) {
+      session.todos ??= [];
+      session.activeTodoIndex ??= -1;
     }
     updateStatusBar(ctx, session);
   };

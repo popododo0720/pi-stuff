@@ -25,7 +25,12 @@ export function updateStatusBar(
   ctx: ExtensionContext,
   session: WorkflowSession | null,
 ): void {
-  if (!session || session.state === 'done') {
+  if (!session) {
+    ctx.ui.setStatus('workflow', undefined);
+    ctx.ui.setWidget('workflow', undefined);
+    return;
+  }
+  if (session.state === 'done' && session.activeTodoIndex < 0) {
     ctx.ui.setStatus('workflow', undefined);
     ctx.ui.setWidget('workflow', undefined);
     return;
@@ -45,7 +50,17 @@ export function updateStatusBar(
       }
       return theme.fg('dim', segment);
     });
-    const progress = parts.join(theme.fg('dim', ' → '));
+    let progress = parts.join(theme.fg('dim', ' → '));
+
+    // Append TODO progress if available
+    if (session.activeTodoIndex >= 0 && session.todos.length > 0) {
+      const doneCount = session.todos.filter((t) => t.status === 'done').length;
+      progress += theme.fg(
+        'accent',
+        `  📋 TODO [${doneCount}/${session.todos.length}]`,
+      );
+    }
+
     return new Text(progress, 0, 0);
   });
 }

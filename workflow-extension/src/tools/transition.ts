@@ -39,7 +39,7 @@ export function registerTransitionTool(
     description:
       'Transition the current workflow stage. ' +
       'Supports: approvePlan, planVerified, planFailed, ' +
-      'implDone, implVerified, implFailed, replan, compoundDone.',
+      'implDone, implVerified, implFailed, replan, compoundDone, setTodos.',
     parameters: Type.Object({
       action: StringEnum([
         'approvePlan',
@@ -50,6 +50,7 @@ export function registerTransitionTool(
         'implFailed',
         'replan',
         'compoundDone',
+        'setTodos',
       ] as const),
       content: Type.Optional(
         Type.String({
@@ -329,7 +330,7 @@ export function registerTransitionTool(
           session.state = 'implement';
           break;
 
-        // ── Compound done → save solution → done ─────────────────
+        // ── Compound done → advance TODO or finish ────────────────
         case 'compoundDone': {
           const summary = params.content?.trim() || '';
           let solutionPath: string | null = null;
@@ -341,19 +342,110 @@ export function registerTransitionTool(
               session.id,
             );
           }
+
+          // Check if there are more TODOs to process
+          if (
+            session.activeTodoIndex >= 0 &&
+            session.activeTodoIndex < session.todos.length
+          ) {
+            // Mark current TODO as done
+            session.todos[session.activeTodoIndex].status = 'done';
+            const nextIndex = session.activeTodoIndex + 1;
+
+            if (nextIndex < session.todos.length) {
+              // Advance to next TODO
+              session.todos[nextIndex].status = 'active';
+              session.activeTodoIndex = nextIndex;
+              session.state = 'plan';
+              session.planContent = '';
+              session.verifyPlanResult = '';
+              session.retryCount = 0;
+              setSession(session);
+              updateStatusBar(ctx, session);
+
+              const doneCount = session.todos.filter(
+                (t) => t.status === 'done',
+              ).length;
+              const todoList = session.todos
+                .map((t, i) => {
+                  const icon =
+                    t.status === 'done'
+                      ? '✅'
+                      : t.status === 'active'
+                        ? '🔨'
+                        : '⬜';
+                  return `${icon} ${i + 1}. ${t.title}`;
+                })
+                .join('\n');
+
+              return textResult(
+                `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
+                  `${todoList}\n\n` +
+                  (solutionPath
+                    ? `**Solution saved:** ${solutionPath}\n\n`
+                    : '') +
+                  `Now plan TODO #${nextIndex + 1}: "${session.todos[nextIndex].title}"`,
+                session,
+              );
+            }
+          }
+
+          // All TODOs done (or no TODOs) — workflow complete
           session.state = 'done';
           session.completed = true;
           setSession(session);
           updateStatusBar(ctx, session);
+
+          const todoSummary =
+            session.todos.length > 0
+              ? `**TODOs completed:** ${session.todos.length}/${session.todos.length}\n`
+              : '';
+
           return textResult(
             '🎉 Workflow Complete!\n\n' +
               `**Task:** ${session.description}\n` +
               `**ID:** ${session.id}\n` +
-              `**Retries used:** ${session.retryCount}\n` +
+              todoSummary +
               (solutionPath ? `**Solution saved:** ${solutionPath}\n` : '') +
               '\nLearnings from this workflow have been captured for future reference.',
             session,
           );
+        }
+
+        // ── Set TODOs for multi-item workflows ──────────────────
+        case 'setTodos': {
+          try {
+            const raw: unknown[] = JSON.parse(params.content || '[]');
+            if (!Array.isArray(raw) || raw.length === 0) {
+              return textResult(
+                'Invalid TODO list. Provide a JSON array of strings.',
+              );
+            }
+            const titles = raw.map((t) => String(t).trim()).filter(Boolean);
+            if (titles.length === 0) {
+              return textResult(
+                'All TODO items are empty. Provide non-empty strings.',
+              );
+            }
+            session.todos = titles.map((title, i) => ({
+              title,
+              status: i === 0 ? ('active' as const) : ('pending' as const),
+            }));
+            session.activeTodoIndex = 0;
+            setSession(session);
+
+            const todoList = session.todos
+              .map((t, i) => `${i === 0 ? '🔨' : '⬜'} ${i + 1}. ${t.title}`)
+              .join('\n');
+            return textResult(
+              `📋 TODO list set (${titles.length} items):\n${todoList}\n\nNow plan TODO #1: "${titles[0]}"`,
+              session,
+            );
+          } catch {
+            return textResult(
+              'Failed to parse TODO list. Use JSON array format: ["item1", "item2"]',
+            );
+          }
         }
 
         // ── Replan ───────────────────────────────────────────────
