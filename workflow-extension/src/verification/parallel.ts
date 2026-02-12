@@ -1,13 +1,87 @@
 // verification/parallel.ts — Parallel model verification
 // Runs plan/impl verification against multiple models via `pi -p`.
+// Uses staggered starts and retry-on-empty to handle concurrency issues.
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import type { VerificationResult, WorkflowSettings } from '../types';
+
+/** Delay helper for staggering parallel starts */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Max retry attempts when a model returns empty output */
+const MAX_EMPTY_RETRIES = 2;
+
+/** Stagger delay between parallel model launches (ms) */
+const STAGGER_DELAY_MS = 3000;
+
+/**
+ * Execute a single model verification with retry on empty response.
+ * Retries up to MAX_EMPTY_RETRIES times if stdout is empty.
+ */
+async function runSingleModel(
+  model: string,
+  prompt: string,
+  pi: ExtensionAPI,
+  timeout: number,
+  signal?: AbortSignal,
+): Promise<{ model: string; passed: boolean; output: string }> {
+  // Model format is "provider/model-id" — split for CLI args
+  const [provider, ...modelParts] = model.split('/');
+  const modelId = modelParts.join('/');
+  const args = [
+    '-p',
+    prompt,
+    '--provider',
+    provider,
+    '--model',
+    modelId,
+    '--thinking',
+    'high',
+  ];
+
+  for (let attempt = 0; attempt <= MAX_EMPTY_RETRIES; attempt++) {
+    try {
+      const result = await pi.exec('pi', args, { signal, timeout });
+      const output = `${result.stdout}\n${result.stderr}`.trim();
+
+      // Retry if output is empty (concurrency issue)
+      if (!output && attempt < MAX_EMPTY_RETRIES) {
+        continue;
+      }
+
+      const upperOutput = output.toUpperCase();
+      const passed =
+        upperOutput.includes('VERDICT: PASS') ||
+        upperOutput.includes('VERDICT:PASS');
+      return { model, passed, output };
+    } catch (e) {
+      // On last attempt, return error; otherwise retry
+      if (attempt === MAX_EMPTY_RETRIES) {
+        return {
+          model,
+          passed: false,
+          output: `Process execution failed: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        };
+      }
+    }
+  }
+
+  return {
+    model,
+    passed: false,
+    output: 'Empty response after all retry attempts.',
+  };
+}
 
 /**
  * Run parallel verification across configured models.
  * Each model receives the same prompt and must output VERDICT: PASS or VERDICT: FAIL.
  * All models must pass for overall success.
+ *
+ * Uses staggered starts (3s apart) to avoid resource contention,
+ * and retries on empty responses up to 2 times per model.
  *
  * @param type - 'plan' for plan verification, 'impl' for implementation verification
  * @param planContent - The approved plan content
@@ -55,40 +129,13 @@ export async function runParallelVerification(
         'Write a detailed verification result. ' +
         'On the last line, write exactly "VERDICT: PASS" or "VERDICT: FAIL".';
 
-  // Run all models in parallel
-  const promises = settings.verifyModels.map(async (model) => {
-    try {
-      // Model format is "provider/model-id" — split for CLI args
-      const [provider, ...modelParts] = model.split('/');
-      const modelId = modelParts.join('/');
-      // Use high thinking level for thorough verification
-      const args = [
-        '-p',
-        prompt,
-        '--provider',
-        provider,
-        '--model',
-        modelId,
-        '--thinking',
-        'high',
-      ];
-      const result = await pi.exec('pi', args, {
-        signal,
-        timeout: settings.verifyTimeout,
-      });
-      const output = `${result.stdout}\n${result.stderr}`.trim();
-      const upperOutput = output.toUpperCase();
-      const passed =
-        upperOutput.includes('VERDICT: PASS') ||
-        upperOutput.includes('VERDICT:PASS');
-      return { model, passed, output };
-    } catch (e) {
-      return {
-        model,
-        passed: false,
-        output: `Process execution failed: ${e instanceof Error ? e.message : 'Unknown error'}`,
-      };
+  // Launch models in parallel with staggered starts
+  const promises = settings.verifyModels.map(async (model, index) => {
+    // Stagger launches to avoid resource contention
+    if (index > 0) {
+      await delay(STAGGER_DELAY_MS * index);
     }
+    return runSingleModel(model, prompt, pi, settings.verifyTimeout, signal);
   });
 
   const results = await Promise.all(promises);
