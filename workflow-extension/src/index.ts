@@ -19,6 +19,7 @@ import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
 import { registerTransitionTool } from './tools/transition';
 import type { WorkflowSession } from './types';
+import { cleanupVerificationResults } from './verification';
 
 export default function (pi: ExtensionAPI) {
   // ── Session state (owned here, accessed via closures) ──────────
@@ -93,12 +94,13 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Clean up completed workflow from current work
+    // Clean up completed workflow from current work + verification files
     if (session.state === 'done') {
       memory.currentWork = memory.currentWork.filter(
         (w) => w.what !== session?.description,
       );
       saveMemory(ctx.cwd, memory);
+      cleanupVerificationResults(ctx.cwd);
       updateStatusBar(ctx, null);
     }
   });

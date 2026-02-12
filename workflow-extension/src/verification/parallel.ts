@@ -2,7 +2,14 @@
 // Runs plan/impl verification against multiple models via `pi -p`.
 // Retries on empty responses to handle transient failures.
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import type { VerificationResult, WorkflowSettings } from '../types';
@@ -173,5 +180,22 @@ export function saveVerificationResult(
     return filePath;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Clean up all verification result files.
+ * Called when workflow completes (done state).
+ */
+export function cleanupVerificationResults(cwd: string): void {
+  try {
+    const dir = resolve(join(cwd, '.pi', 'verifications'));
+    if (!existsSync(dir)) return;
+    for (const file of readdirSync(dir)) {
+      unlinkSync(join(dir, file));
+    }
+    rmdirSync(dir);
+  } catch {
+    // Ignore cleanup errors
   }
 }
