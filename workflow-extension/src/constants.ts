@@ -13,6 +13,16 @@ export const MAX_RULE_PATTERN_LENGTH = 200;
 export const MAX_MODULES = 20;
 export const MAX_MODULE_CONVENTIONS = 30;
 
+/**
+ * Generate a unique workflow ID based on timestamp.
+ * Format: wf-YYYYMMDD-HHmmss (e.g. wf-20260212-152010)
+ */
+export function generateWorkflowId(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `wf-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
 // Default values
 export const DEFAULT_CONVENTIONS: string[] = [
   'Follow clean code principles — single responsibility per function, intention-revealing names, no duplication',

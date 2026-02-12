@@ -6,6 +6,7 @@ export type WorkflowState =
   | 'done';
 
 export interface WorkflowSession {
+  id: string;
   state: WorkflowState;
   description: string;
   planContent: string;

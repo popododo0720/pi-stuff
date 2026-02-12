@@ -23,5 +23,5 @@ export function updateStatusBar(
     session.description.length > 30
       ? `${session.description.slice(0, 30)}...`
       : session.description;
-  ctx.ui.setStatus('workflow', `${emoji} ${label} | ${desc}`);
+  ctx.ui.setStatus('workflow', `${emoji} ${label} | ${desc} (${session.id})`);
 }

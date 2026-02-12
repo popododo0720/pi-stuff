@@ -79,14 +79,17 @@ export default function (pi: ExtensionAPI) {
 
     const memory = loadMemory(ctx.cwd);
 
-    // Track new workflow as current work
+    // Track new workflow as current work (use ID for matching)
     if (session.state === 'plan' && !session.planContent) {
       const alreadyTracked = memory.currentWork.some(
-        (w) => w.what === session?.description,
+        (w) => w.what === `[${session?.id}] ${session?.description}`,
       );
       if (!alreadyTracked && memory.currentWork.length < MAX_MEMORY_ENTRIES) {
         memory.currentWork.push({
-          what: session.description.slice(0, MAX_MEMORY_VALUE_LENGTH),
+          what: `[${session.id}] ${session.description}`.slice(
+            0,
+            MAX_MEMORY_VALUE_LENGTH,
+          ),
           why: 'Workflow in progress',
           startedAt: new Date().toISOString().slice(0, 10),
         });
@@ -97,7 +100,7 @@ export default function (pi: ExtensionAPI) {
     // Clean up completed workflow from current work + verification files
     if (session.state === 'done') {
       memory.currentWork = memory.currentWork.filter(
-        (w) => w.what !== session?.description,
+        (w) => !w.what.startsWith(`[${session?.id}]`),
       );
       saveMemory(ctx.cwd, memory);
       cleanupVerificationResults(ctx.cwd);

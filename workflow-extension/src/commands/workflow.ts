@@ -6,6 +6,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@mariozechner/pi-coding-agent';
+import { generateWorkflowId } from '../constants';
 import { updateStatusBar } from '../context/status';
 import { resolveMemoryPath, saveMemory } from '../storage/memory';
 import type { WorkflowSession } from '../types';
@@ -38,8 +39,10 @@ export function registerWorkflowCommand(
       // Clean up previous verification files
       cleanupVerificationResults(ctx.cwd);
 
-      // Create new session
+      // Create new session with unique ID
+      const id = generateWorkflowId();
       const session: WorkflowSession = {
+        id,
         state: 'plan',
         description: description || 'Workflow',
         planContent: '',

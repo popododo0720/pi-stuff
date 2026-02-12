@@ -164,12 +164,14 @@ export function saveVerificationResult(
   cwd: string,
   type: 'plan' | 'impl',
   results: VerificationResult,
+  workflowId?: string,
 ): string | null {
   try {
     const dir = resolve(join(cwd, '.pi', 'verifications'));
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const prefix = workflowId ? `${workflowId}-` : '';
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
-    const filePath = join(dir, `${type}-${dateStr}.md`);
+    const filePath = join(dir, `${prefix}${type}-${dateStr}.md`);
     const content = results.results
       .map((r) => {
         const status = r.passed ? '✅ PASS' : '❌ FAIL';

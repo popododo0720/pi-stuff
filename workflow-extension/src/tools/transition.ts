@@ -146,7 +146,12 @@ export function registerTransitionTool(
             // Go back to plan for revision — save full result to file
             session.state = 'plan';
             session.verifyPlanResult = formatVerificationSummary(result);
-            const resultPath = saveVerificationResult(ctx.cwd, 'plan', result);
+            const resultPath = saveVerificationResult(
+              ctx.cwd,
+              'plan',
+              result,
+              session.id,
+            );
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
@@ -252,6 +257,7 @@ export function registerTransitionTool(
               ctx.cwd,
               'impl',
               result,
+              session.id,
             );
             setSession(session);
             updateStatusBar(ctx, session);
