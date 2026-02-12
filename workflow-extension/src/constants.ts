@@ -122,6 +122,8 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- Implement each item in the plan in order.\n' +
     '- Accept user feedback as you go.\n' +
     '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
+    '- Track progress: maintain a mental checklist of plan items. Do NOT stop until all items are complete.\n' +
+    '- If stuck on one item, note the blocker and continue with the next.\n' +
     '- When all implementation is complete, call workflow_transition(action: "implDone").',
 
   verifyImpl:
@@ -141,7 +143,8 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '2. **What went wrong** — mistakes, failed approaches, or issues encountered.\n' +
     '3. **Reusable insight** — the key takeaway that would help in future similar tasks.\n' +
     '4. **Conventions to add** — if you discovered project preferences, save them via project_memory.\n' +
-    '5. **Memory cleanup** — review existing project memory (conventions, rules, notes) and remove outdated or redundant entries. ' +
+    '5. **Documentation** — update README.md and architecture diagrams (mermaid) if project structure changed.\n' +
+    '6. **Memory cleanup** — review existing project memory (conventions, rules, notes) and remove outdated or redundant entries. ' +
     'Use project_memory(action: "remove", category: "...", index: N) to clean up.\n\n' +
     'Then call workflow_transition(action: "compoundDone", content: "<compound summary>").\n' +
     'The summary will be saved to docs/solutions/ for future reference.\n' +

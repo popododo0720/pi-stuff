@@ -49,6 +49,7 @@ export function registerWorkflowCommand(
         planContent: '',
         verifyPlanResult: '',
         retryCount: 0,
+        completed: false,
       };
       setSession(session);
 

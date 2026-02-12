@@ -50,6 +50,10 @@ export default function (pi: ExtensionAPI) {
       if (msg.role !== 'toolResult' || msg.toolName !== TOOL_NAME) continue;
       if (msg.details) session = msg.details as WorkflowSession;
     }
+    // Backward compat: default completed for legacy sessions
+    if (session && session.completed === undefined) {
+      session.completed = session.state === 'done';
+    }
     updateStatusBar(ctx, session);
   };
 
@@ -78,6 +82,13 @@ export default function (pi: ExtensionAPI) {
 
   // ── System prompt injection ────────────────────────────────────
   pi.on('before_agent_start', async (event, ctx) => {
+    // Auto-recover: paused workflow resumes as plan on next user message
+    if (session && session.state === 'done' && !session.completed) {
+      session.state = 'plan';
+      session.retryCount = 0;
+      session.verifyPlanResult = '';
+      updateStatusBar(ctx, session);
+    }
     const result = buildSystemPromptInjection(session, ctx, event.systemPrompt);
     if (result) {
       return { systemPrompt: result };
@@ -109,8 +120,8 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Clean up completed workflow
-    if (session.state === 'done') {
+    // Clean up completed workflow (only truly completed, not paused)
+    if (session.state === 'done' && session.completed) {
       memory.currentWork = memory.currentWork.filter(
         (w) => !w.what.startsWith(`[${session?.id}]`),
       );

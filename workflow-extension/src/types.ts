@@ -21,6 +21,7 @@ export interface WorkflowSession {
   planContent: string;
   verifyPlanResult: string;
   retryCount: number;
+  completed: boolean;
 }
 
 export interface ConditionalRule {

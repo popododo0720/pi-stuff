@@ -112,6 +112,7 @@ export function registerTransitionTool(
               session.description,
               settings,
               pi,
+              ctx.cwd,
               signal,
             );
 
@@ -131,7 +132,22 @@ export function registerTransitionTool(
 
             session.retryCount++;
             if (session.retryCount >= maxRetries) {
-              session.retryCount = 0;
+              session.state = 'done';
+              session.completed = false;
+              const resultPath = saveVerificationResult(
+                ctx.cwd,
+                'plan',
+                result,
+                session.id,
+              );
+              setSession(session);
+              updateStatusBar(ctx, session);
+              return textResult(
+                `Plan verification failed ${maxRetries} times. Send a message to return to planning.\n\n` +
+                  formatVerificationSummary(result) +
+                  (resultPath ? `\n\n📋 Full results: ${resultPath}` : ''),
+                session,
+              );
             }
             session.state = 'plan';
             session.verifyPlanResult = formatVerificationSummary(result);
@@ -177,7 +193,15 @@ export function registerTransitionTool(
         case 'planFailed':
           session.retryCount++;
           if (session.retryCount >= maxRetries) {
-            session.retryCount = 0;
+            session.state = 'done';
+            session.completed = false;
+            setSession(session);
+            updateStatusBar(ctx, session);
+            return textResult(
+              `Plan failed ${maxRetries} times. Send a message to return to planning. ` +
+                `Reason: ${params.reason || 'Verification failed'}`,
+              session,
+            );
           }
           session.state = 'plan';
           session.verifyPlanResult = params.reason || 'Verification failed';
@@ -205,6 +229,7 @@ export function registerTransitionTool(
               session.description,
               settings,
               pi,
+              ctx.cwd,
               signal,
             );
 
@@ -224,10 +249,8 @@ export function registerTransitionTool(
 
             session.retryCount++;
             if (session.retryCount >= maxRetries) {
-              session.retryCount = 0;
-              session.state = 'plan';
-              session.verifyPlanResult =
-                'Implementation verification failed after max retries. Revise the plan.';
+              session.state = 'done';
+              session.completed = false;
               const implResultPath = saveVerificationResult(
                 ctx.cwd,
                 'impl',
@@ -237,7 +260,7 @@ export function registerTransitionTool(
               setSession(session);
               updateStatusBar(ctx, session);
               return textResult(
-                `Max retries reached. Returning to plan stage for revision.\n\n` +
+                `Implementation verification failed ${maxRetries} times. Send a message to return to planning.\n\n` +
                   formatVerificationSummary(result) +
                   (implResultPath
                     ? `\n\n📋 Full results: ${implResultPath}`
@@ -293,15 +316,12 @@ export function registerTransitionTool(
         case 'implFailed':
           session.retryCount++;
           if (session.retryCount >= maxRetries) {
-            session.retryCount = 0;
-            session.state = 'plan';
-            session.verifyPlanResult =
-              params.reason ||
-              'Implementation verification failed after max retries.';
+            session.state = 'done';
+            session.completed = false;
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
-              'Max retries reached. Returning to plan stage for revision. ' +
+              `Implementation verification failed ${maxRetries} times. Send a message to return to planning. ` +
                 `Reason: ${params.reason || 'Verification failed'}`,
               session,
             );
@@ -322,6 +342,7 @@ export function registerTransitionTool(
             );
           }
           session.state = 'done';
+          session.completed = true;
           setSession(session);
           updateStatusBar(ctx, session);
           return textResult(

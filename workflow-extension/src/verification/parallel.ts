@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import { loadCustomChecks } from '../storage/checks';
 import type { VerificationResult, WorkflowSettings } from '../types';
 
 /** Max retry attempts when a model returns empty output */
@@ -98,6 +99,7 @@ export async function runParallelVerification(
   description: string,
   settings: WorkflowSettings,
   pi: ExtensionAPI,
+  cwd: string,
   signal?: AbortSignal,
 ): Promise<VerificationResult> {
   if (settings.verifyModels.length === 0) {
@@ -107,7 +109,7 @@ export async function runParallelVerification(
   }
 
   // Build verification prompt based on type
-  const prompt =
+  let prompt =
     type === 'plan'
       ? 'You are reviewing a PLAN, not code. Evaluate at the design level.\n\n' +
         `Task: ${description}\n\n` +
@@ -138,6 +140,12 @@ export async function runParallelVerification(
         '   - Extensibility — easy to add features without modifying existing code\n\n' +
         'Write a detailed verification result. ' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.';
+
+  // Append project-specific checks from docs/checks/*.md
+  const checks = loadCustomChecks(cwd);
+  if (checks.length > 0) {
+    prompt += `\n\nProject-specific checks:\n${checks.join('\n\n')}`;
+  }
 
   // Launch all models in parallel
   const promises = settings.verifyModels.map((model) =>
