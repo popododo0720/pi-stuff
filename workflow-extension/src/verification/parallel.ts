@@ -109,15 +109,18 @@ export async function runParallelVerification(
   // Build verification prompt based on type
   const prompt =
     type === 'plan'
-      ? 'You are a code implementation plan verifier. Verify the following plan:\n\n' +
+      ? 'You are reviewing a PLAN, not code. Evaluate at the design level.\n\n' +
         `Task: ${description}\n\n` +
         `Plan:\n${planContent}\n\n` +
-        'Verification criteria:\n' +
-        '1. Is the plan clear and specific?\n' +
-        '2. Are there any missing steps?\n' +
-        '3. Is the file change list realistic?\n' +
-        '4. Are the verification criteria measurable?\n\n' +
-        'Write a detailed verification result. ' +
+        'Evaluate:\n' +
+        '1. Does the plan address the right problem?\n' +
+        '2. Is the approach sound and complete?\n' +
+        '3. Are file targets identified? (exact line numbers NOT required)\n' +
+        '4. Are there obvious missing steps or architectural risks?\n\n' +
+        'Do NOT fail for: missing exact line numbers, missing exact code snippets, ' +
+        'verification criteria depth, or minor wording issues.\n' +
+        'Only FAIL for: wrong approach, missing critical steps, or architectural flaws.\n\n' +
+        'Write a brief verification result. ' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.'
       : 'You are a code implementation verifier. ' +
         'Verify the implementation against the following plan:\n\n' +
