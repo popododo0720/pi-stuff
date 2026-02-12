@@ -11,7 +11,7 @@ import {
 } from '../constants';
 import { loadMemory, resolveMemoryPath } from '../storage/memory';
 import { listModules, loadMatchingModules } from '../storage/modules';
-import { listSolutions } from '../storage/solution';
+import { findRelevantSolutions } from '../storage/solution';
 import type {
   ConditionalRule,
   ModuleConventions,
@@ -171,15 +171,15 @@ export function buildSystemPromptInjection(
   // Stage-specific guide
   const stageGuide = STAGE_GUIDES[session.state] || '';
 
-  // Include past solutions for reference during planning
+  // Include relevant past solutions for reference during planning
   let solutionContext = '';
   if (session.state === 'plan') {
-    const solutions = listSolutions(ctx.cwd);
-    if (solutions.length > 0) {
+    const solutions = findRelevantSolutions(ctx.cwd, session.description);
+    if (solutions) {
       solutionContext =
         '\n\n### Past Solutions (from previous workflows)\n' +
         'Reference these when planning similar tasks:\n' +
-        solutions.join('\n');
+        solutions;
     }
   }
 

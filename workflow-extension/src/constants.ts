@@ -142,4 +142,6 @@ export const LEARNING_GUIDE =
   '- User says "don\'t do X" or "always do Y" → project_memory(action: "add", category: "conventions", value: "...")\n' +
   '- User points out a pattern-specific rule → project_memory(action: "add", category: "rules", value: "pattern|rule")\n' +
   '- Repeated verification failures reveal a pattern → project_memory(action: "add", category: "notes", value: "...")\n' +
-  'Do NOT save trivial or one-time comments. Only save things that should persist across sessions.';
+  'Do NOT save trivial or one-time comments. Only save things that should persist across sessions.\n' +
+  'Before adding, check if a similar item already exists — update or skip if redundant.\n' +
+  'If memory is getting large, use "remove" to clean up outdated entries.';
