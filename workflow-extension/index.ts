@@ -491,7 +491,7 @@ export default function (pi: ExtensionAPI) {
 
 			session = {
 				state: "plan",
-				description: description || "워크플로우",
+				description: description || "Workflow",
 				planContent: "",
 				verifyPlanResult: "",
 				retryCount: 0,
