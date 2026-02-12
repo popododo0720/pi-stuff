@@ -5,6 +5,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@mariozechner/pi-coding-agent';
+import { registerCancelCommand } from './commands/cancel';
 import { registerSettingsCommand } from './commands/settings';
 import { registerWorkflowCommand } from './commands/workflow';
 import {
@@ -26,13 +27,14 @@ export default function (pi: ExtensionAPI) {
   // ── Session state (owned here, accessed via closures) ──────────
   let session: WorkflowSession | null = null;
   const getSession = () => session;
-  const setSession = (s: WorkflowSession) => {
+  const setSession = (s: WorkflowSession | null) => {
     session = s;
   };
 
   // ── Register commands ──────────────────────────────────────────
   registerWorkflowCommand(pi, getSession, setSession);
   registerSettingsCommand(pi);
+  registerCancelCommand(pi, getSession, setSession);
 
   // ── Register tools ─────────────────────────────────────────────
   registerTransitionTool(pi, getSession, setSession);
@@ -40,8 +42,6 @@ export default function (pi: ExtensionAPI) {
   registerModuleConventionsTool(pi);
 
   // ── Session reconstruction from history ────────────────────────
-  // When switching/forking sessions, reconstruct workflow state
-  // from the last tool result in the session branch.
   const reconstruct = (ctx: ExtensionContext) => {
     session = null;
     for (const entry of ctx.sessionManager.getBranch()) {
@@ -53,7 +53,6 @@ export default function (pi: ExtensionAPI) {
     updateStatusBar(ctx, session);
   };
 
-  // Listen for all session lifecycle events
   for (const event of [
     'session_start',
     'session_switch',
@@ -64,7 +63,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── Tool call guard ─────────────────────────────────────────────
-  // Block write/edit during non-implementation stages.
   pi.on('tool_call', async (event) => {
     if (!session || session.state === 'done') return undefined;
     const result = shouldBlockToolCall(session.state, event.toolName);
@@ -75,7 +73,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── System prompt injection ────────────────────────────────────
-  // Inject workflow context + project memory before each agent turn.
   pi.on('before_agent_start', async (event, ctx) => {
     const result = buildSystemPromptInjection(session, ctx, event.systemPrompt);
     if (result) {
@@ -85,13 +82,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Auto-save current work tracking ────────────────────────────
-  // Track active workflow in project memory; clean up on completion.
   pi.on('agent_end', async (_e, ctx) => {
     if (!session) return;
 
     const memory = loadMemory(ctx.cwd);
 
-    // Track new workflow as current work (use ID for matching)
+    // Track new workflow as current work
     if (session.state === 'plan' && !session.planContent) {
       const alreadyTracked = memory.currentWork.some(
         (w) => w.what === `[${session?.id}] ${session?.description}`,
@@ -109,7 +105,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Clean up completed workflow from current work + verification files
+    // Clean up completed workflow
     if (session.state === 'done') {
       memory.currentWork = memory.currentWork.filter(
         (w) => !w.what.startsWith(`[${session?.id}]`),
