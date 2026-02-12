@@ -12,6 +12,7 @@ const STAGE_ORDER: WorkflowState[] = [
   'verifyPlan',
   'implement',
   'verifyImpl',
+  'compound',
   'done',
 ];
 

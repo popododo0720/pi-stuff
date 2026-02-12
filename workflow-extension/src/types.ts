@@ -3,6 +3,7 @@ export type WorkflowState =
   | 'verifyPlan'
   | 'implement'
   | 'verifyImpl'
+  | 'compound'
   | 'done';
 
 export type ThinkingLevel =

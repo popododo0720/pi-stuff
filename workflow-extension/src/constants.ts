@@ -6,6 +6,7 @@ export const MEMORY_DIR = '.pi';
 export const MEMORY_FILE = 'workflow-memory.json';
 export const SETTINGS_FILE = 'workflow-settings.json';
 export const CONVENTIONS_DIR = 'conventions';
+export const SOLUTIONS_DIR = 'docs/solutions';
 export const MAX_MEMORY_ENTRIES = 50;
 export const MAX_MEMORY_VALUE_LENGTH = 1000;
 export const MAX_RULES = 30;
@@ -43,6 +44,7 @@ export const STATE_EMOJI: Record<WorkflowState, string> = {
   verifyPlan: '🔍',
   implement: '🔨',
   verifyImpl: '✅',
+  compound: '🧠',
   done: '🎉',
 };
 
@@ -51,6 +53,7 @@ export const STATE_LABELS: Record<WorkflowState, string> = {
   verifyPlan: 'Verify Plan',
   implement: 'Implement',
   verifyImpl: 'Verify Impl',
+  compound: 'Compound',
   done: 'Done',
 };
 
@@ -62,6 +65,7 @@ export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
   implVerified: ['verifyImpl'],
   implFailed: ['verifyImpl'],
   replan: ['implement'],
+  compoundDone: ['compound'],
 };
 
 // Guide texts
@@ -79,10 +83,11 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
   plan:
     '## Current Stage: 📝 Planning\n\n' +
     '⚠️ IMPORTANT: You are ONLY a planner in this stage. Do NOT write or edit any code files. ' +
-    'Focus solely on discussing and creating the implementation plan with the user. ' +
-    'The write and edit tools are blocked.\n\n' +
+    'You CAN use bash and read tools to research the codebase. ' +
+    'Focus solely on discussing and creating the implementation plan with the user.\n\n' +
     'Working with the user to create an implementation plan.\n' +
     "- Understand the user's requirements and write a concrete plan.\n" +
+    '- Research the codebase to understand existing patterns and structure.\n' +
     '- The plan should include: summary, step-by-step plan, file change list, and verification criteria.\n' +
     '- When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
     '- Do NOT transition until the user explicitly approves.',
@@ -90,7 +95,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
   verifyPlan:
     '## Current Stage: 🔍 Plan Verification\n\n' +
     '⚠️ IMPORTANT: You are ONLY a verifier in this stage. Do NOT modify any code files. ' +
-    'Focus on reviewing the plan. The write and edit tools are blocked.\n\n' +
+    'You CAN use bash and read tools to check the codebase.\n\n' +
     'Automatic parallel verification failed. Manual verification is required.\n' +
     '- Check if the plan is clear, specific, complete, and has measurable verification criteria.\n' +
     '- Discuss with the user to verify.\n' +
@@ -108,11 +113,23 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
   verifyImpl:
     '## Current Stage: ✅ Implementation Verification\n\n' +
     '⚠️ IMPORTANT: You are ONLY a verifier in this stage. Do NOT modify any code files. ' +
-    'Focus on verifying the implementation. The write and edit tools are blocked.\n\n' +
+    'You CAN use bash and read tools to verify the implementation.\n\n' +
     'Automatic parallel verification failed. Manual verification is required.\n' +
     '- Verify that all plan items are implemented and the code works correctly.\n' +
     '- If passed, call workflow_transition(action: "implVerified").\n' +
     '- If issues found, call workflow_transition(action: "implFailed", reason: "...").',
+
+  compound:
+    '## Current Stage: 🧠 Compound\n\n' +
+    'The implementation is complete. Now capture what you learned.\n\n' +
+    'Analyze this workflow and extract reusable knowledge:\n' +
+    '1. **What worked well** — patterns, approaches, or tools that were effective.\n' +
+    '2. **What went wrong** — mistakes, failed approaches, or issues encountered.\n' +
+    '3. **Reusable insight** — the key takeaway that would help in future similar tasks.\n' +
+    '4. **Conventions to add** — if you discovered project preferences, save them via project_memory.\n\n' +
+    'Then call workflow_transition(action: "compoundDone", content: "<compound summary>").\n' +
+    'The summary will be saved to docs/solutions/ for future reference.\n' +
+    'Keep it concise but specific — focus on what would actually help next time.',
 
   done: '',
 };

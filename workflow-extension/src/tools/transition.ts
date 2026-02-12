@@ -1,5 +1,5 @@
 // tools/transition.ts — workflow_transition tool
-// Manages state machine transitions: plan → verify → implement → verify → done.
+// Manages state machine: plan → verify → implement → verify → compound → done.
 
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
@@ -8,6 +8,7 @@ import { STATE_EMOJI, TOOL_NAME, VALID_TRANSITIONS } from '../constants';
 import { updateStatusBar } from '../context/status';
 import { savePlanDocument } from '../storage/plan';
 import { loadSettings } from '../storage/settings';
+import { saveSolution } from '../storage/solution';
 import type { WorkflowSession } from '../types';
 import {
   formatVerificationSummary,
@@ -21,21 +22,6 @@ function textResult(text: string, session?: WorkflowSession) {
     content: [{ type: 'text' as const, text }],
     ...(session ? { details: session } : {}),
   };
-}
-
-/**
- * Build a completion report summarizing the workflow.
- */
-function buildWorkflowReport(session: WorkflowSession): string {
-  return (
-    '🎉 Workflow Complete!\n\n' +
-    `**Task:** ${session.description}\n` +
-    `**ID:** ${session.id}\n` +
-    `**Retries used:** ${session.retryCount}\n\n` +
-    'The workflow has finished successfully. ' +
-    'If there were important learnings during this session, ' +
-    'they have been saved to project memory for future reference.'
-  );
 }
 
 /**
@@ -53,7 +39,7 @@ export function registerTransitionTool(
     description:
       'Transition the current workflow stage. ' +
       'Supports: approvePlan, planVerified, planFailed, ' +
-      'implDone, implVerified, implFailed, replan.',
+      'implDone, implVerified, implFailed, replan, compoundDone.',
     parameters: Type.Object({
       action: StringEnum([
         'approvePlan',
@@ -63,11 +49,12 @@ export function registerTransitionTool(
         'implVerified',
         'implFailed',
         'replan',
+        'compoundDone',
       ] as const),
       content: Type.Optional(
         Type.String({
           description:
-            'Step deliverable (plan content, verification result, etc.)',
+            'Step deliverable (plan content, verification result, compound summary)',
         }),
       ),
       reason: Type.Optional(Type.String({ description: 'Failure reason' })),
@@ -97,14 +84,12 @@ export function registerTransitionTool(
           }
           session.planContent = params.content;
 
-          // Auto-save plan document to docs/plans/
           const savedPath = savePlanDocument(
             ctx.cwd,
             session.description,
             params.content,
           );
 
-          // Attempt parallel verification
           session.state = 'verifyPlan';
           setSession(session);
           updateStatusBar(ctx, session);
@@ -131,7 +116,6 @@ export function registerTransitionTool(
             );
 
             if (result.passed) {
-              // All models passed → move to implement
               session.state = 'implement';
               session.retryCount = 0;
               session.verifyPlanResult = 'Auto-verification passed';
@@ -145,10 +129,8 @@ export function registerTransitionTool(
               );
             }
 
-            // Verification failed
             session.retryCount++;
             if (session.retryCount >= maxRetries) {
-              // Max retries exceeded → abort
               session.state = 'done';
               setSession(session);
               updateStatusBar(ctx, session);
@@ -158,7 +140,6 @@ export function registerTransitionTool(
                 session,
               );
             }
-            // Go back to plan for revision — save full result to file
             session.state = 'plan';
             session.verifyPlanResult = formatVerificationSummary(result);
             const resultPath = saveVerificationResult(
@@ -176,7 +157,6 @@ export function registerTransitionTool(
               session,
             );
           } catch (e) {
-            // No models configured or process error → fallback to manual
             const isNoModels =
               e instanceof Error &&
               e.message.includes('No verification models');
@@ -243,18 +223,19 @@ export function registerTransitionTool(
             );
 
             if (result.passed) {
-              // All passed → done!
-              session.state = 'done';
+              // Verified → move to compound
+              session.state = 'compound';
+              session.retryCount = 0;
               setSession(session);
               updateStatusBar(ctx, session);
               return textResult(
-                `🎉 Implementation verified! Workflow complete! Task: "${session.description}"\n\n` +
+                '✅ Implementation verified! Moving to compound stage.\n\n' +
+                  'Analyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").\n\n' +
                   formatVerificationSummary(result),
                 session,
               );
             }
 
-            // Failed
             session.retryCount++;
             if (session.retryCount >= maxRetries) {
               session.state = 'done';
@@ -266,7 +247,6 @@ export function registerTransitionTool(
                 session,
               );
             }
-            // Go back to implement — save full result to file
             session.state = 'implement';
             const implResultPath = saveVerificationResult(
               ctx.cwd,
@@ -285,7 +265,6 @@ export function registerTransitionTool(
               session,
             );
           } catch (e) {
-            // Fallback to manual verification
             const isNoModels =
               e instanceof Error &&
               e.message.includes('No verification models');
@@ -300,12 +279,17 @@ export function registerTransitionTool(
           }
         }
 
-        // ── Manual impl verification passed ──────────────────────
+        // ── Manual impl verification passed → compound ───────────
         case 'implVerified':
-          session.state = 'done';
+          session.state = 'compound';
+          session.retryCount = 0;
           setSession(session);
           updateStatusBar(ctx, session);
-          return textResult(buildWorkflowReport(session), session);
+          return textResult(
+            '✅ Implementation verified! Moving to compound stage.\n\n' +
+              'Analyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").',
+            session,
+          );
 
         // ── Manual impl verification failed ──────────────────────
         case 'implFailed':
@@ -323,14 +307,40 @@ export function registerTransitionTool(
           session.state = 'implement';
           break;
 
-        // ── Replan: go back to plan, keep planContent for reference ──
+        // ── Compound done → save solution → done ─────────────────
+        case 'compoundDone': {
+          const summary = params.content?.trim() || '';
+          let solutionPath: string | null = null;
+          if (summary) {
+            solutionPath = saveSolution(
+              ctx.cwd,
+              session.description,
+              summary,
+              session.id,
+            );
+          }
+          session.state = 'done';
+          setSession(session);
+          updateStatusBar(ctx, session);
+          return textResult(
+            '🎉 Workflow Complete!\n\n' +
+              `**Task:** ${session.description}\n` +
+              `**ID:** ${session.id}\n` +
+              `**Retries used:** ${session.retryCount}\n` +
+              (solutionPath ? `**Solution saved:** ${solutionPath}\n` : '') +
+              '\nLearnings from this workflow have been captured for future reference.',
+            session,
+          );
+        }
+
+        // ── Replan ───────────────────────────────────────────────
         case 'replan':
           session.state = 'plan';
           session.verifyPlanResult = '';
           break;
       }
 
-      // Common exit: save session and update status
+      // Common exit
       setSession(session);
       updateStatusBar(ctx, session);
 
