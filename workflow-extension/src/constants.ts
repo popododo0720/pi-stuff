@@ -77,6 +77,9 @@ export const ONBOARDING_GUIDE =
 export const STAGE_GUIDES: Record<WorkflowState, string> = {
   plan:
     '## Current Stage: 📝 Planning\n\n' +
+    '⚠️ IMPORTANT: You are ONLY a planner in this stage. Do NOT write or edit any code files. ' +
+    'Focus solely on discussing and creating the implementation plan with the user. ' +
+    'The write and edit tools are blocked.\n\n' +
     'Working with the user to create an implementation plan.\n' +
     "- Understand the user's requirements and write a concrete plan.\n" +
     '- The plan should include: summary, step-by-step plan, file change list, and verification criteria.\n' +
@@ -85,6 +88,8 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
 
   verifyPlan:
     '## Current Stage: 🔍 Plan Verification\n\n' +
+    '⚠️ IMPORTANT: You are ONLY a verifier in this stage. Do NOT modify any code files. ' +
+    'Focus on reviewing the plan. The write and edit tools are blocked.\n\n' +
     'Automatic parallel verification failed. Manual verification is required.\n' +
     '- Check if the plan is clear, specific, complete, and has measurable verification criteria.\n' +
     '- Discuss with the user to verify.\n' +
@@ -101,6 +106,8 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
 
   verifyImpl:
     '## Current Stage: ✅ Implementation Verification\n\n' +
+    '⚠️ IMPORTANT: You are ONLY a verifier in this stage. Do NOT modify any code files. ' +
+    'Focus on verifying the implementation. The write and edit tools are blocked.\n\n' +
     'Automatic parallel verification failed. Manual verification is required.\n' +
     '- Verify that all plan items are implemented and the code works correctly.\n' +
     '- If passed, call workflow_transition(action: "implVerified").\n' +

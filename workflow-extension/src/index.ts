@@ -12,6 +12,7 @@ import {
   MAX_MEMORY_VALUE_LENGTH,
   TOOL_NAME,
 } from './constants';
+import { shouldBlockToolCall } from './context/guard';
 import { buildSystemPromptInjection } from './context/prompt';
 import { updateStatusBar } from './context/status';
 import { loadMemory, saveMemory } from './storage/memory';
@@ -61,6 +62,17 @@ export default function (pi: ExtensionAPI) {
   ] as const) {
     pi.on(event, async (_e, ctx) => reconstruct(ctx));
   }
+
+  // ── Tool call guard ─────────────────────────────────────────────
+  // Block write/edit during non-implementation stages.
+  pi.on('tool_call', async (event) => {
+    if (!session || session.state === 'done') return undefined;
+    const result = shouldBlockToolCall(session.state, event.toolName);
+    if (result.block) {
+      return { block: true, reason: result.reason };
+    }
+    return undefined;
+  });
 
   // ── System prompt injection ────────────────────────────────────
   // Inject workflow context + project memory before each agent turn.
