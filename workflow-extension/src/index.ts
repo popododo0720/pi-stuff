@@ -65,7 +65,11 @@ export default function (pi: ExtensionAPI) {
   // ── Tool call guard ─────────────────────────────────────────────
   pi.on('tool_call', async (event) => {
     if (!session || session.state === 'done') return undefined;
-    const result = shouldBlockToolCall(session.state, event.toolName);
+    const result = shouldBlockToolCall(
+      session.state,
+      event.toolName,
+      event.input as Record<string, unknown>,
+    );
     if (result.block) {
       return { block: true, reason: result.reason };
     }

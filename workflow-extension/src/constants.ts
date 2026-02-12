@@ -126,7 +126,9 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '1. **What worked well** — patterns, approaches, or tools that were effective.\n' +
     '2. **What went wrong** — mistakes, failed approaches, or issues encountered.\n' +
     '3. **Reusable insight** — the key takeaway that would help in future similar tasks.\n' +
-    '4. **Conventions to add** — if you discovered project preferences, save them via project_memory.\n\n' +
+    '4. **Conventions to add** — if you discovered project preferences, save them via project_memory.\n' +
+    '5. **Memory cleanup** — review existing project memory (conventions, rules, notes) and remove outdated or redundant entries. ' +
+    'Use project_memory(action: "remove", category: "...", index: N) to clean up.\n\n' +
     'Then call workflow_transition(action: "compoundDone", content: "<compound summary>").\n' +
     'The summary will be saved to docs/solutions/ for future reference.\n' +
     'Keep it concise but specific — focus on what would actually help next time.',
