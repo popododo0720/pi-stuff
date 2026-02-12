@@ -85,12 +85,26 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '⚠️ IMPORTANT: You are ONLY a planner in this stage. Do NOT write or edit any code files. ' +
     'You CAN use bash and read tools to research the codebase. ' +
     'Focus solely on discussing and creating the implementation plan with the user.\n\n' +
-    'Working with the user to create an implementation plan.\n' +
-    "- Understand the user's requirements and write a concrete plan.\n" +
-    '- Research the codebase to understand existing patterns and structure.\n' +
-    '- The plan should include: summary, step-by-step plan, file change list, and verification criteria.\n' +
-    '- When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
-    '- Do NOT transition until the user explicitly approves.',
+    '### Phase 1: Pre-Analysis (before planning)\n' +
+    'Analyze the request for:\n' +
+    '- Ambiguities or unclear requirements — ask the user to clarify.\n' +
+    '- Hidden intentions — what the user actually needs vs what they said.\n' +
+    '- Hidden dependencies or side effects on existing code.\n' +
+    '- Edge cases and potential failure points.\n' +
+    '- Whether similar work exists in past solutions.\n' +
+    '- Intent type: refactoring (safety first), new feature (patterns first), bugfix (root cause first).\n\n' +
+    '### Phase 2: Research\n' +
+    '- Read relevant source files to understand current patterns.\n' +
+    '- Check existing conventions in project memory.\n\n' +
+    '### Phase 3: Write the Plan\n' +
+    'The plan MUST include:\n' +
+    '- **Summary** — what and why, in one paragraph.\n' +
+    '- **Step-by-step tasks** — each with exact file path (from project root) and specific change description.\n' +
+    '- **For each file**: what to add/modify/delete and where (after which function, which line area).\n' +
+    '- **Verification criteria** — concrete, executable checks (grep, lint command, test command).\n' +
+    '- **What must NOT change** — explicit scope boundaries.\n\n' +
+    'When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
+    'Do NOT transition until the user explicitly approves.',
 
   verifyPlan:
     '## Current Stage: 🔍 Plan Verification\n\n' +

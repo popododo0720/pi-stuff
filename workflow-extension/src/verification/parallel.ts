@@ -118,7 +118,7 @@ export async function runParallelVerification(
         '3. Is the file change list realistic?\n' +
         '4. Are the verification criteria measurable?\n\n' +
         'Write a detailed verification result. ' +
-        'On the last line, write exactly "VERDICT: PASS" or "VERDICT: FAIL".'
+        'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.'
       : 'You are a code implementation verifier. ' +
         'Verify the implementation against the following plan:\n\n' +
         `Task: ${description}\n\n` +
@@ -128,7 +128,7 @@ export async function runParallelVerification(
         '2. Does the code work correctly? (Run tests if possible)\n' +
         '3. Is anything missing?\n\n' +
         'Write a detailed verification result. ' +
-        'On the last line, write exactly "VERDICT: PASS" or "VERDICT: FAIL".';
+        'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.';
 
   // Launch all models in parallel
   const promises = settings.verifyModels.map((model) =>

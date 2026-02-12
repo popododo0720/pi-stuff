@@ -131,14 +131,7 @@ export function registerTransitionTool(
 
             session.retryCount++;
             if (session.retryCount >= maxRetries) {
-              session.state = 'done';
-              setSession(session);
-              updateStatusBar(ctx, session);
-              return textResult(
-                `Plan verification failed ${maxRetries} times. Workflow aborted.\n\n` +
-                  formatVerificationSummary(result),
-                session,
-              );
+              session.retryCount = 0;
             }
             session.state = 'plan';
             session.verifyPlanResult = formatVerificationSummary(result);
@@ -184,14 +177,7 @@ export function registerTransitionTool(
         case 'planFailed':
           session.retryCount++;
           if (session.retryCount >= maxRetries) {
-            session.state = 'done';
-            setSession(session);
-            updateStatusBar(ctx, session);
-            return textResult(
-              `Plan verification failed ${maxRetries} times. Workflow aborted. ` +
-                `Reason: ${params.reason || 'Verification failed'}`,
-              session,
-            );
+            session.retryCount = 0;
           }
           session.state = 'plan';
           session.verifyPlanResult = params.reason || 'Verification failed';
@@ -238,12 +224,24 @@ export function registerTransitionTool(
 
             session.retryCount++;
             if (session.retryCount >= maxRetries) {
-              session.state = 'done';
+              session.retryCount = 0;
+              session.state = 'plan';
+              session.verifyPlanResult =
+                'Implementation verification failed after max retries. Revise the plan.';
+              const implResultPath = saveVerificationResult(
+                ctx.cwd,
+                'impl',
+                result,
+                session.id,
+              );
               setSession(session);
               updateStatusBar(ctx, session);
               return textResult(
-                `Implementation verification failed ${maxRetries} times. Workflow aborted.\n\n` +
-                  formatVerificationSummary(result),
+                `Max retries reached. Returning to plan stage for revision.\n\n` +
+                  formatVerificationSummary(result) +
+                  (implResultPath
+                    ? `\n\n📋 Full results: ${implResultPath}`
+                    : ''),
                 session,
               );
             }
@@ -295,11 +293,15 @@ export function registerTransitionTool(
         case 'implFailed':
           session.retryCount++;
           if (session.retryCount >= maxRetries) {
-            session.state = 'done';
+            session.retryCount = 0;
+            session.state = 'plan';
+            session.verifyPlanResult =
+              params.reason ||
+              'Implementation verification failed after max retries.';
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
-              `Implementation verification failed ${maxRetries} times. Workflow aborted. ` +
+              'Max retries reached. Returning to plan stage for revision. ' +
                 `Reason: ${params.reason || 'Verification failed'}`,
               session,
             );
