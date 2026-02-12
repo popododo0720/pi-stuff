@@ -172,31 +172,28 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerCommand("workflow", {
 		description: "Start automated workflow: plan → verify → implement → verify",
-		handler: async (args, ctx) => {
-			const description = Array.isArray(args) ? args.join(" ") : String(args || "");
-			if (!description.trim()) {
-				ctx.ui.notify("Usage: /workflow <작업 설명>", "error");
-				return;
-			}
+		handler: async (args: any, ctx: any) => {
+			let description = "";
+			if (typeof args === "string") description = args.trim();
+			else if (Array.isArray(args)) description = args.join(" ").trim();
 
 			if (session && session.state !== "done") {
 				const confirmed = await ctx.ui.confirm(
 					"활성 워크플로우 존재",
-					`"${session.description}" 워크플로우가 진행 중입니다. 새 워크플로우로 대체할까요?`,
+					`워크플로우가 진행 중입니다. 새 워크플로우로 대체할까요?`,
 				);
 				if (!confirmed) return;
 			}
 
 			session = {
 				state: "plan",
-				description,
+				description: description || "워크플로우",
 				planContent: "",
 				verifyPlanResult: "",
 				retryCount: 0,
 			};
 
-			// 모드 전환만 알림. sendUserMessage 없음 — 사용자가 직접 타이핑 시작.
-			ctx.ui.notify(`📝 워크플로우 시작: "${description}" — 계획 모드로 진입했습니다.`, "info");
+			ctx.ui.notify("📝 계획 모드로 진입했습니다. 무엇을 만들지 이야기해주세요.", "info");
 		},
 	});
 
