@@ -34,6 +34,8 @@ export const DEFAULT_SETTINGS: WorkflowSettings = {
   verifyModels: [],
   verifyTimeout: 120_000,
   maxRetries: 3,
+  thinkingLevel: 'high',
+  blockBash: false,
 };
 
 // State maps
@@ -115,3 +117,13 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
 
   done: '',
 };
+
+// Instruction for AI to save important learnings
+export const LEARNING_GUIDE =
+  '\n\n### 📌 Learning & Memory\n' +
+  'When the user gives important corrections, preferences, or constraints, ' +
+  'save them using project_memory for future reference. Only save significant items:\n' +
+  '- User says "don\'t do X" or "always do Y" → project_memory(action: "add", category: "conventions", value: "...")\n' +
+  '- User points out a pattern-specific rule → project_memory(action: "add", category: "rules", value: "pattern|rule")\n' +
+  '- Repeated verification failures reveal a pattern → project_memory(action: "add", category: "notes", value: "...")\n' +
+  'Do NOT save trivial or one-time comments. Only save things that should persist across sessions.';

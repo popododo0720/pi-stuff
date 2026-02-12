@@ -5,6 +5,14 @@ export type WorkflowState =
   | 'verifyImpl'
   | 'done';
 
+export type ThinkingLevel =
+  | 'off'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh';
+
 export interface WorkflowSession {
   id: string;
   state: WorkflowState;
@@ -37,6 +45,8 @@ export interface WorkflowSettings {
   verifyModels: string[];
   verifyTimeout: number;
   maxRetries: number;
+  thinkingLevel: ThinkingLevel;
+  blockBash: boolean;
 }
 
 export interface VerificationResult {

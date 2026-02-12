@@ -26,6 +26,7 @@ async function runSingleModel(
   prompt: string,
   pi: ExtensionAPI,
   timeout: number,
+  thinkingLevel: string,
   signal?: AbortSignal,
 ): Promise<{ model: string; passed: boolean; output: string }> {
   // Model format is "provider/model-id" — split for CLI args
@@ -39,7 +40,7 @@ async function runSingleModel(
     '--model',
     modelId,
     '--thinking',
-    'high',
+    thinkingLevel,
   ];
 
   for (let attempt = 0; attempt <= MAX_EMPTY_RETRIES; attempt++) {

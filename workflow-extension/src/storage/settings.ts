@@ -25,6 +25,8 @@ export function loadSettings(cwd: string): WorkflowSettings {
       verifyModels: raw.verifyModels ?? DEFAULT_SETTINGS.verifyModels,
       verifyTimeout: raw.verifyTimeout ?? DEFAULT_SETTINGS.verifyTimeout,
       maxRetries: raw.maxRetries ?? DEFAULT_SETTINGS.maxRetries,
+      thinkingLevel: raw.thinkingLevel ?? DEFAULT_SETTINGS.thinkingLevel,
+      blockBash: raw.blockBash ?? DEFAULT_SETTINGS.blockBash,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
 import {
   DEFAULT_CONVENTIONS,
+  LEARNING_GUIDE,
   ONBOARDING_GUIDE,
   STAGE_GUIDES,
 } from '../constants';
@@ -190,5 +191,5 @@ export function buildSystemPromptInjection(
     planContext +
     failContext;
 
-  return basePrompt + workflowContext + memoryContext;
+  return basePrompt + workflowContext + LEARNING_GUIDE + memoryContext;
 }

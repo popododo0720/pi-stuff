@@ -24,6 +24,21 @@ function textResult(text: string, session?: WorkflowSession) {
 }
 
 /**
+ * Build a completion report summarizing the workflow.
+ */
+function buildWorkflowReport(session: WorkflowSession): string {
+  return (
+    '🎉 Workflow Complete!\n\n' +
+    `**Task:** ${session.description}\n` +
+    `**ID:** ${session.id}\n` +
+    `**Retries used:** ${session.retryCount}\n\n` +
+    'The workflow has finished successfully. ' +
+    'If there were important learnings during this session, ' +
+    'they have been saved to project memory for future reference.'
+  );
+}
+
+/**
  * Register the workflow_transition tool.
  * Handles all state transitions with automatic parallel verification.
  */
@@ -288,7 +303,9 @@ export function registerTransitionTool(
         // ── Manual impl verification passed ──────────────────────
         case 'implVerified':
           session.state = 'done';
-          break;
+          setSession(session);
+          updateStatusBar(ctx, session);
+          return textResult(buildWorkflowReport(session), session);
 
         // ── Manual impl verification failed ──────────────────────
         case 'implFailed':

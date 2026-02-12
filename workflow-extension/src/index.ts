@@ -17,6 +17,7 @@ import { shouldBlockToolCall } from './context/guard';
 import { buildSystemPromptInjection } from './context/prompt';
 import { updateStatusBar } from './context/status';
 import { loadMemory, saveMemory } from './storage/memory';
+import { loadSettings } from './storage/settings';
 import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
 import { registerTransitionTool } from './tools/transition';
@@ -63,9 +64,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── Tool call guard ─────────────────────────────────────────────
-  pi.on('tool_call', async (event) => {
+  pi.on('tool_call', async (event, ctx) => {
     if (!session || session.state === 'done') return undefined;
-    const result = shouldBlockToolCall(session.state, event.toolName);
+    const settings = loadSettings(ctx.cwd);
+    const result = shouldBlockToolCall(
+      session.state,
+      event.toolName,
+      settings.blockBash,
+    );
     if (result.block) {
       return { block: true, reason: result.reason };
     }

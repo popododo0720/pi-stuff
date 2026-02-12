@@ -24,6 +24,8 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
         `Verify timeout (current: ${settings.verifyTimeout / 1000}s)`,
         `Max retries (current: ${settings.maxRetries})`,
         'View current settings',
+        `Thinking level (current: ${settings.thinkingLevel})`,
+        `Block bash in plan/verify (current: ${settings.blockBash ? 'ON' : 'OFF'})`,
       ];
 
       const choice = await ctx.ui.select('Workflow Settings', menuItems);

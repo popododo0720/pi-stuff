@@ -1,9 +1,9 @@
 // context/guard.ts — Tool call guard for workflow stage enforcement
-// Blocks write/edit tools during non-implementation stages.
+// Blocks write/edit (and optionally bash) during non-implementation stages.
 
 import type { WorkflowState } from '../types';
 
-/** Tools blocked per workflow state */
+/** Base tools always blocked per state */
 const BLOCKED_TOOLS: Record<WorkflowState, string[]> = {
   plan: ['write', 'edit'],
   verifyPlan: ['write', 'edit'],
@@ -23,13 +23,22 @@ const BLOCK_REASONS: Partial<Record<WorkflowState, string>> = {
 
 /**
  * Check if a tool call should be blocked in the current workflow state.
- * Returns { block: true, reason } if blocked, { block: false } if allowed.
+ * @param state - Current workflow state
+ * @param toolName - Name of the tool being called
+ * @param blockBash - Whether to also block bash in non-implementation stages
  */
 export function shouldBlockToolCall(
   state: WorkflowState,
   toolName: string,
+  blockBash = false,
 ): { block: boolean; reason?: string } {
-  const blocked = BLOCKED_TOOLS[state] ?? [];
+  const blocked = [...(BLOCKED_TOOLS[state] ?? [])];
+
+  // Optionally block bash in non-implementation stages
+  if (blockBash && state !== 'implement' && state !== 'done') {
+    blocked.push('bash');
+  }
+
   if (blocked.includes(toolName)) {
     return {
       block: true,
