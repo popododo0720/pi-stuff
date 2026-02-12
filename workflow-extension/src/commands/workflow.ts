@@ -9,6 +9,7 @@ import type {
 import { updateStatusBar } from '../context/status';
 import { resolveMemoryPath, saveMemory } from '../storage/memory';
 import type { WorkflowSession } from '../types';
+import { cleanupVerificationResults } from '../verification';
 
 /**
  * Register the /workflow command.
@@ -33,6 +34,9 @@ export function registerWorkflowCommand(
         );
         if (!confirmed) return;
       }
+
+      // Clean up previous verification files
+      cleanupVerificationResults(ctx.cwd);
 
       // Create new session
       const session: WorkflowSession = {
