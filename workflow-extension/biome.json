@@ -5,6 +5,9 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
+  "files": {
+    "includes": ["src/**", "tests/**"]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -14,7 +17,29 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "style": {
+        "useNamingConvention": {
+          "level": "warn",
+          "options": {
+            "strictCase": false,
+            "conventions": [
+              {
+                "selector": { "kind": "function" },
+                "formats": ["camelCase"]
+              },
+              {
+                "selector": { "kind": "variable" },
+                "formats": ["camelCase", "CONSTANT_CASE"]
+              },
+              {
+                "selector": { "kind": "typeLike" },
+                "formats": ["PascalCase"]
+              }
+            ]
+          }
+        }
+      }
     }
   },
   "javascript": {
