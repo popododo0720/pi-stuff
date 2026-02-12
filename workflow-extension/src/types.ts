@@ -1,8 +1,8 @@
 export type WorkflowState =
   | 'plan'
-  | 'verify_plan'
+  | 'verifyPlan'
   | 'implement'
-  | 'verify_impl'
+  | 'verifyImpl'
   | 'done';
 
 export interface WorkflowSession {

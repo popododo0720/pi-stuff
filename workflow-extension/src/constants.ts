@@ -1,0 +1,100 @@
+import type { WorkflowSettings, WorkflowState } from './types';
+
+// Path and limit configuration constants
+export const TOOL_NAME = 'workflow_transition';
+export const MEMORY_DIR = '.pi';
+export const MEMORY_FILE = 'workflow-memory.json';
+export const SETTINGS_FILE = 'workflow-settings.json';
+export const CONVENTIONS_DIR = 'conventions';
+export const MAX_MEMORY_ENTRIES = 50;
+export const MAX_MEMORY_VALUE_LENGTH = 1000;
+export const MAX_RULES = 30;
+export const MAX_RULE_PATTERN_LENGTH = 200;
+export const MAX_MODULES = 20;
+export const MAX_MODULE_CONVENTIONS = 30;
+
+// Default values
+export const DEFAULT_CONVENTIONS: string[] = [
+  'Follow clean code principles — single responsibility per function, intention-revealing names, no duplication',
+  'Adhere to SOLID principles — SRP, OCP, LSP, ISP, DIP',
+  'No unnecessary complexity — YAGNI, KISS first',
+];
+
+export const DEFAULT_SETTINGS: WorkflowSettings = {
+  verifyModels: [],
+  verifyTimeout: 120_000,
+  maxRetries: 3,
+};
+
+// State maps
+export const STATE_EMOJI: Record<WorkflowState, string> = {
+  plan: '📝',
+  verifyPlan: '🔍',
+  implement: '🔨',
+  verifyImpl: '✅',
+  done: '🎉',
+};
+
+export const STATE_LABELS: Record<WorkflowState, string> = {
+  plan: 'Plan',
+  verifyPlan: 'Verify Plan',
+  implement: 'Implement',
+  verifyImpl: 'Verify Impl',
+  done: 'Done',
+};
+
+export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
+  approvePlan: ['plan'],
+  planVerified: ['verifyPlan'],
+  planFailed: ['verifyPlan'],
+  implDone: ['implement'],
+  implVerified: ['verifyImpl'],
+  implFailed: ['verifyImpl'],
+  replan: ['implement'],
+};
+
+// Guide texts
+export const ONBOARDING_GUIDE =
+  '## 🚀 Project Setup\n\n' +
+  'Conventions have not been configured for this project yet. Ask briefly before planning.\n\n' +
+  '1. Understand the project structure — for multi-module projects, use module_conventions to separate conventions per module.\n' +
+  '   (e.g. module_conventions(action: "create", module: "web-server", path: "src/web-server"))\n' +
+  '2. Add global conventions via project_memory(category: "conventions").\n' +
+  '3. Add directory/file-specific rules via project_memory(category: "rules") or module rules.\n' +
+  '4. Once setup is done, proceed to planning.\n\n' +
+  'Keep it short. If the user says "skip", proceed immediately.\n';
+
+export const STAGE_GUIDES: Record<WorkflowState, string> = {
+  plan:
+    '## Current Stage: 📝 Planning\n\n' +
+    'Working with the user to create an implementation plan.\n' +
+    "- Understand the user's requirements and write a concrete plan.\n" +
+    '- The plan should include: summary, step-by-step plan, file change list, and verification criteria.\n' +
+    '- When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
+    '- Do NOT transition until the user explicitly approves.',
+
+  verifyPlan:
+    '## Current Stage: 🔍 Plan Verification\n\n' +
+    'Automatic parallel verification failed. Manual verification is required.\n' +
+    '- Check if the plan is clear, specific, complete, and has measurable verification criteria.\n' +
+    '- Discuss with the user to verify.\n' +
+    '- If passed, call workflow_transition(action: "planVerified").\n' +
+    '- If issues found, call workflow_transition(action: "planFailed", reason: "...").',
+
+  implement:
+    '## Current Stage: 🔨 Implementation\n\n' +
+    'Implementing based on the verified plan.\n' +
+    '- Implement each item in the plan in order.\n' +
+    '- Accept user feedback as you go.\n' +
+    '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
+    '- When all implementation is complete, call workflow_transition(action: "implDone").',
+
+  verifyImpl:
+    '## Current Stage: ✅ Implementation Verification\n\n' +
+    'Automatic parallel verification failed. Manual verification is required.\n' +
+    '- Verify that all plan items are implemented and the code works correctly.\n' +
+    '- If passed, call workflow_transition(action: "implVerified").\n' +
+    '- If issues found, call workflow_transition(action: "implFailed", reason: "...").',
+
+  done: '',
+};

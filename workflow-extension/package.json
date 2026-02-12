@@ -12,6 +12,9 @@
     "format": "npx biome format --write .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
