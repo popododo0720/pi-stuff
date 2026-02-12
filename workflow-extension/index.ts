@@ -782,13 +782,16 @@ export default function (pi: ExtensionAPI) {
 								details: session,
 							};
 						}
-					} catch {
-						// 자동 검증 프로세스 오류 → verify_plan 상태 유지, 수동 검증으로 폴백
+					} catch (e) {
+						// 모델 미설정 vs 실제 오류 구분
+						const isNoModels = e instanceof Error && e.message.includes("검증 모델이 설정되지 않았습니다");
 						updateStatusBar(ctx, session);
 						return {
 							content: [{
 								type: "text" as const,
-								text: `⚠️ 자동 검증 프로세스 오류. 수동 검증으로 전환합니다.${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}`,
+								text: isNoModels
+									? `⚠️ 검증 모델이 없어서 수동 검증으로 진행합니다. /workflow-settings로 설정하세요.${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}`
+									: `⚠️ 자동 검증 프로세스 오류. 수동 검증으로 전환합니다.${savedPath ? `\n📄 계획 저장: ${savedPath}` : ""}`,
 							}],
 							details: session,
 						};
@@ -863,13 +866,15 @@ export default function (pi: ExtensionAPI) {
 								details: session,
 							};
 						}
-					} catch {
-						// 자동 검증 프로세스 오류 → verify_impl 상태 유지, 수동 검증으로 폴백
+					} catch (e) {
+						const isNoModels = e instanceof Error && e.message.includes("검증 모델이 설정되지 않았습니다");
 						updateStatusBar(ctx, session);
 						return {
 							content: [{
 								type: "text" as const,
-								text: `⚠️ 자동 검증 프로세스 오류. 수동 검증으로 전환합니다.`,
+								text: isNoModels
+									? `⚠️ 검증 모델이 없어서 수동 검증으로 진행합니다. /workflow-settings로 설정하세요.`
+									: `⚠️ 자동 검증 프로세스 오류. 수동 검증으로 전환합니다.`,
 							}],
 							details: session,
 						};
