@@ -22,7 +22,8 @@ export function registerWorkflowCommand(
   setSession: (s: WorkflowSession) => void,
 ) {
   pi.registerCommand('workflow', {
-    description: 'Start automated workflow: plan → verify → implement → verify',
+    description:
+      'Start automated workflow: plan → verify → implement → verify → compound',
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const description = args.trim();
       const currentSession = getSession();

@@ -82,8 +82,7 @@ async function runSingleModel(
  * Each model receives the same prompt and must output VERDICT: PASS or VERDICT: FAIL.
  * All models must pass for overall success.
  *
- * Uses staggered starts (3s apart) to avoid resource contention,
- * and retries on empty responses up to 2 times per model.
+ * Retries on empty responses up to 2 times per model.
  *
  * @param type - 'plan' for plan verification, 'impl' for implementation verification
  * @param planContent - The approved plan content
@@ -133,7 +132,14 @@ export async function runParallelVerification(
 
   // Launch all models in parallel
   const promises = settings.verifyModels.map((model) =>
-    runSingleModel(model, prompt, pi, settings.verifyTimeout, signal),
+    runSingleModel(
+      model,
+      prompt,
+      pi,
+      settings.verifyTimeout,
+      settings.thinkingLevel,
+      signal,
+    ),
   );
 
   const results = await Promise.all(promises);
