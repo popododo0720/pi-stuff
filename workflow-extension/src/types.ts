@@ -1,0 +1,48 @@
+export type WorkflowState =
+  | 'plan'
+  | 'verify_plan'
+  | 'implement'
+  | 'verify_impl'
+  | 'done';
+
+export interface WorkflowSession {
+  state: WorkflowState;
+  description: string;
+  planContent: string;
+  verifyPlanResult: string;
+  retryCount: number;
+}
+
+export interface ConditionalRule {
+  pattern: string;
+  rule: string;
+}
+
+export interface ModuleConventions {
+  path: string;
+  conventions: string[];
+  rules: ConditionalRule[];
+}
+
+export interface ProjectMemory {
+  conventions: string[];
+  rules: ConditionalRule[];
+  workflows: Array<{ name: string; description: string }>;
+  currentWork: Array<{ what: string; why: string; startedAt: string }>;
+  notes: string[];
+}
+
+export interface WorkflowSettings {
+  verifyModels: string[];
+  verifyTimeout: number;
+  maxRetries: number;
+}
+
+export interface VerificationResult {
+  passed: boolean;
+  results: Array<{
+    model: string;
+    passed: boolean;
+    output: string;
+  }>;
+}
