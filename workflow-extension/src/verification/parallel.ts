@@ -143,6 +143,19 @@ async function runSingleModel(
         continue;
       }
 
+      // Empty output on final attempt → infrastructure error
+      if (!output) {
+        return {
+          model,
+          passed: false,
+          output: 'Empty response after all retry attempts.',
+          criticalCount: 0,
+          warningCount: 0,
+          infoCount: 0,
+          infrastructureError: true,
+        };
+      }
+
       // Infrastructure error — halt verification loop
       if (isInfrastructureError(output)) {
         return {
