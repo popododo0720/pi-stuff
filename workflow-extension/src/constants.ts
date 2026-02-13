@@ -57,13 +57,9 @@ export const STATE_LABELS: Record<WorkflowState, string> = {
 };
 
 export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
-  approvePlan: ['plan'],
-  planVerified: ['verifyPlan'],
-  planFailed: ['verifyPlan'],
-  implDone: ['implement'],
-  implVerified: ['verifyImpl'],
-  implFailed: ['verifyImpl'],
-  replan: ['implement'],
+  approvePlan: ['plan', 'verifyPlan'],
+  implDone: ['implement', 'verifyImpl'],
+  replan: ['implement', 'verifyImpl'],
   compoundDone: ['compound'],
   setTodos: ['plan'],
 };
@@ -113,14 +109,14 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     'Discussing the plan is NOT approval. Wait for explicit words like "approve", "go", "submit", "승인", "ㄱㄱ", "제출해".',
 
   verifyPlan:
-    '## Current Stage: 🔍 Plan Verification\n\n' +
-    '⚠️ IMPORTANT: You are ONLY a verifier in this stage. Do NOT modify any code files. ' +
-    'You CAN use bash and read tools to check the codebase.\n\n' +
-    'Automatic parallel verification failed. Manual verification is required.\n' +
-    '- Check if the plan is clear, specific, complete, and has measurable verification criteria.\n' +
-    '- Discuss with the user to verify.\n' +
-    '- If passed, call workflow_transition(action: "planVerified").\n' +
-    '- If issues found, call workflow_transition(action: "planFailed", reason: "...").',
+    '## Current Stage: 🔍 Plan Verification — FAILED\n\n' +
+    '⚠️ MANDATORY: Fix ALL issues found by verification. Do NOT bypass or ignore verification results.\n' +
+    'Do NOT call any manual override. The ONLY path forward is to fix the plan and resubmit.\n\n' +
+    '1. Read the verification feedback above carefully.\n' +
+    '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in your plan.\n' +
+    '3. Discuss changes with the user if needed.\n' +
+    '4. Call workflow_transition(action: "replan") to return to plan stage.\n' +
+    '5. Then resubmit with workflow_transition(action: "approvePlan", content: "<fixed plan>").',
 
   implement:
     '## Current Stage: 🔨 Implementation\n\n' +
@@ -130,17 +126,18 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
     '- Track progress: maintain a mental checklist of plan items. Do NOT stop until all items are complete.\n' +
     '- If stuck on one item, note the blocker and continue with the next.\n' +
-    '- After all code changes, update README.md (introduction, installation, usage) and architecture diagram (mermaid code flow) if project structure changed.\n' +
-    '- When all implementation is complete, call workflow_transition(action: "implDone").',
+    '- **MANDATORY**: After all code changes, update README.md and ARCHITECTURE.md to reflect current state. This is NOT optional.\n' +
+    '- When all implementation is complete, call workflow_transition(action: "implDone").\n\n' +
+    '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:
-    '## Current Stage: ✅ Implementation Verification\n\n' +
-    '⚠️ IMPORTANT: You are ONLY a verifier in this stage. Do NOT modify any code files. ' +
-    'You CAN use bash and read tools to verify the implementation.\n\n' +
-    'Automatic parallel verification failed. Manual verification is required.\n' +
-    '- Verify that all plan items are implemented and the code works correctly.\n' +
-    '- If passed, call workflow_transition(action: "implVerified").\n' +
-    '- If issues found, call workflow_transition(action: "implFailed", reason: "...").',
+    '## Current Stage: ✅ Implementation Verification — FAILED\n\n' +
+    '⚠️ MANDATORY: Fix ALL issues found by verification. Do NOT bypass or ignore verification results.\n' +
+    'Do NOT call any manual override. The ONLY path forward is to fix the code and resubmit.\n\n' +
+    '1. Read the verification feedback above carefully.\n' +
+    '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in the implementation.\n' +
+    '3. Call workflow_transition(action: "replan") to return to planning if the plan itself needs changes.\n' +
+    '4. Or fix the code and call workflow_transition(action: "implDone") to re-verify.',
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +

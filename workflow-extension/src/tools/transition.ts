@@ -38,16 +38,11 @@ export function registerTransitionTool(
     label: 'Workflow Transition',
     description:
       'Transition the current workflow stage. ' +
-      'Supports: approvePlan, planVerified, planFailed, ' +
-      'implDone, implVerified, implFailed, replan, compoundDone, setTodos.',
+      'Supports: approvePlan, implDone, replan, compoundDone, setTodos.',
     parameters: Type.Object({
       action: StringEnum([
         'approvePlan',
-        'planVerified',
-        'planFailed',
         'implDone',
-        'implVerified',
-        'implFailed',
         'replan',
         'compoundDone',
         'setTodos',
@@ -164,20 +159,6 @@ export function registerTransitionTool(
           }
         }
 
-        // ── Manual plan verification passed ──────────────────────
-        case 'planVerified':
-          session.state = 'implement';
-          session.retryCount = 0;
-          session.verifyPlanResult = params.content || 'Verification passed';
-          break;
-
-        // ── Manual plan verification failed ──────────────────────
-        case 'planFailed':
-          session.retryCount++;
-          session.state = 'plan';
-          session.verifyPlanResult = params.reason || 'Verification failed';
-          break;
-
         // ── Implementation done → auto-verify ────────────────────
         case 'implDone': {
           session.state = 'verifyImpl';
@@ -250,24 +231,6 @@ export function registerTransitionTool(
             );
           }
         }
-
-        // ── Manual impl verification passed → compound ───────────
-        case 'implVerified':
-          session.state = 'compound';
-          session.retryCount = 0;
-          setSession(session);
-          updateStatusBar(ctx, session);
-          return textResult(
-            '✅ Implementation verified! Moving to compound stage.\n\n' +
-              'Analyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").',
-            session,
-          );
-
-        // ── Manual impl verification failed ──────────────────────
-        case 'implFailed':
-          session.retryCount++;
-          session.state = 'implement';
-          break;
 
         // ── Compound done → advance TODO or finish ────────────────
         case 'compoundDone': {
