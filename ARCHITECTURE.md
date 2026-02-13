@@ -101,9 +101,9 @@ flowchart TD
     TODOPUSH -->|no| NEXT["next TODO implement"]
     TODOPUSH -->|yes| TODOTARGET{"branch target exists?"}
     TODOTARGET -->|no| TODOWARN["skip push + warning"]
-    TODOTARGET -->|yes| TODOPUSH["push origin/<branch>"]
+    TODOTARGET -->|yes| TODOPUSHRUN["push origin/<branch>"]
     TODOWARN --> NEXT
-    TODOPUSH --> NEXT
+    TODOPUSHRUN --> NEXT
 
     MORE -->|no| FINALCOMMIT["final auto commit"]
     FINALCOMMIT --> FINALPUSH{"pushOnComplete?"}

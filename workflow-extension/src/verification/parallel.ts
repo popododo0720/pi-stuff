@@ -40,23 +40,21 @@ function isNegatedSeverity(
   const checks: Record<'critical' | 'warning' | 'info', RegExp[]> = {
     critical: [
       /^\s*(?:none|n\/a|na|null|0)\s*[.!?]*\s*$/,
-      /\bno\s+critical\b/,
+      /\bno\s+critical\b(?:\s+(?:found|detected|identified|reported))?\s*[.!,;:)]*\s*$/,
       /\b0\s+critical\b/,
       /\bcritical\s*:\s*none\b/,
       /\bno\s+critical\s+findings?\b/,
     ],
     warning: [
       /^\s*(?:none|n\/a|na|null|0)\s*[.!?]*\s*$/,
-      /\bno\s+warning\b/,
-      /\bno\s+warnings\b/,
-      /\b0\s+warning\b/,
-      /\b0\s+warnings\b/,
+      /\bno\s+warnings?\b(?:\s+(?:found|detected|identified|reported))?\s*[.!,;:)]*\s*$/,
+      /\b0\s+warnings?\b/,
       /\bwarnings?\s*:\s*none\b/,
-      /\bno\s+warning\s+findings?\b/,
+      /\bno\s+warnings?\s+findings?\b/,
     ],
     info: [
       /^\s*(?:none|n\/a|na|null|0)\s*[.!?]*\s*$/,
-      /\bno\s+info\b/,
+      /\bno\s+info\b(?:\s+(?:found|detected|identified|reported))?\s*[.!,;:)]*\s*$/,
       /\b0\s+info\b/,
       /\binfo\s*:\s*none\b/,
       /\bno\s+info\s+findings?\b/,
@@ -68,7 +66,8 @@ function isNegatedSeverity(
 function parseVerdict(output: string): 'PASS' | 'FAIL' | undefined {
   const lines = output.split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
+    // Strip markdown bold/italic (*/**) so "**VERDICT: PASS**" is parsed correctly
+    const line = lines[i].trim().replace(/\*{1,2}/g, '');
     const match = line.match(/^VERDICT\s*:\s*(PASS|FAIL)\s*$/i);
     if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
   }
@@ -117,8 +116,16 @@ function parseFindingsFromOutput(output: string): {
 
   const lines = output.split('\n');
   let section: Severity | null = null;
+  let inCodeBlock = false;
 
   for (const rawLine of lines) {
+    // Skip fenced code blocks (``` or ~~~) to avoid false positives from code examples
+    if (/^\s*(`{3,}|~{3,})/.test(rawLine)) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock) continue;
+
     const line = rawLine.trim();
     if (!line) continue;
     if (/^\s*VERDICT\s*:/i.test(line)) continue;
@@ -228,7 +235,14 @@ function parseFindingsFromOutput(output: string): {
 
   // Fallback: structure parse found nothing, but text still has severity words.
   if (critical + warning + info === 0) {
+    let inCodeBlock2 = false;
     for (const rawLine of lines) {
+      if (/^\s*(`{3,}|~{3,})/.test(rawLine)) {
+        inCodeBlock2 = !inCodeBlock2;
+        continue;
+      }
+      if (inCodeBlock2) continue;
+
       const line = rawLine.trim();
       if (!line || /^\s*VERDICT\s*:/i.test(line)) continue;
 

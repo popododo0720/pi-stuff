@@ -209,7 +209,6 @@ workflow-extension/
 │   │   └── index.ts             # generateRepoMap entry point
 │   ├── storage/
 │   │   ├── index.ts             # Re-exports
-│   │   ├── git.ts               # Git commit/push helpers
 │   │   ├── memory.ts            # Project memory CRUD
 │   │   ├── modules.ts           # Module conventions
 │   │   ├── plan.ts              # Plan document saving
