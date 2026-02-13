@@ -11,13 +11,16 @@ flowchart TD
     end
 
     subgraph Events["Event Handlers"]
-        SE[session_start/switch/fork/tree] --> RECON[Reconstruct session from history]
+        SE[session_start/switch/fork/tree] --> RECON[Reconstruct session from disk]
         TC[tool_call] --> GUARD{guard.ts<br/>Should block?}
         GUARD -->|blocked| BLOCK[Return block reason]
         GUARD -->|allowed| PASS[Allow tool execution]
-        BAS[before_agent_start] --> RECOVER{Done state?}
+        BAS[before_agent_start] --> COMPACT{Pending compact?}
+        COMPACT -->|yes| RUN_COMPACT["await compact<br/>(onComplete)"]
+        RUN_COMPACT --> RECOVER
+        COMPACT -->|no| RECOVER{Done state?}
         RECOVER -->|yes| PLAN_RECOVER[Auto-recover → plan]
-        RECOVER -->|no| INJECT[prompt.ts<br/>Inject system prompt]
+        RECOVER -->|no| INJECT["prompt.ts (async)<br/>Inject system prompt<br/>+ WORKFLOW_ACTIVE flag<br/>+ Repo Map"]
         AE[agent_end] --> TRACK[Track currentWork]
     end
 
@@ -25,15 +28,11 @@ flowchart TD
         PLAN["📝 plan"] -->|approvePlan| VP["🔍 verifyPlan"]
         VP -->|auto-verify pass| IMPL["🔨 implement"]
         VP -->|auto-verify fail| VP
-        VP -->|planVerified manual| IMPL
-        VP -->|planFailed manual| PLAN
         IMPL -->|implDone| VI["✅ verifyImpl"]
         VI -->|auto-verify pass| COMPOUND["🧠 compound"]
         VI -->|auto-verify fail| VI
-        VI -->|implVerified manual| COMPOUND
-        VI -->|implFailed manual| IMPL
-        COMPOUND -->|compoundDone + more TODOs| PLAN
-        COMPOUND -->|compoundDone + no TODOs| DONE["🎉 done"]
+        COMPOUND -->|"compoundDone + more TODOs"| IMPL_NEXT["🔨 implement (next TODO)<br/>+ deferred compact"]
+        COMPOUND -->|"compoundDone + no TODOs"| DONE["🎉 done<br/>+ deferred compact"]
         DONE -->|user message| PLAN
         IMPL -->|replan| PLAN
         PLAN -->|setTodos| PLAN
@@ -48,7 +47,8 @@ flowchart TD
         MOD_A --> PARSE[Parse VERDICT + severity]
         MOD_B --> PARSE
         SELF --> PARSE
-        PARSE --> RESULT{All pass?}
+        PARSE --> SUMMARIZE["summarizeVerificationOutput()<br/>🔴/🟡 + context lines<br/>🔵 count<br/>VERDICT guaranteed at end"]
+        SUMMARIZE --> RESULT{All pass?}
         RESULT -->|yes| NEXT[Advance state]
         RESULT -->|no| RETRY[Stay in verify state]
     end
@@ -63,7 +63,9 @@ flowchart TD
     end
 
     subgraph Context["Context Layer"]
-        PROMPT[prompt.ts] --> MEM_CTX[Memory context]
+        PROMPT[prompt.ts — async] --> FLAG["WORKFLOW_ACTIVE=true/false<br/>(all branches)"]
+        PROMPT --> REPO_MAP["Repo Map<br/>(if enabled)"]
+        PROMPT --> MEM_CTX[Memory context]
         PROMPT --> STAGE_GUIDE[Stage guide]
         PROMPT --> TODO_PROG[TODO progress]
         PROMPT --> SOL_CTX[Past solutions]
@@ -72,14 +74,20 @@ flowchart TD
     end
 ```
 
-## Verification Prompt Structure (Implementation)
+## Verification Prompt Structure
 
 ```mermaid
 flowchart LR
-    subgraph Prompt["Unified Impl Verification Prompt"]
+    subgraph PlanVerify["Plan Verification"]
+        PP1["Approach correctness"]
+        PP2["Missing critical steps"]
+        PP3["🔴 CRITICAL → FAIL<br/>🟡 WARNING → PASS (noted)<br/>🔵 INFO → PASS"]
+    end
+
+    subgraph ImplVerify["Implementation Verification"]
         P1["Phase 1: Strict Verification<br/>Plan compliance, SOLID,<br/>security, architecture"]
         P2["Phase 2: Adversarial Testing<br/>Try to break the code<br/>with concrete scenarios"]
-        P3["Severity Classification<br/>🔴 CRITICAL → FAIL<br/>🟡 WARNING → FAIL<br/>🔵 INFO → PASS"]
+        P3["🔴 CRITICAL → FAIL<br/>🟡 WARNING → FAIL<br/>🔵 INFO → PASS"]
     end
 
     subgraph SelfCritique["Self-Critique Prompt"]
@@ -91,31 +99,98 @@ flowchart LR
         SC6["Integration side effects"]
     end
 
-    Prompt --> MODEL_A["Model A"]
-    Prompt --> MODEL_B["Model B"]
+    PlanVerify --> MODEL_P["Model A + B"]
+    ImplVerify --> MODEL_A["Model A"]
+    ImplVerify --> MODEL_B["Model B"]
     SelfCritique --> MODEL_SC["Model A<br/>(self-critique)"]
     MODEL_A --> COMBINE["Combine results<br/>All must pass"]
     MODEL_B --> COMBINE
     MODEL_SC --> COMBINE
+    MODEL_P --> COMBINE_P["Plan: All must pass<br/>(WARNING = PASS)"]
 ```
 
-## TODO System Flow
+## Repo Map Pipeline
+
+```mermaid
+flowchart LR
+    subgraph Collection["File Collection"]
+        WALK["Walk project tree"] --> FILTER["Skip: node_modules, .git,<br/>dist, build, symlinks"]
+        FILTER --> CAP["Cap: 500 files max"]
+    end
+
+    subgraph Parsing["AST Parsing (web-tree-sitter)"]
+        CAP --> EXT["Extension → Language ID<br/>.ts → typescript<br/>.py → python"]
+        EXT --> WASM["Load language .wasm<br/>(cached per language)"]
+        WASM --> PARSE_AST["Parse → Extract:<br/>• Symbols (fn, class, type)<br/>• Import specifiers"]
+    end
+
+    subgraph Ranking["Graph + PageRank"]
+        PARSE_AST --> RESOLVE["Resolve imports<br/>(JS/TS: relative paths)"]
+        RESOLVE --> GRAPH["Build file graph<br/>(all files = nodes)"]
+        GRAPH --> RANK["PageRank<br/>(damping=0.85, iter=20)<br/>+ dangling node handling"]
+    end
+
+    subgraph Output["Token-Budgeted Output"]
+        RANK --> SORT["Sort by rank descending"]
+        SORT --> RENDER["Render: path + symbols<br/>within token budget"]
+        RENDER --> CACHE["Cache 30s<br/>key: cwd:budget"]
+    end
+```
+
+## TODO System Flow (Unified Plan)
 
 ```mermaid
 flowchart TD
-    START["/workflow Big feature"] --> PLAN1["📝 Plan: Break into TODOs"]
-    PLAN1 -->|setTodos| TODOS["📋 TODO List<br/>1. Setup types<br/>2. Add API<br/>3. Write tests"]
-    
-    TODOS --> CYCLE1["TODO #1: Plan → Verify → Impl → Verify → Compound"]
-    CYCLE1 -->|compoundDone| ADV1["Auto-advance to TODO #2"]
-    ADV1 --> CYCLE2["TODO #2: Plan → Verify → Impl → Verify → Compound"]
-    CYCLE2 -->|compoundDone| ADV2["Auto-advance to TODO #3"]
-    ADV2 --> CYCLE3["TODO #3: Plan → Verify → Impl → Verify → Compound"]
-    CYCLE3 -->|compoundDone, no more| DONE["🎉 All TODOs complete"]
-    
-    CYCLE1 -.->|compact| CLN1["🧹 Context compaction"]
-    CYCLE2 -.->|compact| CLN2["🧹 Context compaction"]
-    CYCLE3 -.->|compact| CLN3["🧹 Context compaction"]
+    START["/workflow Big feature"] --> SET["setTodos: define items"]
+    SET --> PLAN["📝 Unified Plan<br/>(covers ALL TODOs)"]
+    PLAN -->|approvePlan| VERIFY_P["🔍 Verify Plan (once)"]
+    VERIFY_P -->|pass| TODO1
+
+    subgraph TODO1["TODO #1"]
+        IMPL1["🔨 Implement"] --> VI1["✅ Verify Impl"]
+        VI1 --> COMP1["🧠 Compound"]
+    end
+
+    COMP1 -->|"compoundDone<br/>+ deferred compact"| TODO2
+
+    subgraph TODO2["TODO #2"]
+        IMPL2["🔨 Implement"] --> VI2["✅ Verify Impl"]
+        VI2 --> COMP2["🧠 Compound"]
+    end
+
+    COMP2 -->|"compoundDone<br/>+ deferred compact"| TODO3
+
+    subgraph TODO3["TODO #3"]
+        IMPL3["🔨 Implement"] --> VI3["✅ Verify Impl"]
+        VI3 --> COMP3["🧠 Compound"]
+    end
+
+    COMP3 -->|"compoundDone<br/>no more TODOs"| DONE["🎉 Done"]
+
+    style PLAN fill:#e3f2fd
+    style VERIFY_P fill:#fff3e0
+```
+
+## Deferred Compaction Flow
+
+```mermaid
+sequenceDiagram
+    participant Tool as transition.ts
+    participant Flag as _pendingCompact
+    participant Event as before_agent_start
+    participant Pi as Pi Core
+
+    Tool->>Flag: Set compact instructions
+    Tool-->>Pi: Return textResult (no race)
+    Note over Pi: Turn completes safely
+    Pi->>Event: Next turn starts
+    Event->>Flag: Check pending compact
+    Flag-->>Event: Instructions found
+    Event->>Pi: await ctx.compact({onComplete})
+    Note over Pi: Compaction runs + completes
+    Pi-->>Event: Compact done
+    Event->>Pi: Inject system prompt
+    Note over Pi: Agent starts with clean context
 ```
 
 ## Tool Call Guard

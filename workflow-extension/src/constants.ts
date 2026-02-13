@@ -83,8 +83,8 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '### Large Tasks → TODO Breakdown\n' +
     'For large tasks, break them into smaller TODO items first:\n' +
     'Call workflow_transition(action: "setTodos", content: \'["item1", "item2", "item3"]\')\n' +
-    'Each TODO will get its own plan→verify→implement→verify→compound cycle.\n' +
-    'After setting TODOs, plan the first item.\n\n' +
+    '**After setting TODOs, write ONE unified plan covering ALL TODO items in separate sections.**\n' +
+    'Each TODO will be implemented sequentially, but planned together for better architecture.\n\n' +
     '### Phase 1: Pre-Analysis (before planning)\n' +
     'Analyze the request for:\n' +
     '- Ambiguities or unclear requirements — ask the user to clarify.\n' +
@@ -97,6 +97,15 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- Read relevant source files to understand current patterns.\n' +
     '- Check existing conventions in project memory.\n\n' +
     '### Phase 3: Write the Plan\n' +
+    '**If TODOs are set**: Structure the plan with clear sections for each TODO:\n' +
+    '```\n' +
+    '## TODO #1: [title]\n' +
+    '- Summary\n' +
+    '- Steps...\n\n' +
+    '## TODO #2: [title]\n' +
+    '- Summary\n' +
+    '- Steps...\n' +
+    '```\n\n' +
     'The plan MUST include:\n' +
     '- **Summary** — what and why, in one paragraph.\n' +
     '- **Step-by-step tasks** — each with exact file path (from project root) and specific change description.\n' +
@@ -125,23 +134,24 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
   implement:
     '## Current Stage: 🔨 Implementation\n\n' +
     'Implementing based on the verified plan.\n' +
-    '- Implement each item in the plan in order.\n' +
+    '**If TODOs are active**: Implement ONLY the current TODO section from the plan. Do NOT implement other TODO sections yet.\n' +
+    '- Implement each item in the current TODO section in order.\n' +
     '- Accept user feedback as you go.\n' +
     '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
-    '- Track progress: maintain a mental checklist of plan items. Do NOT stop until all items are complete.\n' +
+    '- Track progress: maintain a mental checklist of current TODO items. Do NOT stop until all items are complete.\n' +
     '- If stuck on one item, note the blocker and continue with the next.\n' +
     '- **MANDATORY before calling implDone**:\n' +
     '  1. Run linter/formatter and fix all errors (e.g. `npm run lint`).\n' +
     '  2. Run type checker if available (e.g. `npx tsc --noEmit`) and fix all errors.\n' +
     '  3. Run tests if available (e.g. `npm test`) and fix all failures.\n' +
-    '  4. Update README.md and ARCHITECTURE.md to reflect current state.\n' +
+    '  4. Update README.md and ARCHITECTURE.md if needed for this TODO.\n' +
     '  5. **Self-critique (MANDATORY — do NOT skip)**:\n' +
-    '     a. Re-read the Approved Plan above. Make a numbered checklist of every step.\n' +
+    '     a. Re-read the Approved Plan for the CURRENT TODO section. Make a numbered checklist of every step.\n' +
     '     b. For each step, read the actual file and confirm the change exists.\n' +
     '     c. Check: missing steps, edge cases (null/empty/zero), type safety, error handling.\n' +
     '     d. If ANY step is missing or incomplete, implement it NOW before continuing.\n' +
     '     e. Run `grep` or other verification criteria from the plan to confirm.\n' +
-    '  Do NOT call implDone until ALL plan steps are verified present.\n' +
+    '  Do NOT call implDone until ALL current TODO steps are verified present.\n' +
     '- When calling implDone, include implementation notes in content:\n' +
     '  workflow_transition(action: "implDone", content: "<notes about decisions, known trade-offs, context for verifiers>")\n' +
     '  This helps verifiers understand your reasoning and avoids false positives.\n\n' +

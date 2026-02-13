@@ -16,6 +16,19 @@ import {
   saveVerificationResult,
 } from '../verification';
 
+// ── Deferred compaction ──────────────────────────────────────────
+// Tool execution 중 ctx.compact() 직접 호출 시 race condition 발생.
+// 대신 플래그만 세팅하고, before_agent_start에서 실행.
+let PENDING_COMPACT: string | null = null;
+
+export function getPendingCompact(): string | null {
+  return PENDING_COMPACT;
+}
+
+export function clearPendingCompact(): void {
+  PENDING_COMPACT = null;
+}
+
 /**
  * Apply stage-specific model and thinking level.
  * Skips if config is undefined or fields are not set.
@@ -142,14 +155,23 @@ export function registerTransitionTool(
             if (result.passed) {
               session.state = 'implement';
               session.retryCount = 0;
-              session.verifyPlanResult = 'Auto-verification passed';
+              const summary = formatVerificationSummary(result);
+              const hasWarnings = summary.includes('🟡');
+              const hasInfo = summary.includes('🔵');
+              session.verifyPlanResult =
+                hasWarnings || hasInfo
+                  ? `Plan passed with notes:\n${summary}`
+                  : 'Auto-verification passed';
               setSession(session);
               updateStatusBar(ctx, session);
               await applyStageConfig(pi, ctx, settings.stages.implement);
               return textResult(
                 '✅ Plan verified! Moving to implementation.' +
                   (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
-                  `\n\n${formatVerificationSummary(result)}`,
+                  (hasWarnings
+                    ? '\n\n⚠️ **Address these warnings during implementation:**'
+                    : '') +
+                  `\n\n${summary}`,
                 session,
               );
             }
@@ -286,16 +308,15 @@ export function registerTransitionTool(
             const nextIndex = session.activeTodoIndex + 1;
 
             if (nextIndex < session.todos.length) {
-              // Advance to next TODO
+              // Advance to next TODO — skip plan stage, go straight to implement
               session.todos[nextIndex].status = 'active';
               session.activeTodoIndex = nextIndex;
-              session.state = 'plan';
-              session.planContent = '';
-              session.verifyPlanResult = '';
+              session.state = 'implement';
+              // Keep planContent and verifyPlanResult — already verified unified plan
               session.retryCount = 0;
               setSession(session);
               updateStatusBar(ctx, session);
-              await applyStageConfig(pi, ctx, settings.stages.plan);
+              await applyStageConfig(pi, ctx, settings.stages.implement);
 
               const doneCount = session.todos.filter(
                 (t) => t.status === 'done',
@@ -312,13 +333,11 @@ export function registerTransitionTool(
                 })
                 .join('\n');
 
-              // Compact context after completing a TODO cycle
-              ctx.compact({
-                customInstructions:
-                  `Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
-                  `Preserve: task description, TODO list progress, key decisions. ` +
-                  `Discard: implementation details, verification output, code diffs.`,
-              });
+              // Defer compaction — will run in next before_agent_start
+              PENDING_COMPACT =
+                `Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
+                `Preserve: unified plan, TODO list progress, key decisions. ` +
+                `Discard: previous TODO implementation details, verification output, code diffs.`;
 
               return textResult(
                 `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
@@ -326,7 +345,8 @@ export function registerTransitionTool(
                   (solutionPath
                     ? `**Solution saved:** ${solutionPath}\n\n`
                     : '') +
-                  `Now plan TODO #${nextIndex + 1}: "${session.todos[nextIndex].title}"`,
+                  `Now implement TODO #${nextIndex + 1}: "${session.todos[nextIndex].title}"\n` +
+                  `Refer to the TODO #${nextIndex + 1} section in the approved plan above.`,
                 session,
               );
             }
@@ -338,13 +358,11 @@ export function registerTransitionTool(
           setSession(session);
           updateStatusBar(ctx, session);
 
-          // Compact context after workflow completion
-          ctx.compact({
-            customInstructions:
-              `Workflow "${session.description}" completed. ` +
-              `Preserve: task description, final outcome, key decisions. ` +
-              `Discard: implementation details, verification output, code diffs.`,
-          });
+          // Defer compaction — will run in next before_agent_start
+          PENDING_COMPACT =
+            `Workflow "${session.description}" completed. ` +
+            `Preserve: task description, final outcome, key decisions. ` +
+            `Discard: implementation details, verification output, code diffs.`;
 
           const todoSummary =
             session.todos.length > 0
@@ -388,7 +406,10 @@ export function registerTransitionTool(
               .map((t, i) => `${i === 0 ? '🔨' : '⬜'} ${i + 1}. ${t.title}`)
               .join('\n');
             return textResult(
-              `📋 TODO list set (${titles.length} items):\n${todoList}\n\nNow plan TODO #1: "${titles[0]}"`,
+              `📋 TODO list set (${titles.length} items):\n${todoList}\n\n` +
+                `Now create ONE unified plan covering ALL ${titles.length} TODO items.\n` +
+                `Structure the plan with clear sections (## TODO #1, ## TODO #2, etc.).\n` +
+                `All TODOs will be planned together, then implemented sequentially.`,
               session,
             );
           } catch {

@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
 import type {
+  RepoMapConfig,
   StageConfig,
   StageConfigs,
   VerifyStageConfig,
@@ -30,19 +31,35 @@ function validateStageConfig(raw: unknown): StageConfig | undefined {
   return config.model || config.thinking ? config : undefined;
 }
 
+function validateRepoMapConfig(raw: unknown): RepoMapConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const config: RepoMapConfig = {};
+  if (typeof r.enabled === 'boolean') config.enabled = r.enabled;
+  if (typeof r.tokenBudget === 'number' && Number.isFinite(r.tokenBudget)) {
+    config.tokenBudget = Math.max(
+      256,
+      Math.min(8192, Math.floor(r.tokenBudget)),
+    );
+  }
+  return config.enabled !== undefined || config.tokenBudget !== undefined
+    ? config
+    : undefined;
+}
+
 function validateVerifyConfig(raw: unknown): VerifyStageConfig | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const models = Array.isArray(r.models)
-    ? r.models.filter(
-        (m): m is string => typeof m === 'string' && m.trim() !== '',
-      )
+    ? r.models
+        .filter((m): m is string => typeof m === 'string')
+        .map((m) => m.trim())
+        .filter((m) => m !== '')
     : [];
-  if (models.length === 0) return undefined;
   const config: VerifyStageConfig = { models };
   if (typeof r.thinking === 'string' && VALID_THINKING.has(r.thinking))
     config.thinking = r.thinking as VerifyStageConfig['thinking'];
-  return config;
+  return config.models.length > 0 || config.thinking ? config : undefined;
 }
 
 /**
@@ -87,9 +104,12 @@ export function loadSettings(cwd: string): WorkflowSettings {
         ? raw.verifyTimeout
         : DEFAULT_SETTINGS.verifyTimeout;
 
+    const repoMap = validateRepoMapConfig(raw.repoMap);
+
     return {
       verifyTimeout: timeout,
       stages,
+      ...(repoMap ? { repoMap } : {}),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, stages: {} };

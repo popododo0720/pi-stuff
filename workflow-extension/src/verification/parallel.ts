@@ -171,12 +171,16 @@ export async function runParallelVerification(
         '## Classify each finding:\n' +
         '🔴 CRITICAL: Wrong approach, missing critical step, architectural flaw, security vulnerability, breaking change not addressed\n' +
         '🟡 WARNING: Missing consumer update, missing input validation, missing edge case handling, ambiguous step\n' +
-        '🔵 INFO: Style suggestion, minor optimization, nitpick\n\n' +
+        '🔵 INFO: Style suggestion, minor optimization, nitpick, implementation-level detail\n\n' +
         '## Verdict rules:\n' +
-        '- Any 🔴 CRITICAL or 🟡 WARNING → VERDICT: FAIL\n' +
+        '- Any 🔴 CRITICAL → VERDICT: FAIL\n' +
+        '- 🟡 WARNING only (no 🔴) → VERDICT: PASS (note warnings — implementer will address them)\n' +
         '- Only 🔵 INFO → VERDICT: PASS\n' +
         '- No findings → VERDICT: PASS\n\n' +
-        'Do NOT fail for: missing exact line numbers, missing exact code snippets, or minor wording.\n' +
+        'Plans describe WHAT to do, not every implementation detail. ' +
+        'Do NOT fail for: missing exact line numbers, missing exact code snippets, minor wording, ' +
+        'implementation-level details (exact validation logic, exact error messages, exact variable names), ' +
+        'or things a competent developer would naturally handle during implementation.\n' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.'
       : 'You are a strict code verifier AND adversarial code breaker.\n\n' +
         `Task: ${description}\n\n` +
@@ -239,8 +243,102 @@ export async function runParallelVerification(
 }
 
 /**
+ * Summarize verification output by extracting severity markers + context.
+ * Compresses raw output while preserving actionable information.
+ * Falls back to raw prefix when no severity markers (🔴/🟡/🔵) are found.
+ * VERDICT line is always guaranteed at the end of the summary.
+ */
+function summarizeVerificationOutput(output: string): string {
+  const MAX_LENGTH = 1500;
+  const lines = output.split('\n');
+  const findings: string[] = [];
+  let verdictLine = '';
+  let infoCount = 0;
+  let hasSeverityMarkers = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // VERDICT line — capture separately to guarantee placement at end
+    if (/VERDICT:/i.test(line)) {
+      verdictLine = line;
+      continue;
+    }
+
+    // 🔴 CRITICAL — include line + next 2 context lines
+    if (line.includes('🔴')) {
+      hasSeverityMarkers = true;
+      findings.push(line);
+      for (let j = 1; j <= 2 && i + j < lines.length; j++) {
+        const ctx = lines[i + j];
+        if (
+          ctx.includes('🔴') ||
+          ctx.includes('🟡') ||
+          ctx.includes('🔵') ||
+          /VERDICT:/i.test(ctx)
+        )
+          break;
+        findings.push(ctx);
+      }
+      continue;
+    }
+
+    // 🟡 WARNING — include line + next 2 context lines
+    if (line.includes('🟡')) {
+      hasSeverityMarkers = true;
+      findings.push(line);
+      for (let j = 1; j <= 2 && i + j < lines.length; j++) {
+        const ctx = lines[i + j];
+        if (
+          ctx.includes('🔴') ||
+          ctx.includes('🟡') ||
+          ctx.includes('🔵') ||
+          /VERDICT:/i.test(ctx)
+        )
+          break;
+        findings.push(ctx);
+      }
+      continue;
+    }
+
+    // 🔵 INFO — count only
+    if (line.includes('🔵')) {
+      hasSeverityMarkers = true;
+      infoCount++;
+    }
+  }
+
+  // Add INFO summary
+  if (infoCount > 0) {
+    findings.push(`🔵 INFO: ${infoCount} suggestion(s) (see full results)`);
+  }
+
+  // Fallback: no severity markers found (verifier used plain text)
+  if (!hasSeverityMarkers) {
+    const fallback = output.slice(0, 500);
+    const suffix = verdictLine ? `\n${verdictLine}` : '';
+    return `${fallback}\n...(no severity markers found, see full results)${suffix}`;
+  }
+
+  // Build summary: findings first, then VERDICT guaranteed at the end
+  let summary = findings.join('\n');
+  if (verdictLine) {
+    const verdictSpace = verdictLine.length + 1;
+    const truncateLimit = MAX_LENGTH - verdictSpace - 40;
+    if (summary.length + verdictSpace > MAX_LENGTH) {
+      summary = `${summary.slice(0, Math.max(0, truncateLimit))}\n...(truncated, see full results)`;
+    }
+    summary = `${summary}\n${verdictLine}`;
+  } else if (summary.length > MAX_LENGTH) {
+    summary = `${summary.slice(0, MAX_LENGTH)}\n...(truncated, see full results)`;
+  }
+
+  return summary;
+}
+
+/**
  * Format verification results into a human-readable summary.
- * Truncates long outputs to 300 characters for inline display.
+ * Uses marker-based extraction (🔴/🟡/🔵) for structured output.
  */
 export function formatVerificationSummary(results: VerificationResult): string {
   return results.results
@@ -250,8 +348,7 @@ export function formatVerificationSummary(results: VerificationResult): string {
         r.criticalCount + r.warningCount + r.infoCount > 0
           ? ` (🔴${r.criticalCount} 🟡${r.warningCount} 🔵${r.infoCount})`
           : '';
-      const output =
-        r.output.length > 300 ? `${r.output.slice(0, 300)}...` : r.output;
+      const output = summarizeVerificationOutput(r.output);
       return `[${r.model}] ${status}${severity}\n${output}`;
     })
     .join('\n\n');

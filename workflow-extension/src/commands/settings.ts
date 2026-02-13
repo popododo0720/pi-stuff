@@ -51,8 +51,17 @@ async function pickModels(
   const available = ctx.modelRegistry
     .getAvailable()
     .map((m) => `${m.provider}/${m.id}`);
+  const canClear = current.length > 0;
   if (available.length === 0) {
-    ctx.ui.notify('No models available. Configure API keys.', 'error');
+    if (!canClear) {
+      ctx.ui.notify('No models available. Configure API keys.', 'error');
+      return undefined;
+    }
+    const pick = await ctx.ui.select(
+      'No models available. Clear current verify models?',
+      ['(clear)'],
+    );
+    if (pick === '(clear)') return [];
     return undefined;
   }
 
@@ -61,13 +70,10 @@ async function pickModels(
 
   while (picking) {
     const remaining = available.filter((m) => !selected.includes(m));
+    const doneLabel = `✅ Done (selected: ${selected.join(', ')})`;
     const options = [
-      ...(selected.length > 0
-        ? [`✅ Done (selected: ${selected.join(', ')})`]
-        : []),
-      ...(current.length > 0 && selected.length === 0
-        ? ['🗑️ Clear all']
-        : []),
+      ...(canClear ? ['(clear)'] : []),
+      ...(selected.length > 0 ? [doneLabel] : []),
       ...remaining,
     ];
 
@@ -78,10 +84,10 @@ async function pickModels(
 
     if (pick === undefined) {
       picking = false;
-    } else if (pick.startsWith('✅ Done') && selected.length > 0) {
-      picking = false;
-    } else if (pick === '🗑️ Clear all') {
+    } else if (pick === '(clear)') {
       return [];
+    } else if (pick === doneLabel) {
+      picking = false;
     } else {
       selected.push(pick);
       ctx.ui.notify(`+ ${pick}`, 'info');
@@ -118,33 +124,38 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
       const settings = loadSettings(ctx.cwd);
       const s = settings.stages;
 
-      const menuItems = [
-        `📝 Plan (model: ${s.plan?.model || 'default'}, thinking: ${s.plan?.thinking || 'default'})`,
-        `🔍 Verify (models: ${s.verify?.models?.join(', ') || 'none'}, thinking: ${s.verify?.thinking || 'default'})`,
-        `🔨 Implement (model: ${s.implement?.model || 'default'}, thinking: ${s.implement?.thinking || 'default'})`,
-        `🧠 Compound (model: ${s.compound?.model || 'default'}, thinking: ${s.compound?.thinking || 'default'})`,
-        `⏱️ Verify timeout (${settings.verifyTimeout / 1000}s)`,
-        '📋 View all settings',
-      ];
+      let configuring = true;
+      while (configuring) {
+        const rm = settings.repoMap;
+        const menuItems = [
+          `📝 Plan (model: ${s.plan?.model || '(current)'}, thinking: ${s.plan?.thinking || '(current)'})`,
+          `🔍 Verify (models: ${s.verify?.models?.join(', ') || 'none'}, thinking: ${s.verify?.thinking || '(current)'})`,
+          `🔨 Implement (model: ${s.implement?.model || '(current)'}, thinking: ${s.implement?.thinking || '(current)'})`,
+          `🧠 Compound (model: ${s.compound?.model || '(current)'}, thinking: ${s.compound?.thinking || '(current)'})`,
+          `⏱️ Verify timeout (${settings.verifyTimeout / 1000}s)`,
+          `🗺️ Repo Map (${rm?.enabled === false ? 'off' : 'on'}, budget: ${rm?.tokenBudget ?? 2048})`,
+          '✅ Done',
+        ];
 
-      const choice = await ctx.ui.select('Workflow Settings', menuItems);
-      if (choice === undefined) return;
+        const choice = await ctx.ui.select('Workflow Settings', menuItems);
+        if (choice === undefined || choice === '✅ Done') {
+          configuring = false;
+          break;
+        }
 
-      switch (choice) {
-        // ── Plan stage config ────────────────────────────────────
-        case menuItems[0]: {
+        if (choice.startsWith('📝')) {
+          // ── Plan stage config ────────────────────────────────────
           const sub = await ctx.ui.select('Plan settings', [
             `Model (${s.plan?.model || 'default'})`,
             `Thinking (${s.plan?.thinking || 'default'})`,
           ]);
-          if (!sub) break;
-          if (sub.startsWith('Model')) {
+          if (sub?.startsWith('Model')) {
             const model = await pickModel(ctx, s.plan?.model);
             if (model !== undefined) {
               s.plan = { ...s.plan, model: model || undefined };
               if (!s.plan.model && !s.plan.thinking) delete s.plan;
             }
-          } else {
+          } else if (sub?.startsWith('Thinking')) {
             const thinking = await pickThinking(ctx, s.plan?.thinking);
             if (thinking === '') {
               if (s.plan) {
@@ -155,51 +166,50 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
               s.plan = { ...s.plan, thinking };
             }
           }
-          break;
-        }
-
-        // ── Verify stage config ──────────────────────────────────
-        case menuItems[1]: {
+        } else if (choice.startsWith('🔍')) {
+          // ── Verify stage config ──────────────────────────────────
           const sub = await ctx.ui.select('Verify settings', [
             `Models (${s.verify?.models?.join(', ') || 'none'})`,
             `Thinking (${s.verify?.thinking || 'default'})`,
           ]);
-          if (!sub) break;
-          if (sub.startsWith('Models')) {
+          if (sub?.startsWith('Models')) {
             const models = await pickModels(ctx, s.verify?.models ?? []);
-            if (models) {
-              s.verify = { ...s.verify, models };
-            }
-          } else {
-            const thinking = await pickThinking(ctx, s.verify?.thinking);
-            if (thinking === '') {
-              if (s.verify) {
-                delete s.verify.thinking;
-                if (!s.verify.models?.length) delete s.verify;
+            if (models !== undefined) {
+              if (models.length === 0) {
+                delete s.verify;
+              } else {
+                s.verify = { ...s.verify, models };
               }
-            } else if (thinking) {
-              s.verify = { ...s.verify, models: s.verify?.models ?? [] };
-              s.verify.thinking = thinking;
+            }
+          } else if (sub?.startsWith('Thinking')) {
+            if (!s.verify?.models?.length) {
+              ctx.ui.notify(
+                'Set verify models first before configuring thinking level.',
+                'warn',
+              );
+            } else {
+              const thinking = await pickThinking(ctx, s.verify?.thinking);
+              if (thinking === '') {
+                delete s.verify.thinking;
+              } else if (thinking) {
+                s.verify.thinking = thinking;
+              }
             }
           }
-          break;
-        }
-
-        // ── Implement stage config ───────────────────────────────
-        case menuItems[2]: {
+        } else if (choice.startsWith('🔨')) {
+          // ── Implement stage config ───────────────────────────────
           const sub = await ctx.ui.select('Implement settings', [
             `Model (${s.implement?.model || 'default'})`,
             `Thinking (${s.implement?.thinking || 'default'})`,
           ]);
-          if (!sub) break;
-          if (sub.startsWith('Model')) {
+          if (sub?.startsWith('Model')) {
             const model = await pickModel(ctx, s.implement?.model);
             if (model !== undefined) {
               s.implement = { ...s.implement, model: model || undefined };
               if (!s.implement.model && !s.implement.thinking)
                 delete s.implement;
             }
-          } else {
+          } else if (sub?.startsWith('Thinking')) {
             const thinking = await pickThinking(ctx, s.implement?.thinking);
             if (thinking === '') {
               if (s.implement) {
@@ -210,23 +220,19 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
               s.implement = { ...s.implement, thinking };
             }
           }
-          break;
-        }
-
-        // ── Compound stage config ────────────────────────────────
-        case menuItems[3]: {
+        } else if (choice.startsWith('🧠')) {
+          // ── Compound stage config ────────────────────────────────
           const sub = await ctx.ui.select('Compound settings', [
             `Model (${s.compound?.model || 'default'})`,
             `Thinking (${s.compound?.thinking || 'default'})`,
           ]);
-          if (!sub) break;
-          if (sub.startsWith('Model')) {
+          if (sub?.startsWith('Model')) {
             const model = await pickModel(ctx, s.compound?.model);
             if (model !== undefined) {
               s.compound = { ...s.compound, model: model || undefined };
               if (!s.compound.model && !s.compound.thinking) delete s.compound;
             }
-          } else {
+          } else if (sub?.startsWith('Thinking')) {
             const thinking = await pickThinking(ctx, s.compound?.thinking);
             if (thinking === '') {
               if (s.compound) {
@@ -237,11 +243,8 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
               s.compound = { ...s.compound, thinking };
             }
           }
-          break;
-        }
-
-        // ── Timeout ──────────────────────────────────────────────
-        case menuItems[4]: {
+        } else if (choice.startsWith('⏱️')) {
+          // ── Timeout ──────────────────────────────────────────────
           const input = await ctx.ui.input(
             'Verify timeout (seconds):',
             String(settings.verifyTimeout / 1000),
@@ -252,32 +255,40 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
               settings.verifyTimeout = seconds * 1000;
             } else {
               ctx.ui.notify('Enter a number between 1 and 600.', 'error');
-              return;
             }
           }
-          break;
-        }
-
-        // ── View all settings ────────────────────────────────────
-        case menuItems[5]: {
-          const fmt = (label: string, model?: string, thinking?: string) =>
-            `${label}: model=${model || 'default'}, thinking=${thinking || 'default'}`;
-          const info =
-            '🔧 Workflow Settings\n\n' +
-            fmt('📝 Plan', s.plan?.model, s.plan?.thinking) +
-            '\n' +
-            `🔍 Verify: models=${s.verify?.models?.join(', ') || 'none'}, thinking=${s.verify?.thinking || 'default'}` +
-            '\n' +
-            fmt('🔨 Implement', s.implement?.model, s.implement?.thinking) +
-            '\n' +
-            fmt('🧠 Compound', s.compound?.model, s.compound?.thinking) +
-            '\n' +
-            `⏱️ Timeout: ${settings.verifyTimeout / 1000}s`;
-          ctx.ui.notify(info, 'info');
-          return;
+        } else if (choice.startsWith('🗺️')) {
+          // ── Repo Map config ──────────────────────────────────────
+          const sub = await ctx.ui.select('Repo Map settings', [
+            `Enabled (${settings.repoMap?.enabled === false ? 'off' : 'on'})`,
+            `Token Budget (${settings.repoMap?.tokenBudget ?? 2048})`,
+          ]);
+          if (sub?.startsWith('Enabled')) {
+            const pick = await ctx.ui.select('Repo Map enabled', ['on', 'off']);
+            if (pick) {
+              settings.repoMap = {
+                ...settings.repoMap,
+                enabled: pick === 'on',
+              };
+            }
+          } else if (sub?.startsWith('Token')) {
+            const input = await ctx.ui.input(
+              'Token budget (256–8192):',
+              String(settings.repoMap?.tokenBudget ?? 2048),
+            );
+            if (input) {
+              const val = Number.parseInt(input, 10);
+              if (!Number.isNaN(val) && val >= 256 && val <= 8192) {
+                settings.repoMap = { ...settings.repoMap, tokenBudget: val };
+              } else {
+                ctx.ui.notify('Enter a number between 256 and 8192.', 'error');
+              }
+            }
+          }
         }
       }
 
+      // Save after all changes
       settings.stages = s;
       const err = saveSettings(ctx.cwd, settings);
       if (err) ctx.ui.notify(`Save failed: ${err}`, 'error');

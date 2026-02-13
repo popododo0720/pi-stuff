@@ -17,7 +17,12 @@ import { loadSessionFromDisk, saveSessionToDisk } from './storage/session';
 import { loadSettings } from './storage/settings';
 import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
-import { applyStageConfig, registerTransitionTool } from './tools/transition';
+import {
+  applyStageConfig,
+  clearPendingCompact,
+  getPendingCompact,
+  registerTransitionTool,
+} from './tools/transition';
 import type { StageConfig, WorkflowSession, WorkflowSettings } from './types';
 import { cleanupVerificationResults } from './verification';
 
@@ -82,7 +87,8 @@ export default function (pi: ExtensionAPI) {
 
   // ── Tool call guard ─────────────────────────────────────────────
   pi.on('tool_call', async (event) => {
-    if (!session || session.state === 'done') return undefined;
+    if (!session || session.state === 'done' || session.completed)
+      return undefined;
     const result = shouldBlockToolCall(
       session.state,
       event.toolName,
@@ -98,9 +104,23 @@ export default function (pi: ExtensionAPI) {
   pi.on('before_agent_start', async (event, ctx) => {
     currentCwd = ctx.cwd;
 
+    // Execute deferred compaction from previous tool call (await completion)
+    const pendingCompact = getPendingCompact();
+    if (pendingCompact) {
+      clearPendingCompact();
+      await new Promise<void>((resolve) => {
+        ctx.compact({
+          customInstructions: pendingCompact,
+          onComplete: () => resolve(),
+          onError: () => resolve(), // don't block on failure
+        });
+      });
+    }
+
     // Auto-recover: any done workflow resumes as plan on next user message
-    if (session && session.state === 'done') {
+    if (session && (session.state === 'done' || session.completed)) {
       session.state = 'plan';
+      session.completed = false;
       session.retryCount = 0;
       session.verifyPlanResult = '';
       cleanupVerificationResults(ctx.cwd);
@@ -113,7 +133,11 @@ export default function (pi: ExtensionAPI) {
       await applyStageConfig(pi, ctx, getStageConfig(session, settings));
     }
 
-    const result = buildSystemPromptInjection(session, ctx, event.systemPrompt);
+    const result = await buildSystemPromptInjection(
+      session,
+      ctx,
+      event.systemPrompt,
+    );
     if (result) {
       return { systemPrompt: result };
     }

@@ -21,6 +21,10 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "dependencies": {
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.6"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
     "typescript": "^5.9.3"

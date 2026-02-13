@@ -70,9 +70,15 @@ export interface StageConfigs {
   compound?: StageConfig;
 }
 
+export interface RepoMapConfig {
+  enabled?: boolean;
+  tokenBudget?: number;
+}
+
 export interface WorkflowSettings {
   verifyTimeout: number;
   stages: StageConfigs;
+  repoMap?: RepoMapConfig;
 }
 
 export interface ModelVerificationResult {

@@ -14,6 +14,22 @@
     "indentWidth": 2,
     "lineWidth": 80
   },
+  "overrides": [
+    {
+      "includes": ["src/repomap/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          },
+          "style": {
+            "noNonNullAssertion": "off",
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    }
+  ],
   "linter": {
     "enabled": true,
     "rules": {
