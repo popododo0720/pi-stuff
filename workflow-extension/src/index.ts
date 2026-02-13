@@ -8,15 +8,12 @@ import type {
 import { registerCancelCommand } from './commands/cancel';
 import { registerSettingsCommand } from './commands/settings';
 import { registerWorkflowCommand } from './commands/workflow';
-import {
-  MAX_MEMORY_ENTRIES,
-  MAX_MEMORY_VALUE_LENGTH,
-  TOOL_NAME,
-} from './constants';
+import { MAX_MEMORY_ENTRIES, MAX_MEMORY_VALUE_LENGTH } from './constants';
 import { shouldBlockToolCall } from './context/guard';
 import { buildSystemPromptInjection } from './context/prompt';
 import { updateStatusBar } from './context/status';
 import { loadMemory, saveMemory } from './storage/memory';
+import { loadSessionFromDisk, saveSessionToDisk } from './storage/session';
 import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
 import { registerTransitionTool } from './tools/transition';
@@ -26,9 +23,11 @@ import { cleanupVerificationResults } from './verification';
 export default function (pi: ExtensionAPI) {
   // ── Session state (owned here, accessed via closures) ──────────
   let session: WorkflowSession | null = null;
+  let currentCwd = '';
   const getSession = () => session;
   const setSession = (s: WorkflowSession | null) => {
     session = s;
+    if (currentCwd) saveSessionToDisk(currentCwd, s);
   };
 
   // ── Register commands ──────────────────────────────────────────
@@ -41,28 +40,10 @@ export default function (pi: ExtensionAPI) {
   registerProjectMemoryTool(pi);
   registerModuleConventionsTool(pi);
 
-  // ── Session reconstruction from history ────────────────────────
+  // ── Session reconstruction from disk ─────────────────────────
   const reconstruct = (ctx: ExtensionContext) => {
-    session = null;
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type !== 'message') continue;
-      const msg = entry.message;
-      if (msg.role !== 'toolResult' || msg.toolName !== TOOL_NAME) continue;
-      const details = msg.details as Record<string, unknown> | undefined;
-      if (details?.cancelled) {
-        session = null;
-      } else if (details) {
-        session = details as WorkflowSession;
-      }
-    }
-    // Backward compat: default fields for legacy sessions
-    if (session && session.completed === undefined) {
-      session.completed = session.state === 'done';
-    }
-    if (session) {
-      session.todos ??= [];
-      session.activeTodoIndex ??= -1;
-    }
+    currentCwd = ctx.cwd;
+    session = loadSessionFromDisk(ctx.cwd);
     updateStatusBar(ctx, session);
   };
 
@@ -91,12 +72,14 @@ export default function (pi: ExtensionAPI) {
 
   // ── System prompt injection ────────────────────────────────────
   pi.on('before_agent_start', async (event, ctx) => {
+    currentCwd = ctx.cwd;
     // Auto-recover: any done workflow resumes as plan on next user message
     if (session && session.state === 'done') {
       session.state = 'plan';
       session.retryCount = 0;
       session.verifyPlanResult = '';
       cleanupVerificationResults(ctx.cwd);
+      saveSessionToDisk(ctx.cwd, session);
       updateStatusBar(ctx, session);
     }
     const result = buildSystemPromptInjection(session, ctx, event.systemPrompt);

@@ -112,6 +112,10 @@ flowchart TD
     CYCLE2 -->|compoundDone| ADV2["Auto-advance to TODO #3"]
     ADV2 --> CYCLE3["TODO #3: Plan → Verify → Impl → Verify → Compound"]
     CYCLE3 -->|compoundDone, no more| DONE["🎉 All TODOs complete"]
+    
+    CYCLE1 -.->|compact| CLN1["🧹 Context compaction"]
+    CYCLE2 -.->|compact| CLN2["🧹 Context compaction"]
+    CYCLE3 -.->|compact| CLN3["🧹 Context compaction"]
 ```
 
 ## Tool Call Guard

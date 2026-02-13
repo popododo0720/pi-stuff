@@ -76,7 +76,7 @@ For large tasks, the AI breaks them into TODO items during planning:
 workflow_transition(action: "setTodos", content: '["Setup types", "Add API", "Write tests"]')
 ```
 
-Each TODO gets its own Plan → Verify → Implement → Verify → Compound cycle. Auto-advances to the next item after each compound.
+Each TODO gets its own Plan → Verify → Implement → Verify → Compound cycle. Auto-advances to the next item after each compound. Context is automatically compacted between cycles to keep the context window clean.
 
 ### Verification Configuration
 
@@ -138,6 +138,7 @@ workflow-extension/
 │   │   ├── memory.ts            # Project memory CRUD
 │   │   ├── modules.ts           # Module conventions
 │   │   ├── plan.ts              # Plan document saving
+│   │   ├── session.ts           # Session disk persistence
 │   │   ├── settings.ts          # Settings load/save
 │   │   ├── solution.ts          # Solution saving/search
 │   │   └── checks.ts            # Custom checks loader

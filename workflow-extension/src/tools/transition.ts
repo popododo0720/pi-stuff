@@ -280,6 +280,14 @@ export function registerTransitionTool(
                 })
                 .join('\n');
 
+              // Compact context after completing a TODO cycle
+              ctx.compact({
+                customInstructions:
+                  `Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
+                  `Preserve: task description, TODO list progress, key decisions. ` +
+                  `Discard: implementation details, verification output, code diffs.`,
+              });
+
               return textResult(
                 `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
                   `${todoList}\n\n` +
@@ -297,6 +305,14 @@ export function registerTransitionTool(
           session.completed = true;
           setSession(session);
           updateStatusBar(ctx, session);
+
+          // Compact context after workflow completion
+          ctx.compact({
+            customInstructions:
+              `Workflow "${session.description}" completed. ` +
+              `Preserve: task description, final outcome, key decisions. ` +
+              `Discard: implementation details, verification output, code diffs.`,
+          });
 
           const todoSummary =
             session.todos.length > 0
