@@ -126,8 +126,13 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
     '- Track progress: maintain a mental checklist of plan items. Do NOT stop until all items are complete.\n' +
     '- If stuck on one item, note the blocker and continue with the next.\n' +
-    '- **MANDATORY**: After all code changes, update README.md and ARCHITECTURE.md to reflect current state. This is NOT optional.\n' +
-    '- When all implementation is complete, call workflow_transition(action: "implDone").\n\n' +
+    '- **MANDATORY before calling implDone**:\n' +
+    '  1. Run linter/formatter and fix all errors (e.g. `npm run lint`).\n' +
+    '  2. Run type checker if available (e.g. `npx tsc --noEmit`) and fix all errors.\n' +
+    '  3. Run tests if available (e.g. `npm test`) and fix all failures.\n' +
+    '  4. Update README.md and ARCHITECTURE.md to reflect current state.\n' +
+    '  Do NOT call implDone until ALL of the above pass.\n' +
+    '- When all checks pass, call workflow_transition(action: "implDone").\n\n' +
     '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:

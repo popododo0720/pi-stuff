@@ -169,7 +169,7 @@ export function registerTransitionTool(
             content: [
               {
                 type: 'text' as const,
-                text: `✅ Verifying implementation... (${settings.verifyModels.join(' + ') || 'no models'})`,
+                text: `🔍 Verifying implementation... (${settings.verifyModels.join(' + ') || 'no models'})`,
               },
             ],
           });
