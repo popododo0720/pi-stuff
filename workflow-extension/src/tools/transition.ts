@@ -555,9 +555,11 @@ export function registerTransitionTool(
                 settings.git?.useWorkflowWorktree !== false ||
                 settings.git?.useWorkflowBranch !== false;
 
-              if (!session.gitBranch && !branchStrategyEnabled) {
+              if (!session.gitBranch) {
                 finalGitNotes.push(
-                  '⚠️ Final push skipped: branch/worktree strategy is disabled, so no explicit push target is available.',
+                  branchStrategyEnabled
+                    ? '⚠️ Final push skipped: workflow branch target is missing (e.g., startup prep path).'
+                    : '⚠️ Final push skipped: branch/worktree strategy is disabled, so no explicit push target is available.',
                 );
               } else {
                 const finalPush = await autoPush(pi, session.gitBranch, gitCwd);

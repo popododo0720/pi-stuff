@@ -104,17 +104,29 @@ Git automation is configurable in `/workflow-settings` (`🧬 Git Automation`):
 - `pushOnComplete`
 - `requireCleanStart`
 - `useWorkflowBranch`
+- `useWorkflowWorktree`
 
 Behavior:
+- Workflow execution/edit/verification stays on current `cwd`.
+- Workflow branch is prepared on current `cwd`; worktree is created/reused as **auxiliary workspace metadata**.
 - On TODO boundary (`compoundDone` → next TODO), auto-commit and optional push can run.
 - On final completion (all TODOs done), final commit/push is executed.
 - If final commit/push fails, workflow completion is blocked and state remains `compound`.
+- If push target branch is unavailable (strategy disabled or startup-prep path left branch unset), final push is skipped safely with a warning (no bare `git push`).
 
 ### Context Injection Policy
 
 - **Always-on minimal set**: default conventions, user conventions, matched rules/module rules.
 - **On-demand retrieval**: solutions + patterns/gotchas/decisions use keyword-overlap top-k selection.
 - **Aggressive reset marker**: deferred compaction uses `[WF_RESET]` marker for reset-oriented checkpointing.
+
+### Verification Decision Policy (Severity-first)
+
+- PASS/FAIL uses structured severity parsing first (not emoji-count based).
+- Plan verify: 🔴 any => FAIL, 🟡-only => PASS, VERDICT missing => FAIL.
+- Impl verify: 🔴 or 🟡 any => FAIL, VERDICT missing => FAIL.
+- VERDICT is auxiliary; conflict with severity resolves to FAIL.
+- Parser applies negation handling (`no critical`, `0 warning`, `none`) + dedupe + fallback keyword scan.
 
 ### Per-Stage Model & Thinking Configuration
 

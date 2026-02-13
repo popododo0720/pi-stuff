@@ -22,15 +22,247 @@ import type {
 /** Max retry attempts when a model returns empty output */
 const MAX_EMPTY_RETRIES = 2;
 
-/** Count severity markers in verification output */
-function parseSeverity(output: string): {
+/** Normalize finding text for dedupe/non-overlap. */
+function normalizeFinding(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[`*_~>#[\]()]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isNegatedSeverity(
+  text: string,
+  severity: 'critical' | 'warning' | 'info',
+): boolean {
+  const lower = text.toLowerCase();
+  const checks: Record<'critical' | 'warning' | 'info', RegExp[]> = {
+    critical: [
+      /^\s*(?:none|n\/a|na|null|0)\s*[.!?]*\s*$/,
+      /\bno\s+critical\b/,
+      /\b0\s+critical\b/,
+      /\bcritical\s*:\s*none\b/,
+      /\bno\s+critical\s+findings?\b/,
+    ],
+    warning: [
+      /^\s*(?:none|n\/a|na|null|0)\s*[.!?]*\s*$/,
+      /\bno\s+warning\b/,
+      /\bno\s+warnings\b/,
+      /\b0\s+warning\b/,
+      /\b0\s+warnings\b/,
+      /\bwarnings?\s*:\s*none\b/,
+      /\bno\s+warning\s+findings?\b/,
+    ],
+    info: [
+      /^\s*(?:none|n\/a|na|null|0)\s*[.!?]*\s*$/,
+      /\bno\s+info\b/,
+      /\b0\s+info\b/,
+      /\binfo\s*:\s*none\b/,
+      /\bno\s+info\s+findings?\b/,
+    ],
+  };
+  return checks[severity].some((re) => re.test(lower));
+}
+
+function parseVerdict(output: string): 'PASS' | 'FAIL' | undefined {
+  const lines = output.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    const match = line.match(/^VERDICT\s*:\s*(PASS|FAIL)\s*$/i);
+    if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
+  return undefined;
+}
+
+function parseFindingsFromOutput(output: string): {
   critical: number;
   warning: number;
   info: number;
 } {
-  const critical = (output.match(/🔴/g) || []).length;
-  const warning = (output.match(/🟡/g) || []).length;
-  const info = (output.match(/🔵/g) || []).length;
+  type Severity = 'critical' | 'warning' | 'info';
+
+  const seen = new Set<string>();
+  let critical = 0;
+  let warning = 0;
+  let info = 0;
+
+  const addFinding = (severity: Severity, text: string) => {
+    if (!text) return;
+    if (isNegatedSeverity(text, severity)) return;
+    const normalized = normalizeFinding(text);
+    if (!normalized || normalized.length < 3) return;
+    const dedupeKey = `${severity}:${normalized}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    if (severity === 'critical') critical++;
+    if (severity === 'warning') warning++;
+    if (severity === 'info') info++;
+  };
+
+  const SEV_ORDER: Record<Severity, number> = {
+    info: 0,
+    warning: 1,
+    critical: 2,
+  };
+  function emojiSev(text: string): Severity | null {
+    const m = text.match(/🔴|🟡|🔵/);
+    if (!m) return null;
+    return m[0] === '🔴' ? 'critical' : m[0] === '🟡' ? 'warning' : 'info';
+  }
+  function upgrade(text: string, base: Severity): Severity {
+    const e = emojiSev(text);
+    return e && SEV_ORDER[e] > SEV_ORDER[base] ? e : base;
+  }
+
+  const lines = output.split('\n');
+  let section: Severity | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (/^\s*VERDICT\s*:/i.test(line)) continue;
+
+    const lineNoMd = line
+      .replace(/^#+\s*/, '')
+      .replace(/[**`]/g, '')
+      .trim();
+
+    if (/^(?:🔴\s*)?critical(?:\s+findings?)?\s*:?$/i.test(lineNoMd)) {
+      section = 'critical';
+      continue;
+    }
+    if (/^(?:🟡\s*)?warnings?(?:\s+findings?)?\s*:?$/i.test(lineNoMd)) {
+      section = 'warning';
+      continue;
+    }
+    if (/^(?:🔵\s*)?info(?:\s+findings?)?\s*:?$/i.test(lineNoMd)) {
+      section = 'info';
+      continue;
+    }
+    // Catch-all: mismatched emoji+keyword heading (e.g., "🔴 Warning:")
+    // End-anchored ($) prevents matching finding lines with detail text
+    const catchAll = lineNoMd.match(
+      /^(🔴|🟡|🔵)\s*(?:critical|warnings?|info)(?:\s+findings?)?\s*:?\s*$/i,
+    );
+    if (catchAll) {
+      const kwSev: Severity = /critical/i.test(lineNoMd)
+        ? 'critical'
+        : /warnings?/i.test(lineNoMd)
+          ? 'warning'
+          : 'info';
+      section = upgrade(lineNoMd, kwSev);
+      continue;
+    }
+    if (
+      /^#+\s+/.test(line) &&
+      !/(?<!\w-)\bcritical\b(?!-\w)|(?<!\w-)\bwarnings?\b(?!-\w)|(?<!\w-)\binfo\b(?!-\w)/i.test(
+        line,
+      )
+    ) {
+      section = null;
+    }
+
+    const bullet = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.+)$/);
+    if (section && bullet) {
+      addFinding(upgrade(line, section), bullet[1]);
+      continue;
+    }
+
+    const inlineSegments = [
+      ...line.matchAll(/(?<!\w-)\b(critical|warnings?|info)\b(?!-\w)\s*:\s*/gi),
+    ];
+    if (inlineSegments.length > 0) {
+      for (let i = 0; i < inlineSegments.length; i++) {
+        const severity = inlineSegments[i][1]
+          .toLowerCase()
+          .replace(/s$/, '') as Severity;
+        const matchIdx = inlineSegments[i].index ?? 0;
+        // Narrow-window emoji detection: 8 chars before keyword + 4 chars at detail start
+        const start = matchIdx + inlineSegments[i][0].length;
+        const end =
+          i + 1 < inlineSegments.length
+            ? (inlineSegments[i + 1].index ?? line.length)
+            : line.length;
+        const detail = line
+          .slice(start, end)
+          .replace(/^[\s,;.-]+|[\s,;.-]+$/g, '');
+        const prefixWindow = line.slice(Math.max(0, matchIdx - 8), matchIdx);
+        const detailWindow = detail.slice(0, 4);
+        const nearby = emojiSev(prefixWindow) ?? emojiSev(detailWindow);
+        const effectiveSev =
+          nearby && SEV_ORDER[nearby] > SEV_ORDER[severity] ? nearby : severity;
+        if (detail) addFinding(effectiveSev, detail);
+      }
+      continue;
+    }
+
+    const tagged = line.match(
+      /^\s*(?:[-*•]|\d+[.)])?\s*(?:🔴|🟡|🔵)?\s*(?<!\w-)\b(critical|warnings?|info)\b(?!-\w)\s*(.+)$/i,
+    );
+    const taggedDetail = tagged?.[2]?.trim();
+    if (tagged && taggedDetail) {
+      const taggedSeverity = tagged[1]
+        .toLowerCase()
+        .replace(/s$/, '') as Severity;
+      addFinding(upgrade(line, taggedSeverity), tagged[2]);
+    }
+    // Emoji-only fallback: lines with emoji but no keyword (e.g., "🔴 missing null check")
+    // Uses lineNoMd to strip markdown (** / `) so "**🔴** text" is detected
+    if (!(tagged && taggedDetail)) {
+      const emojiOnly = lineNoMd.match(
+        /^\s*(?:[-*•]|\d+[.)])?\s*(🔴|🟡|🔵)\s+(.+)$/,
+      );
+      if (emojiOnly) {
+        addFinding(
+          emojiOnly[1] === '🔴'
+            ? 'critical'
+            : emojiOnly[1] === '🟡'
+              ? 'warning'
+              : 'info',
+          emojiOnly[2],
+        );
+      }
+    }
+  }
+
+  // Fallback: structure parse found nothing, but text still has severity words.
+  if (critical + warning + info === 0) {
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || /^\s*VERDICT\s*:/i.test(line)) continue;
+
+      const lower = line.toLowerCase();
+      const lineNoMd = line
+        .replace(/^#+\s*/, '')
+        .replace(/[**`]/g, '')
+        .trim();
+
+      if (
+        /^(?:🔴\s*)?critical(?:\s+findings?)?\s*:?$/i.test(lineNoMd) ||
+        /^(?:🟡\s*)?warnings?(?:\s+findings?)?\s*:?$/i.test(lineNoMd) ||
+        /^(?:🔵\s*)?info(?:\s+findings?)?\s*:?$/i.test(lineNoMd)
+      ) {
+        continue;
+      }
+
+      const hasCritical = /(?<!\w-)\bcritical\b(?!-\w)/.test(lower);
+      const hasWarning = /(?<!\w-)\bwarnings?\b(?!-\w)/.test(lower);
+      const hasInfo = /(?<!\w-)\binfo\b(?!-\w)/.test(lower);
+      if (!hasCritical && !hasWarning && !hasInfo) continue;
+
+      if (hasCritical && !isNegatedSeverity(line, 'critical')) {
+        addFinding(upgrade(line, 'critical'), line);
+      }
+      if (hasWarning && !isNegatedSeverity(line, 'warning')) {
+        addFinding(upgrade(line, 'warning'), line);
+      }
+      if (hasInfo && !isNegatedSeverity(line, 'info')) {
+        addFinding(upgrade(line, 'info'), line);
+      }
+    }
+  }
+
   return { critical, warning, info };
 }
 
@@ -39,6 +271,7 @@ function parseSeverity(output: string): {
  * Retries up to MAX_EMPTY_RETRIES times if stdout is empty.
  */
 async function runSingleModel(
+  type: 'plan' | 'impl',
   model: string,
   prompt: string,
   pi: ExtensionAPI,
@@ -70,11 +303,17 @@ async function runSingleModel(
         continue;
       }
 
-      const upperOutput = output.toUpperCase();
-      const passed =
-        upperOutput.includes('VERDICT: PASS') ||
-        upperOutput.includes('VERDICT:PASS');
-      const severity = parseSeverity(output);
+      const severity = parseFindingsFromOutput(output);
+      const verdict = parseVerdict(output);
+
+      const hasCritical = severity.critical > 0;
+      const hasWarning = severity.warning > 0;
+
+      // Severity-first: severity findings are authoritative
+      let passed = !hasCritical && !(type === 'impl' && hasWarning);
+      // VERDICT as auxiliary safety net (only consulted when severity is clean)
+      if (passed && verdict !== 'PASS') passed = false;
+
       return {
         model,
         passed,
@@ -227,6 +466,7 @@ export async function runParallelVerification(
   // Launch all models in parallel
   const promises = verifyModels.map((model) =>
     runSingleModel(
+      type,
       model,
       prompt,
       pi,

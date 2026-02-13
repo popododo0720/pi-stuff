@@ -124,8 +124,7 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
           : false,
       gitBranch: typeof raw.gitBranch === 'string' ? raw.gitBranch : undefined,
       gitWorktreePath:
-        typeof raw.gitWorktreePath === 'string' &&
-        existsSync(raw.gitWorktreePath)
+        typeof raw.gitWorktreePath === 'string'
           ? raw.gitWorktreePath
           : undefined,
     };

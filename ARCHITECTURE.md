@@ -79,11 +79,16 @@ flowchart TD
 ```mermaid
 flowchart TD
     WF["/workflow command"] --> CHECK["git/worktree check"]
-    CHECK -->|dirty + requireCleanStart| PREP["Inject mandatory TODO #1 (prep)"]
-    CHECK -->|clean| BRANCH["ensure workflow branch wf/<id>-<slug>"]
-    CHECK -->|check failed| PREP
-    PREP --> PLAN["plan stage"]
-    BRANCH --> PLAN
+    CHECK -->|check failed| PREP["Inject mandatory TODO #1 (prep)"]
+    CHECK -->|dirty + requireCleanStart| PREP
+    CHECK -->|clean or dirty-allowed| PREP_OK["startup prep not required"]
+
+    PREP_OK --> BRANCH["ensure workflow branch on current cwd"]
+    BRANCH --> WT{"useWorkflowWorktree?"}
+    WT -->|yes| AUX["create/reuse auxiliary worktree\n(git worktree list --porcelain)"]
+    WT -->|no| PLAN["plan stage"]
+    AUX --> PLAN
+    PREP --> PLAN
 ```
 
 ## Git Automation Flow
@@ -91,12 +96,25 @@ flowchart TD
 ```mermaid
 flowchart TD
     COMP["compoundDone"] --> MORE{"more TODOs?"}
-    MORE -->|yes| TODOGIT["auto commit (per TODO)<br/>optional auto push"]
-    TODOGIT --> NEXT["next TODO implement"]
-    MORE -->|no| FINALGIT["final auto commit + auto push"]
-    FINALGIT --> PUSHOK{"push ok?"}
-    PUSHOK -->|yes| DONE["done"]
-    PUSHOK -->|no| BLOCK["stay in compound (completion blocked)"]
+    MORE -->|yes| TODOGIT["auto commit (per TODO)"]
+    TODOGIT --> TODOPUSH{"pushPerTodo?"}
+    TODOPUSH -->|no| NEXT["next TODO implement"]
+    TODOPUSH -->|yes| TODOTARGET{"branch target exists?"}
+    TODOTARGET -->|no| TODOWARN["skip push + warning"]
+    TODOTARGET -->|yes| TODOPUSH["push origin/<branch>"]
+    TODOWARN --> NEXT
+    TODOPUSH --> NEXT
+
+    MORE -->|no| FINALCOMMIT["final auto commit"]
+    FINALCOMMIT --> FINALPUSH{"pushOnComplete?"}
+    FINALPUSH -->|no| DONE["done"]
+    FINALPUSH -->|yes| FINALTARGET{"branch target exists?"}
+    FINALTARGET -->|no| FINALSKIP["safe skip + warning"]
+    FINALTARGET -->|yes| FINALRUN["push origin/<branch>"]
+    FINALRUN --> PUSHOK{"push ok?"}
+    PUSHOK -->|yes| DONE
+    PUSHOK -->|no| BLOCK
+    FINALSKIP --> DONE
 ```
 
 ## Reset Marker Compaction Hook
@@ -119,6 +137,15 @@ sequenceDiagram
 - Always-on memory is minimal (core conventions + matched rules).
 - solutions/patterns/gotchas/decisions are injected by **top-k** relevance search.
 - reset marker compaction reduces stale history carry-over.
+
+## Verification Decision Engine (Severity-first)
+
+- `runSingleModel()` computes PASS/FAIL from parsed severity first.
+- Structured parsing reads CRITICAL/WARNING/INFO sections + inline findings.
+- Negation handling (`no critical`, `0 warning`, `none`) prevents false positives.
+- Dedupe/non-overlap prevents double counting between section and inline parsing.
+- Fallback keyword scan runs when structured extraction finds zero findings.
+- VERDICT is auxiliary; conflicts with severity resolve to FAIL.
 
 ## Verification Prompt Structure
 
