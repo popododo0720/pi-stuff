@@ -130,6 +130,11 @@ function parseFindingsFromOutput(output: string): {
     if (!line) continue;
     if (/^\s*VERDICT\s*:/i.test(line)) continue;
 
+    // Strip backtick-quoted content to prevent false-positive keyword matches
+    // inside code examples (e.g., `warning`, `critical`). Preserve positions
+    // so emoji detection on the original `line` stays accurate.
+    const dequoted = line.replace(/`[^`]*`/g, (m) => ' '.repeat(m.length));
+
     const lineNoMd = line
       .replace(/^#+\s*/, '')
       .replace(/[**`]/g, '')
@@ -177,7 +182,9 @@ function parseFindingsFromOutput(output: string): {
     }
 
     const inlineSegments = [
-      ...line.matchAll(/(?<!\w-)\b(critical|warnings?|info)\b(?!-\w)\s*:\s*/gi),
+      ...dequoted.matchAll(
+        /(?<!\w-)\b(critical|warnings?|info)\b(?!-\w)\s*:\s*/gi,
+      ),
     ];
     if (inlineSegments.length > 0) {
       for (let i = 0; i < inlineSegments.length; i++) {
@@ -189,9 +196,9 @@ function parseFindingsFromOutput(output: string): {
         const start = matchIdx + inlineSegments[i][0].length;
         const end =
           i + 1 < inlineSegments.length
-            ? (inlineSegments[i + 1].index ?? line.length)
-            : line.length;
-        const detail = line
+            ? (inlineSegments[i + 1].index ?? dequoted.length)
+            : dequoted.length;
+        const detail = dequoted
           .slice(start, end)
           .replace(/^[\s,;.-]+|[\s,;.-]+$/g, '');
         const prefixWindow = line.slice(Math.max(0, matchIdx - 8), matchIdx);
@@ -204,7 +211,7 @@ function parseFindingsFromOutput(output: string): {
       continue;
     }
 
-    const tagged = line.match(
+    const tagged = dequoted.match(
       /^\s*(?:[-*•]|\d+[.)])?\s*(?:🔴|🟡|🔵)?\s*(?<!\w-)\b(critical|warnings?|info)\b(?!-\w)\s*(.+)$/i,
     );
     const taggedDetail = tagged?.[2]?.trim();
@@ -246,7 +253,9 @@ function parseFindingsFromOutput(output: string): {
       const line = rawLine.trim();
       if (!line || /^\s*VERDICT\s*:/i.test(line)) continue;
 
-      const lower = line.toLowerCase();
+      // Strip backtick-quoted content for keyword detection (same as main loop)
+      const dequoted2 = line.replace(/`[^`]*`/g, (m) => ' '.repeat(m.length));
+      const lower = dequoted2.toLowerCase();
       const lineNoMd = line
         .replace(/^#+\s*/, '')
         .replace(/[**`]/g, '')
