@@ -2,8 +2,6 @@
 
 A workflow automation extension for the [Pi coding agent](https://github.com/mariozechner/pi-coding-agent) that enforces a structured development cycle: **Plan → Verify → Implement → Verify → Compound → Done**.
 
-Inspired by [Compound Engineering](https://every.to/), [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff), and [oh-my-opencode](https://github.com/nicepkg/oh-my-opencode).
-
 ## Features
 
 - **Enforced workflow stages** — AI cannot skip steps; write/edit tools blocked during non-implementation stages
@@ -199,6 +197,3 @@ npm run lint:fix
 npm run format
 ```
 
-## License
-
-ISC
