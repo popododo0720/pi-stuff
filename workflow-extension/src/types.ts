@@ -53,10 +53,26 @@ export interface ProjectMemory {
   decisions: string[];
 }
 
+export interface StageConfig {
+  model?: string;
+  thinking?: ThinkingLevel;
+}
+
+export interface VerifyStageConfig {
+  models: string[];
+  thinking?: ThinkingLevel;
+}
+
+export interface StageConfigs {
+  plan?: StageConfig;
+  verify?: VerifyStageConfig;
+  implement?: StageConfig;
+  compound?: StageConfig;
+}
+
 export interface WorkflowSettings {
-  verifyModels: string[];
   verifyTimeout: number;
-  thinkingLevel: ThinkingLevel;
+  stages: StageConfigs;
 }
 
 export interface ModelVerificationResult {

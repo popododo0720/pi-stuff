@@ -9,6 +9,8 @@ import type {
 import { generateWorkflowId } from '../constants';
 import { updateStatusBar } from '../context/status';
 import { loadMemory, resolveMemoryPath, saveMemory } from '../storage/memory';
+import { loadSettings } from '../storage/settings';
+import { applyStageConfig } from '../tools/transition';
 import type { WorkflowSession } from '../types';
 import { cleanupVerificationResults } from '../verification';
 
@@ -87,6 +89,10 @@ export function registerWorkflowCommand(
       }
 
       updateStatusBar(ctx, session);
+
+      // Apply plan stage config
+      const settings = loadSettings(ctx.cwd);
+      await applyStageConfig(pi, ctx, settings.stages.plan);
 
       // Show different message for new vs returning users
       ctx.ui.notify(

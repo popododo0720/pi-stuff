@@ -9,12 +9,40 @@ import { updateStatusBar } from '../context/status';
 import { savePlanDocument } from '../storage/plan';
 import { loadSettings } from '../storage/settings';
 import { saveSolution } from '../storage/solution';
-import type { WorkflowSession } from '../types';
+import type { StageConfig, WorkflowSession } from '../types';
 import {
   formatVerificationSummary,
   runParallelVerification,
   saveVerificationResult,
 } from '../verification';
+
+/**
+ * Apply stage-specific model and thinking level.
+ * Skips if config is undefined or fields are not set.
+ */
+export async function applyStageConfig(
+  pi: ExtensionAPI,
+  ctx: {
+    modelRegistry?: { getAvailable(): Array<{ provider: string; id: string }> };
+  },
+  config?: StageConfig,
+): Promise<void> {
+  if (!config) return;
+  if (config.model) {
+    const [provider, ...idParts] = config.model.split('/');
+    const modelId = idParts.join('/');
+    const available = ctx.modelRegistry?.getAvailable() ?? [];
+    const found = available.find(
+      (m) => m.provider === provider && m.id === modelId,
+    );
+    if (found) {
+      await pi.setModel(found);
+    }
+  }
+  if (config.thinking) {
+    pi.setThinkingLevel(config.thinking);
+  }
+}
 
 // Helper to build a text content response
 function textResult(text: string, session?: WorkflowSession) {
@@ -94,7 +122,7 @@ export function registerTransitionTool(
               {
                 type: 'text' as const,
                 text:
-                  `🔍 Verifying plan... (${settings.verifyModels.join(' + ') || 'no models'})` +
+                  `🔍 Verifying plan... (${(settings.stages.verify?.models ?? []).join(' + ') || 'no models'})` +
                   (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
               },
             ],
@@ -117,6 +145,7 @@ export function registerTransitionTool(
               session.verifyPlanResult = 'Auto-verification passed';
               setSession(session);
               updateStatusBar(ctx, session);
+              await applyStageConfig(pi, ctx, settings.stages.implement);
               return textResult(
                 '✅ Plan verified! Moving to implementation.' +
                   (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
@@ -169,7 +198,7 @@ export function registerTransitionTool(
             content: [
               {
                 type: 'text' as const,
-                text: `🔍 Verifying implementation... (${settings.verifyModels.join(' + ') || 'no models'})`,
+                text: `🔍 Verifying implementation... (${(settings.stages.verify?.models ?? []).join(' + ') || 'no models'})`,
               },
             ],
           });
@@ -192,6 +221,7 @@ export function registerTransitionTool(
               session.retryCount = 0;
               setSession(session);
               updateStatusBar(ctx, session);
+              await applyStageConfig(pi, ctx, settings.stages.compound);
               return textResult(
                 '✅ Implementation verified! Moving to compound stage.\n\n' +
                   'Analyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").\n\n' +
@@ -265,6 +295,7 @@ export function registerTransitionTool(
               session.retryCount = 0;
               setSession(session);
               updateStatusBar(ctx, session);
+              await applyStageConfig(pi, ctx, settings.stages.plan);
 
               const doneCount = session.todos.filter(
                 (t) => t.status === 'done',
@@ -371,6 +402,7 @@ export function registerTransitionTool(
         case 'replan':
           session.state = 'plan';
           session.verifyPlanResult = '';
+          await applyStageConfig(pi, ctx, settings.stages.plan);
           break;
       }
 

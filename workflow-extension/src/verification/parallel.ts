@@ -133,7 +133,11 @@ export async function runParallelVerification(
   signal?: AbortSignal,
   implNotes?: string,
 ): Promise<VerificationResult> {
-  if (settings.verifyModels.length === 0) {
+  const verifyConfig = settings.stages.verify;
+  const verifyModels = verifyConfig?.models ?? [];
+  const verifyThinking = verifyConfig?.thinking ?? 'high';
+
+  if (verifyModels.length === 0) {
     throw new Error(
       'No verification models configured. Use /workflow-settings to add models.',
     );
@@ -198,13 +202,13 @@ export async function runParallelVerification(
   }
 
   // Launch all models in parallel
-  const promises = settings.verifyModels.map((model) =>
+  const promises = verifyModels.map((model) =>
     runSingleModel(
       model,
       prompt,
       pi,
       settings.verifyTimeout,
-      settings.thinkingLevel,
+      verifyThinking,
       signal,
     ),
   );

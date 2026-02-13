@@ -4,7 +4,46 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
-import type { WorkflowSettings } from '../types';
+import type {
+  StageConfig,
+  StageConfigs,
+  VerifyStageConfig,
+  WorkflowSettings,
+} from '../types';
+
+const VALID_THINKING = new Set([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
+
+function validateStageConfig(raw: unknown): StageConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const config: StageConfig = {};
+  if (typeof r.model === 'string' && r.model) config.model = r.model;
+  if (typeof r.thinking === 'string' && VALID_THINKING.has(r.thinking))
+    config.thinking = r.thinking as StageConfig['thinking'];
+  return config.model || config.thinking ? config : undefined;
+}
+
+function validateVerifyConfig(raw: unknown): VerifyStageConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const models = Array.isArray(r.models)
+    ? r.models.filter(
+        (m): m is string => typeof m === 'string' && m.trim() !== '',
+      )
+    : [];
+  if (models.length === 0) return undefined;
+  const config: VerifyStageConfig = { models };
+  if (typeof r.thinking === 'string' && VALID_THINKING.has(r.thinking))
+    config.thinking = r.thinking as VerifyStageConfig['thinking'];
+  return config;
+}
 
 /**
  * Resolve the absolute path to the settings file.
@@ -21,13 +60,39 @@ export function loadSettings(cwd: string): WorkflowSettings {
   try {
     const path = resolveSettingsPath(cwd);
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
+
+    // Backward compat: migrate old verifyModels/thinkingLevel to stages
+    const rawStages = raw.stages ?? {};
+    if (raw.verifyModels && !rawStages.verify) {
+      rawStages.verify = {
+        models: raw.verifyModels,
+        thinking: raw.thinkingLevel ?? 'high',
+      };
+    }
+
+    const stages: StageConfigs = {};
+    const plan = validateStageConfig(rawStages.plan);
+    if (plan) stages.plan = plan;
+    const verify = validateVerifyConfig(rawStages.verify);
+    if (verify) stages.verify = verify;
+    const implement = validateStageConfig(rawStages.implement);
+    if (implement) stages.implement = implement;
+    const compound = validateStageConfig(rawStages.compound);
+    if (compound) stages.compound = compound;
+
+    const timeout =
+      typeof raw.verifyTimeout === 'number' &&
+      raw.verifyTimeout > 0 &&
+      raw.verifyTimeout <= 600_000
+        ? raw.verifyTimeout
+        : DEFAULT_SETTINGS.verifyTimeout;
+
     return {
-      verifyModels: raw.verifyModels ?? DEFAULT_SETTINGS.verifyModels,
-      verifyTimeout: raw.verifyTimeout ?? DEFAULT_SETTINGS.verifyTimeout,
-      thinkingLevel: raw.thinkingLevel ?? DEFAULT_SETTINGS.thinkingLevel,
+      verifyTimeout: timeout,
+      stages,
     };
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, stages: {} };
   }
 }
 

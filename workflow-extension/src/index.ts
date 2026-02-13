@@ -14,11 +14,31 @@ import { buildSystemPromptInjection } from './context/prompt';
 import { updateStatusBar } from './context/status';
 import { loadMemory, saveMemory } from './storage/memory';
 import { loadSessionFromDisk, saveSessionToDisk } from './storage/session';
+import { loadSettings } from './storage/settings';
 import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
-import { registerTransitionTool } from './tools/transition';
-import type { WorkflowSession } from './types';
+import { applyStageConfig, registerTransitionTool } from './tools/transition';
+import type { StageConfig, WorkflowSession, WorkflowSettings } from './types';
 import { cleanupVerificationResults } from './verification';
+
+function getStageConfig(
+  session: WorkflowSession,
+  settings: WorkflowSettings,
+): StageConfig | undefined {
+  switch (session.state) {
+    case 'plan':
+      return settings.stages.plan;
+    case 'verifyPlan':
+    case 'verifyImpl':
+      return undefined;
+    case 'implement':
+      return settings.stages.implement;
+    case 'compound':
+      return settings.stages.compound;
+    default:
+      return undefined;
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   // ── Session state (owned here, accessed via closures) ──────────
@@ -41,10 +61,14 @@ export default function (pi: ExtensionAPI) {
   registerModuleConventionsTool(pi);
 
   // ── Session reconstruction from disk ─────────────────────────
-  const reconstruct = (ctx: ExtensionContext) => {
+  const reconstruct = async (ctx: ExtensionContext) => {
     currentCwd = ctx.cwd;
     session = loadSessionFromDisk(ctx.cwd);
     updateStatusBar(ctx, session);
+
+    if (!session) return;
+    const settings = loadSettings(ctx.cwd);
+    await applyStageConfig(pi, ctx, getStageConfig(session, settings));
   };
 
   for (const event of [
@@ -53,7 +77,7 @@ export default function (pi: ExtensionAPI) {
     'session_fork',
     'session_tree',
   ] as const) {
-    pi.on(event, async (_e, ctx) => reconstruct(ctx));
+    pi.on(event, async (_e, ctx) => await reconstruct(ctx));
   }
 
   // ── Tool call guard ─────────────────────────────────────────────
@@ -73,6 +97,7 @@ export default function (pi: ExtensionAPI) {
   // ── System prompt injection ────────────────────────────────────
   pi.on('before_agent_start', async (event, ctx) => {
     currentCwd = ctx.cwd;
+
     // Auto-recover: any done workflow resumes as plan on next user message
     if (session && session.state === 'done') {
       session.state = 'plan';
@@ -82,6 +107,12 @@ export default function (pi: ExtensionAPI) {
       saveSessionToDisk(ctx.cwd, session);
       updateStatusBar(ctx, session);
     }
+
+    if (session) {
+      const settings = loadSettings(ctx.cwd);
+      await applyStageConfig(pi, ctx, getStageConfig(session, settings));
+    }
+
     const result = buildSystemPromptInjection(session, ctx, event.systemPrompt);
     if (result) {
       return { systemPrompt: result };

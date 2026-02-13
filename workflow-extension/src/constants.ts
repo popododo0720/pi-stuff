@@ -32,9 +32,8 @@ export const DEFAULT_CONVENTIONS: string[] = [
 ];
 
 export const DEFAULT_SETTINGS: WorkflowSettings = {
-  verifyModels: [],
   verifyTimeout: 120_000,
-  thinkingLevel: 'high',
+  stages: {},
 };
 
 // State maps
