@@ -163,7 +163,10 @@ export async function runParallelVerification(
         '1. Are all planned items implemented?\n' +
         '2. Does the code work correctly? (Run tests if possible)\n' +
         '3. Is anything missing?\n' +
-        '4. Code quality — SOLID, YAGNI/KISS, separation of concerns, security, extensibility\n\n' +
+        '4. Code quality — SOLID, YAGNI/KISS, separation of concerns, security, extensibility\n' +
+        'IMPORTANT: Verify by reading the actual source files, NOT by git diff. ' +
+        'Git diff may include unrelated changes from previous work. ' +
+        'Only evaluate files and changes mentioned in the plan.\n\n' +
         '## Phase 2: Adversarial Testing\n' +
         'Try to break this code. Find concrete inputs, edge cases, or scenarios that would:\n' +
         '- Crash the program or cause unhandled exceptions\n' +
