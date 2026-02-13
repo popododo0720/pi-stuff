@@ -1,6 +1,7 @@
 // tools/transition.ts — workflow_transition tool
 // Manages state machine: plan → verify → implement → verify → compound → done.
 
+import { resolve } from 'node:path';
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
@@ -71,9 +72,11 @@ function textResult(text: string, session?: WorkflowSession) {
 async function runGit(
   pi: ExtensionAPI,
   args: string[],
+  cwd?: string,
 ): Promise<{ ok: boolean; stdout: string; stderr: string; code: number }> {
   try {
-    const result = await pi.exec('git', args);
+    const gitArgs = cwd ? ['-C', cwd, ...args] : args;
+    const result = await pi.exec('git', gitArgs);
     return {
       ok: result.code === 0,
       stdout: result.stdout.trim(),
@@ -90,8 +93,15 @@ async function runGit(
   }
 }
 
-async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
-  const status = await runGit(pi, ['status', '--porcelain']);
+function getGitCwd(cwd: string): string {
+  return resolve(cwd);
+}
+
+async function hasUncommittedChanges(
+  pi: ExtensionAPI,
+  gitCwd: string,
+): Promise<boolean> {
+  const status = await runGit(pi, ['status', '--porcelain'], gitCwd);
   if (!status.ok) return false;
   return status.stdout.length > 0;
 }
@@ -100,8 +110,9 @@ async function autoCommitTodo(
   pi: ExtensionAPI,
   session: WorkflowSession,
   todoIndex: number,
+  gitCwd: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const add = await runGit(pi, ['add', '-A']);
+  const add = await runGit(pi, ['add', '-A'], gitCwd);
   if (!add.ok) {
     return {
       ok: false,
@@ -109,7 +120,7 @@ async function autoCommitTodo(
     };
   }
 
-  const hasChanges = await hasUncommittedChanges(pi);
+  const hasChanges = await hasUncommittedChanges(pi, gitCwd);
   if (!hasChanges) {
     return { ok: true, message: 'No changes to commit for this TODO.' };
   }
@@ -117,7 +128,7 @@ async function autoCommitTodo(
   const todo = session.todos[todoIndex];
   const title = todo?.title ?? 'unknown';
   const msg = `chore(workflow): TODO #${todoIndex + 1} - ${title}`;
-  const commit = await runGit(pi, ['commit', '-m', msg]);
+  const commit = await runGit(pi, ['commit', '-m', msg], gitCwd);
   if (!commit.ok) {
     return {
       ok: false,
@@ -125,7 +136,7 @@ async function autoCommitTodo(
     };
   }
 
-  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD']);
+  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD'], gitCwd);
   return {
     ok: true,
     message: `Committed TODO #${todoIndex + 1}${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
@@ -136,8 +147,9 @@ async function autoCommitFinal(
   pi: ExtensionAPI,
   session: WorkflowSession,
   completedTodoIndex: number | null,
+  gitCwd: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const add = await runGit(pi, ['add', '-A']);
+  const add = await runGit(pi, ['add', '-A'], gitCwd);
   if (!add.ok) {
     return {
       ok: false,
@@ -145,7 +157,7 @@ async function autoCommitFinal(
     };
   }
 
-  const hasChanges = await hasUncommittedChanges(pi);
+  const hasChanges = await hasUncommittedChanges(pi, gitCwd);
   if (!hasChanges) {
     return { ok: true, message: 'No changes to commit for finalization.' };
   }
@@ -159,7 +171,7 @@ async function autoCommitFinal(
       ? `chore(workflow): final - TODO #${completedTodoIndex + 1} - ${finalTitle}`
       : `chore(workflow): final - ${session.description}`;
 
-  const commit = await runGit(pi, ['commit', '-m', msg]);
+  const commit = await runGit(pi, ['commit', '-m', msg], gitCwd);
   if (!commit.ok) {
     return {
       ok: false,
@@ -167,7 +179,7 @@ async function autoCommitFinal(
     };
   }
 
-  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD']);
+  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD'], gitCwd);
   return {
     ok: true,
     message: `Final commit created${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
@@ -176,11 +188,18 @@ async function autoCommitFinal(
 
 async function autoPush(
   pi: ExtensionAPI,
-  branch?: string,
+  branch: string | undefined,
+  gitCwd: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const push = branch
-    ? await runGit(pi, ['push', 'origin', branch])
-    : await runGit(pi, ['push']);
+  if (!branch) {
+    return {
+      ok: false,
+      message:
+        'Push target branch is not set. Push skipped to avoid unintended current-branch push.',
+    };
+  }
+
+  const push = await runGit(pi, ['push', 'origin', branch], gitCwd);
   if (!push.ok) {
     return {
       ok: false,
@@ -189,7 +208,7 @@ async function autoPush(
   }
   return {
     ok: true,
-    message: branch ? `Pushed origin/${branch}` : 'Pushed current branch',
+    message: `Pushed origin/${branch}`,
   };
 }
 
@@ -427,6 +446,7 @@ export function registerTransitionTool(
           }
 
           let completedTodoIndex: number | null = null;
+          const gitCwd = getGitCwd(ctx.cwd);
 
           // Check if there are more TODOs to process
           if (
@@ -449,13 +469,14 @@ export function registerTransitionTool(
                   pi,
                   session,
                   completedTodoIndex,
+                  gitCwd,
                 );
                 gitNotes.push(
                   commit.ok ? `📦 ${commit.message}` : `⚠️ ${commit.message}`,
                 );
 
                 if (commit.ok && settings.git?.pushPerTodo) {
-                  const push = await autoPush(pi, session.gitBranch);
+                  const push = await autoPush(pi, session.gitBranch, gitCwd);
                   gitNotes.push(
                     push.ok ? `🚀 ${push.message}` : `⚠️ ${push.message}`,
                   );
@@ -516,6 +537,7 @@ export function registerTransitionTool(
               pi,
               session,
               completedTodoIndex,
+              gitCwd,
             );
             if (!finalCommit.ok) {
               session.state = 'compound';
@@ -529,17 +551,27 @@ export function registerTransitionTool(
             finalGitNotes.push(`📦 ${finalCommit.message}`);
 
             if (settings.git?.pushOnComplete !== false) {
-              const finalPush = await autoPush(pi, session.gitBranch);
-              if (!finalPush.ok) {
-                session.state = 'compound';
-                setSession(session);
-                updateStatusBar(ctx, session);
-                return textResult(
-                  `❌ Final push failed. Workflow cannot complete yet.\n\n${finalPush.message}`,
-                  session,
+              const branchStrategyEnabled =
+                settings.git?.useWorkflowWorktree !== false ||
+                settings.git?.useWorkflowBranch !== false;
+
+              if (!session.gitBranch && !branchStrategyEnabled) {
+                finalGitNotes.push(
+                  '⚠️ Final push skipped: branch/worktree strategy is disabled, so no explicit push target is available.',
                 );
+              } else {
+                const finalPush = await autoPush(pi, session.gitBranch, gitCwd);
+                if (!finalPush.ok) {
+                  session.state = 'compound';
+                  setSession(session);
+                  updateStatusBar(ctx, session);
+                  return textResult(
+                    `❌ Final push failed. Workflow cannot complete yet.\n\n${finalPush.message}`,
+                    session,
+                  );
+                }
+                finalGitNotes.push(`🚀 ${finalPush.message}`);
               }
-              finalGitNotes.push(`🚀 ${finalPush.message}`);
             }
           }
 
@@ -559,6 +591,7 @@ export function registerTransitionTool(
           session.startupPrepNote = '';
           session.startupPrepLocked = false;
           session.gitBranch = undefined;
+          session.gitWorktreePath = undefined;
 
           // Remove currentWork entry for this workflow
           try {

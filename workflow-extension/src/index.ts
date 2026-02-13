@@ -153,6 +153,7 @@ export default function (pi: ExtensionAPI) {
       session.startupPrepNote = '';
       session.startupPrepLocked = false;
       session.gitBranch = undefined;
+      session.gitWorktreePath = undefined;
       cleanupVerificationResults(ctx.cwd);
       saveSessionToDisk(ctx.cwd, session);
       updateStatusBar(ctx, session);

@@ -2,6 +2,7 @@
 // Starts a new workflow session or replaces an existing one.
 
 import { existsSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -18,6 +19,12 @@ interface GitStateCheckResult {
   dirty: boolean;
   checkFailed: boolean;
   error?: string;
+}
+
+interface GitWorktreeEntry {
+  path: string;
+  branch?: string;
+  detached: boolean;
 }
 
 async function safeGitStatus(pi: ExtensionAPI): Promise<GitStateCheckResult> {
@@ -83,12 +90,125 @@ async function safeGitWorktreeList(
   }
 }
 
+async function safeGitRoot(
+  pi: ExtensionAPI,
+): Promise<{ root?: string; error?: string }> {
+  try {
+    const result = await pi.exec('git', ['rev-parse', '--show-toplevel']);
+    if (result.code !== 0) {
+      return {
+        error:
+          result.stderr.trim() ||
+          `failed to detect git root (exit ${result.code})`,
+      };
+    }
+    const root = result.stdout.trim();
+    if (!root) return { error: 'git root is empty' };
+    return { root: resolve(root) };
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : 'failed to detect git root',
+    };
+  }
+}
+
+async function safeGitCurrentBranch(
+  pi: ExtensionAPI,
+): Promise<{ branch?: string; detached: boolean; error?: string }> {
+  try {
+    const result = await pi.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+    if (result.code !== 0) {
+      return {
+        detached: false,
+        error:
+          result.stderr.trim() ||
+          `failed to detect current branch (exit ${result.code})`,
+      };
+    }
+    const branch = result.stdout.trim();
+    if (!branch || branch === 'HEAD') {
+      return { detached: true };
+    }
+    return { branch, detached: false };
+  } catch (e) {
+    return {
+      detached: false,
+      error: e instanceof Error ? e.message : 'failed to detect current branch',
+    };
+  }
+}
+
+function normalizeBranchName(ref?: string): string | undefined {
+  if (!ref) return undefined;
+  return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref;
+}
+
+async function safeGitWorktreePorcelain(
+  pi: ExtensionAPI,
+): Promise<{ entries: GitWorktreeEntry[]; error?: string }> {
+  try {
+    const result = await pi.exec('git', ['worktree', 'list', '--porcelain']);
+    if (result.code !== 0) {
+      return {
+        entries: [],
+        error:
+          result.stderr.trim() ||
+          `git worktree list --porcelain failed (exit ${result.code})`,
+      };
+    }
+
+    const entries: GitWorktreeEntry[] = [];
+    let current: GitWorktreeEntry | null = null;
+    const lines = result.stdout.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (current) entries.push(current);
+        current = null;
+        continue;
+      }
+
+      if (trimmed.startsWith('worktree ')) {
+        if (current) entries.push(current);
+        current = {
+          path: resolve(trimmed.slice('worktree '.length).trim()),
+          detached: false,
+        };
+        continue;
+      }
+
+      if (!current) continue;
+      if (trimmed.startsWith('branch ')) {
+        current.branch = trimmed.slice('branch '.length).trim();
+      } else if (trimmed === 'detached') {
+        current.detached = true;
+      }
+    }
+
+    if (current) entries.push(current);
+    return { entries };
+  } catch (e) {
+    return {
+      entries: [],
+      error:
+        e instanceof Error ? e.message : 'git worktree list --porcelain failed',
+    };
+  }
+}
+
 function toBranchSlug(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 24);
+}
+
+function getWorkflowWorktreePath(root: string, branch: string): string {
+  const repoName = toBranchSlug(basename(root) || 'repo') || 'repo';
+  const branchSlug = toBranchSlug(normalizeBranchName(branch) || 'branch');
+  return resolve(root, '..', '.pi-worktrees', repoName, branchSlug || 'branch');
 }
 
 async function ensureWorkflowBranch(
@@ -132,6 +252,70 @@ async function ensureWorkflowBranch(
     };
   }
   return { branch, message: `Created workflow branch: ${branch}` };
+}
+
+async function ensureWorkflowWorkspace(
+  pi: ExtensionAPI,
+  gitRoot: string,
+  branch: string,
+): Promise<{ path?: string; message?: string; error?: string }> {
+  const normalizedBranch = normalizeBranchName(branch);
+  if (!normalizedBranch) {
+    return { error: 'No branch available for workflow worktree.' };
+  }
+
+  const porcelain = await safeGitWorktreePorcelain(pi);
+  if (porcelain.error) return { error: porcelain.error };
+
+  const targetPath = resolve(
+    getWorkflowWorktreePath(gitRoot, normalizedBranch),
+  );
+
+  const existingByBranch = porcelain.entries.find(
+    (e) => normalizeBranchName(e.branch) === normalizedBranch,
+  );
+  if (existingByBranch) {
+    return {
+      path: existingByBranch.path,
+      message: `Reusing existing worktree for ${normalizedBranch}: ${existingByBranch.path}`,
+    };
+  }
+
+  const existingByPath = porcelain.entries.find(
+    (e) => resolve(e.path) === targetPath,
+  );
+  if (existingByPath) {
+    return {
+      error:
+        `Target worktree path already in use by ${normalizeBranchName(existingByPath.branch) || 'detached HEAD'}: ` +
+        targetPath,
+    };
+  }
+
+  if (existsSync(targetPath)) {
+    return {
+      error: `Target worktree path exists but is not a registered worktree: ${targetPath}`,
+    };
+  }
+
+  const add = await pi.exec('git', [
+    'worktree',
+    'add',
+    targetPath,
+    normalizedBranch,
+  ]);
+  if (add.code !== 0) {
+    return {
+      error:
+        add.stderr.trim() ||
+        `git worktree add failed for ${normalizedBranch} (exit ${add.code})`,
+    };
+  }
+
+  return {
+    path: targetPath,
+    message: `Created workflow worktree (${normalizedBranch}): ${targetPath}`,
+  };
 }
 
 /**
@@ -201,8 +385,24 @@ export function registerWorkflowCommand(
         startupPrepLocked: false,
       };
 
+      const gitEnabled = settings.git?.enabled !== false;
       const requireCleanStart = settings.git?.requireCleanStart !== false;
-      const useWorkflowBranch = settings.git?.useWorkflowBranch !== false;
+      const useWorkflowWorktree =
+        gitEnabled && settings.git?.useWorkflowWorktree !== false;
+      const useWorkflowBranch =
+        gitEnabled &&
+        (useWorkflowWorktree || settings.git?.useWorkflowBranch !== false);
+
+      if (
+        gitEnabled &&
+        settings.git?.pushOnComplete !== false &&
+        !useWorkflowBranch
+      ) {
+        ctx.ui.notify(
+          '⚠️ Push on complete is enabled, but workflow branch/worktree strategy is disabled. Final push will be skipped safely.',
+          'warning',
+        );
+      }
 
       if (gitStatus.checkFailed) {
         // Unknown git state -> force prep TODO #1
@@ -276,16 +476,32 @@ export function registerWorkflowCommand(
 
       if (worktreeInfo.count && worktreeInfo.count > 1) {
         ctx.ui.notify(
-          `ℹ️ Multiple worktrees detected (${worktreeInfo.count}). Worktree switching is manual; this workflow only manages branch strategy.`,
+          `ℹ️ Multiple worktrees detected (${worktreeInfo.count}).`,
+          'info',
+        );
+      }
+
+      if (!gitEnabled) {
+        ctx.ui.notify(
+          'ℹ️ Git automation is disabled. Skipping workflow branch/worktree preparation.',
           'info',
         );
       }
 
       if (
         !session.startupPrepRequired &&
-        useWorkflowBranch &&
-        !gitStatus.checkFailed
+        !gitStatus.checkFailed &&
+        gitEnabled &&
+        useWorkflowBranch
       ) {
+        const sourceBranch = await safeGitCurrentBranch(pi);
+        if (sourceBranch.error) {
+          ctx.ui.notify(
+            `⚠️ Could not detect current branch for worktree reuse. (${sourceBranch.error})`,
+            'warning',
+          );
+        }
+
         const branchResult = await ensureWorkflowBranch(
           pi,
           session.id,
@@ -300,6 +516,44 @@ export function registerWorkflowCommand(
         if (branchResult.error) {
           ctx.ui.notify(
             `⚠️ Workflow branch setup failed. Continuing on current branch. (${branchResult.error})`,
+            'warning',
+          );
+        }
+
+        if (
+          useWorkflowWorktree &&
+          sourceBranch.branch &&
+          !sourceBranch.detached &&
+          !branchResult.error
+        ) {
+          const gitRoot = await safeGitRoot(pi);
+          if (gitRoot.root) {
+            const workspaceResult = await ensureWorkflowWorkspace(
+              pi,
+              gitRoot.root,
+              sourceBranch.branch,
+            );
+            if (workspaceResult.path) {
+              session.gitWorktreePath = workspaceResult.path;
+            }
+            if (workspaceResult.message) {
+              ctx.ui.notify(workspaceResult.message, 'info');
+            }
+            if (workspaceResult.error) {
+              ctx.ui.notify(
+                `⚠️ Workflow worktree setup failed. (${workspaceResult.error})`,
+                'warning',
+              );
+            }
+          } else {
+            ctx.ui.notify(
+              `⚠️ Could not resolve git root for worktree setup. (${gitRoot.error || 'unknown error'})`,
+              'warning',
+            );
+          }
+        } else if (useWorkflowWorktree && sourceBranch.detached) {
+          ctx.ui.notify(
+            '⚠️ Current branch is detached HEAD. Skipping workflow worktree setup.',
             'warning',
           );
         }

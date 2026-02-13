@@ -33,6 +33,7 @@ export interface WorkflowSession {
   startupPrepNote?: string;
   startupPrepLocked?: boolean;
   gitBranch?: string;
+  gitWorktreePath?: string;
 }
 
 export interface ConditionalRule {
@@ -86,6 +87,7 @@ export interface GitAutomationConfig {
   pushOnComplete?: boolean;
   requireCleanStart?: boolean;
   useWorkflowBranch?: boolean;
+  useWorkflowWorktree?: boolean;
 }
 
 export interface WorkflowSettings {

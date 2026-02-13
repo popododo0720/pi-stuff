@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS: WorkflowSettings = {
     pushOnComplete: true,
     requireCleanStart: true,
     useWorkflowBranch: true,
+    useWorkflowWorktree: true,
   },
 };
 
