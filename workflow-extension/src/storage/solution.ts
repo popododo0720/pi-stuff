@@ -56,6 +56,11 @@ export function saveSolution(
 export function findRelevantSolutions(
   cwd: string,
   taskDescription: string,
+  options?: {
+    topK?: number;
+    maxBodyChars?: number;
+    minScore?: number;
+  },
 ): string {
   try {
     const dirPath = resolve(join(cwd, SOLUTIONS_DIR));
@@ -67,6 +72,13 @@ export function findRelevantSolutions(
 
     if (files.length === 0) return '';
 
+    const topK = Math.max(1, options?.topK ?? MAX_SOLUTIONS_IN_CONTEXT);
+    const maxBodyChars = Math.max(
+      100,
+      options?.maxBodyChars ?? MAX_SOLUTION_BODY,
+    );
+    const minScore = Math.max(0, options?.minScore ?? 1);
+
     // Extract keywords from task description (3+ char words)
     const keywords = taskDescription
       .toLowerCase()
@@ -75,7 +87,7 @@ export function findRelevantSolutions(
 
     if (keywords.length === 0) {
       // No keywords — just list titles
-      const titles = files.slice(0, MAX_SOLUTIONS_IN_CONTEXT).map((f) => {
+      const titles = files.slice(0, topK).map((f) => {
         const title = extractTitle(dirPath, f);
         return `- ${f.slice(0, 10)}: ${title}`;
       });
@@ -95,13 +107,11 @@ export function findRelevantSolutions(
 
     // Sort by score desc, take top N
     scored.sort((a, b) => b.score - a.score);
-    const relevant = scored
-      .filter((s) => s.score > 0)
-      .slice(0, MAX_SOLUTIONS_IN_CONTEXT);
+    const relevant = scored.filter((s) => s.score >= minScore).slice(0, topK);
 
     if (relevant.length === 0) {
       // No matches — list recent titles only
-      const titles = files.slice(0, MAX_SOLUTIONS_IN_CONTEXT).map((f) => {
+      const titles = files.slice(0, topK).map((f) => {
         const title = extractTitle(dirPath, f);
         return `- ${f.slice(0, 10)}: ${title}`;
       });
@@ -112,8 +122,8 @@ export function findRelevantSolutions(
     return relevant
       .map((s) => {
         const truncated =
-          s.body.length > MAX_SOLUTION_BODY
-            ? `${s.body.slice(0, MAX_SOLUTION_BODY)}...`
+          s.body.length > maxBodyChars
+            ? `${s.body.slice(0, maxBodyChars)}...`
             : s.body;
         return `#### ${s.file.slice(0, 10)}: ${s.title}\n${truncated}`;
       })

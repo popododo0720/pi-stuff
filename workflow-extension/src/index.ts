@@ -21,6 +21,7 @@ import {
   applyStageConfig,
   clearPendingCompact,
   getPendingCompact,
+  RESET_MARKER,
   registerTransitionTool,
 } from './tools/transition';
 import type { StageConfig, WorkflowSession, WorkflowSettings } from './types';
@@ -85,6 +86,28 @@ export default function (pi: ExtensionAPI) {
     pi.on(event, async (_e, ctx) => await reconstruct(ctx));
   }
 
+  // ── Aggressive reset compaction hook ───────────────────────────
+  pi.on('session_before_compact', async (event) => {
+    if (!event.customInstructions?.includes(RESET_MARKER)) {
+      return undefined;
+    }
+
+    const latestEntryId =
+      event.branchEntries[event.branchEntries.length - 1]?.id ??
+      event.preparation.firstKeptEntryId;
+
+    return {
+      compaction: {
+        summary:
+          `${RESET_MARKER} context checkpoint — ` +
+          'preserved: active TODO progress, plan refs',
+        firstKeptEntryId: latestEntryId,
+        tokensBefore: event.preparation.tokensBefore,
+        details: { reset: true },
+      },
+    };
+  });
+
   // ── Tool call guard ─────────────────────────────────────────────
   pi.on('tool_call', async (event) => {
     if (!session || session.state === 'done' || session.completed)
@@ -122,7 +145,14 @@ export default function (pi: ExtensionAPI) {
       session.state = 'plan';
       session.completed = false;
       session.retryCount = 0;
+      session.planContent = '';
       session.verifyPlanResult = '';
+      session.todos = [];
+      session.activeTodoIndex = -1;
+      session.startupPrepRequired = false;
+      session.startupPrepNote = '';
+      session.startupPrepLocked = false;
+      session.gitBranch = undefined;
       cleanupVerificationResults(ctx.cwd);
       saveSessionToDisk(ctx.cwd, session);
       updateStatusBar(ctx, session);

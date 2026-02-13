@@ -12,9 +12,13 @@ A workflow automation extension for Pi coding agent (`@mariozechner/pi-coding-ag
 - **Verification error summarization** — Marker-based extraction (🔴/🟡/🔵) replaces naive truncation; VERDICT guaranteed at end
 - **Repo map** — AST-based file symbol extraction (web-tree-sitter) + PageRank ranking within token budget
 - **TODO system** — Unified plan for all TODOs, then sequential implementation with per-TODO verify/compound cycles
+- **Startup git/worktree gate** — Dirty trees force mandatory prep TODO #1; clean trees proceed directly
+- **Git automation** — Auto commit/push at TODO boundaries and final completion (with completion blocking on final push failure)
 - **Deferred compaction** — Context compaction between TODO cycles runs safely via `before_agent_start` (no tool-execution race)
+- **Reset marker compaction** — `[WF_RESET]` marker enables aggressive reset-style compaction checkpoints
 - **Compound learning** — Captures patterns, gotchas, decisions after each cycle; solutions saved for future reference
 - **Project memory** — Conventions, rules, patterns, gotchas, decisions persist across sessions
+- **Minimal always-on context** — Only core rules are always injected; history-like data is retrieval-based
 - **Custom checks** — Drop `.md` files in `docs/checks/` for project-specific verification
 - **Bash guard** — Detects file-modifying bash commands (rm, mv, sed -i, git push, etc.) and blocks them during read-only stages
 
@@ -53,7 +57,7 @@ ln -s "$(pwd)" ~/.pi/agent/extensions/workflow-extension
 | Command | Description |
 |---------|-------------|
 | `/workflow <description>` | Start a new workflow |
-| `/workflow-settings` | Configure per-stage model/thinking, verify models, timeout, repo map |
+| `/workflow-settings` | Configure per-stage model/thinking, verify models, timeout, repo map, git automation |
 | `/workflow-cancel` | Cancel the active workflow |
 
 ### Workflow Stages
@@ -82,6 +86,35 @@ setTodos → Unified Plan → Verify Plan →
 ```
 
 Context is automatically compacted between TODO cycles (deferred to `before_agent_start` to avoid race conditions).
+
+### Startup Git/Worktree Check Policy
+
+`/workflow` now checks git/worktree state first:
+
+- **Dirty tree**: user cleanup strategy is requested, and mandatory TODO #1 (git/worktree preparation) is injected/locked.
+- **Clean tree**: cleanup prompt is skipped; workflow proceeds directly.
+- **Git check failure** (non-git/permission/etc): non-fatal fallback with mandatory prep TODO #1.
+
+### Git Automation (TODO boundary + completion)
+
+Git automation is configurable in `/workflow-settings` (`🧬 Git Automation`):
+
+- `enabled`
+- `commitPerTodo` / `pushPerTodo`
+- `pushOnComplete`
+- `requireCleanStart`
+- `useWorkflowBranch`
+
+Behavior:
+- On TODO boundary (`compoundDone` → next TODO), auto-commit and optional push can run.
+- On final completion (all TODOs done), final commit/push is executed.
+- If final commit/push fails, workflow completion is blocked and state remains `compound`.
+
+### Context Injection Policy
+
+- **Always-on minimal set**: default conventions, user conventions, matched rules/module rules.
+- **On-demand retrieval**: solutions + patterns/gotchas/decisions use keyword-overlap top-k selection.
+- **Aggressive reset marker**: deferred compaction uses `[WF_RESET]` marker for reset-oriented checkpointing.
 
 ### Per-Stage Model & Thinking Configuration
 
@@ -164,6 +197,7 @@ workflow-extension/
 │   │   └── index.ts             # generateRepoMap entry point
 │   ├── storage/
 │   │   ├── index.ts             # Re-exports
+│   │   ├── git.ts               # Git commit/push helpers
 │   │   ├── memory.ts            # Project memory CRUD
 │   │   ├── modules.ts           # Module conventions
 │   │   ├── plan.ts              # Plan document saving

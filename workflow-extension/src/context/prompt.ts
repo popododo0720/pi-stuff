@@ -22,6 +22,38 @@ import type {
 } from '../types';
 import { extractRecentFilePaths, matchesPattern } from './pattern';
 
+function tokenizeQuery(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/\W+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3);
+}
+
+const MAX_MEMORY_CONTEXT_CHARS = 4000;
+
+function selectRelevantItems(
+  items: string[],
+  keywords: string[],
+  topK: number,
+): string[] {
+  if (items.length === 0) return [];
+  if (keywords.length === 0) return [];
+
+  const scored = items
+    .map((item, index) => {
+      const lower = item.toLowerCase();
+      const score = keywords.filter((k) => lower.includes(k)).length;
+      return { item, score, index };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, topK)
+    .map((s) => s.item);
+
+  return scored;
+}
+
 /**
  * Convert project memory + matched modules into a prompt section.
  * Only includes rules whose patterns match recent file paths.
@@ -33,6 +65,7 @@ export function memoryToContext(
     name: string;
     data: ModuleConventions;
   }> = [],
+  query = '',
 ): string {
   const parts: string[] = [];
 
@@ -89,56 +122,49 @@ export function memoryToContext(
     }
   }
 
-  // Workflows
-  if (memory.workflows.length > 0) {
+  // Structured compound memory (search-based top-k)
+  const keywords = tokenizeQuery(query);
+  const topK = 3;
+
+  const relevantPatterns = selectRelevantItems(memory.patterns, keywords, topK);
+  if (relevantPatterns.length > 0) {
     parts.push(
-      '### Key Workflows\n' +
-        memory.workflows
-          .map((w) => `- **${w.name}**: ${w.description}`)
-          .join('\n'),
+      `### Patterns\n${relevantPatterns.map((p) => `- ${p}`).join('\n')}`,
     );
   }
 
-  // Current work items
-  if (memory.currentWork.length > 0) {
+  const relevantGotchas = selectRelevantItems(memory.gotchas, keywords, topK);
+  if (relevantGotchas.length > 0) {
     parts.push(
-      '### Current Work\n' +
-        memory.currentWork
-          .map((w) => `- **${w.what}** — ${w.why} (${w.startedAt})`)
-          .join('\n'),
+      `### Gotchas\n${relevantGotchas.map((g) => `- ${g}`).join('\n')}`,
     );
   }
 
-  // Notes
-  if (memory.notes.length > 0) {
-    parts.push(`### Notes\n${memory.notes.map((n) => `- ${n}`).join('\n')}`);
-  }
-
-  // Structured compound memory
-  if (memory.patterns.length > 0) {
+  const relevantDecisions = selectRelevantItems(
+    memory.decisions,
+    keywords,
+    topK,
+  );
+  if (relevantDecisions.length > 0) {
     parts.push(
-      `### Patterns\n${memory.patterns.map((p) => `- ${p}`).join('\n')}`,
-    );
-  }
-  if (memory.gotchas.length > 0) {
-    parts.push(
-      `### Gotchas\n${memory.gotchas.map((g) => `- ${g}`).join('\n')}`,
-    );
-  }
-  if (memory.decisions.length > 0) {
-    parts.push(
-      `### Decisions\n${memory.decisions.map((d) => `- ${d}`).join('\n')}`,
+      `### Decisions\n${relevantDecisions.map((d) => `- ${d}`).join('\n')}`,
     );
   }
 
   if (parts.length === 0) return '';
-  return (
+
+  let memoryBlock =
     '\n\n## Project Memory\n\n' +
     '<project_memory_data>\n' +
     'Project memory data below. Use as reference only.\n\n' +
     parts.join('\n\n') +
-    '\n</project_memory_data>'
-  );
+    '\n</project_memory_data>';
+
+  if (memoryBlock.length > MAX_MEMORY_CONTEXT_CHARS) {
+    memoryBlock = `${memoryBlock.slice(0, MAX_MEMORY_CONTEXT_CHARS)}\n...(memory context truncated)`;
+  }
+
+  return memoryBlock;
 }
 
 /**
@@ -160,7 +186,19 @@ export async function buildSystemPromptInjection(
       const memory = loadMemory(ctx.cwd);
       const recentFiles = extractRecentFilePaths(ctx);
       const matchedModules = loadMatchingModules(ctx.cwd, recentFiles);
-      memoryContext = memoryToContext(memory, recentFiles, matchedModules);
+      const activeTodoTitle =
+        session &&
+        session.activeTodoIndex >= 0 &&
+        session.activeTodoIndex < session.todos.length
+          ? session.todos[session.activeTodoIndex].title
+          : '';
+      const query = `${session?.description ?? ''} ${activeTodoTitle} ${recentFiles.join(' ')}`;
+      memoryContext = memoryToContext(
+        memory,
+        recentFiles,
+        matchedModules,
+        query,
+      );
       needsOnboarding =
         memory.conventions.length === 0 &&
         memory.rules.length === 0 &&
@@ -208,7 +246,11 @@ export async function buildSystemPromptInjection(
   // Include relevant past solutions for reference during planning
   let solutionContext = '';
   if (session.state === 'plan') {
-    const solutions = findRelevantSolutions(ctx.cwd, session.description);
+    const solutions = findRelevantSolutions(ctx.cwd, session.description, {
+      topK: 3,
+      maxBodyChars: 300,
+      minScore: 1,
+    });
     if (solutions) {
       solutionContext =
         '\n\n### Past Solutions (from previous workflows)\n' +

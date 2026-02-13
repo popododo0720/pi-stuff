@@ -6,6 +6,7 @@ import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { STATE_EMOJI, TOOL_NAME, VALID_TRANSITIONS } from '../constants';
 import { updateStatusBar } from '../context/status';
+import { loadMemory, saveMemory } from '../storage/memory';
 import { savePlanDocument } from '../storage/plan';
 import { loadSettings } from '../storage/settings';
 import { saveSolution } from '../storage/solution';
@@ -19,6 +20,8 @@ import {
 // ── Deferred compaction ──────────────────────────────────────────
 // Tool execution 중 ctx.compact() 직접 호출 시 race condition 발생.
 // 대신 플래그만 세팅하고, before_agent_start에서 실행.
+export const RESET_MARKER = '[WF_RESET]';
+
 let PENDING_COMPACT: string | null = null;
 
 export function getPendingCompact(): string | null {
@@ -126,6 +129,48 @@ async function autoCommitTodo(
   return {
     ok: true,
     message: `Committed TODO #${todoIndex + 1}${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
+  };
+}
+
+async function autoCommitFinal(
+  pi: ExtensionAPI,
+  session: WorkflowSession,
+  completedTodoIndex: number | null,
+): Promise<{ ok: boolean; message: string }> {
+  const add = await runGit(pi, ['add', '-A']);
+  if (!add.ok) {
+    return {
+      ok: false,
+      message: `git add failed: ${add.stderr || `exit ${add.code}`}`,
+    };
+  }
+
+  const hasChanges = await hasUncommittedChanges(pi);
+  if (!hasChanges) {
+    return { ok: true, message: 'No changes to commit for finalization.' };
+  }
+
+  const finalTitle =
+    completedTodoIndex !== null
+      ? session.todos[completedTodoIndex]?.title || 'unknown'
+      : 'workflow completion';
+  const msg =
+    completedTodoIndex !== null
+      ? `chore(workflow): final - TODO #${completedTodoIndex + 1} - ${finalTitle}`
+      : `chore(workflow): final - ${session.description}`;
+
+  const commit = await runGit(pi, ['commit', '-m', msg]);
+  if (!commit.ok) {
+    return {
+      ok: false,
+      message: `git commit failed: ${commit.stderr || `exit ${commit.code}`}`,
+    };
+  }
+
+  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD']);
+  return {
+    ok: true,
+    message: `Final commit created${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
   };
 }
 
@@ -381,16 +426,18 @@ export function registerTransitionTool(
             );
           }
 
+          let completedTodoIndex: number | null = null;
+
           // Check if there are more TODOs to process
           if (
             session.activeTodoIndex >= 0 &&
             session.activeTodoIndex < session.todos.length
           ) {
-            const completedIndex = session.activeTodoIndex;
+            completedTodoIndex = session.activeTodoIndex;
 
             // Mark current TODO as done
-            session.todos[completedIndex].status = 'done';
-            const nextIndex = completedIndex + 1;
+            session.todos[completedTodoIndex].status = 'done';
+            const nextIndex = completedTodoIndex + 1;
 
             if (nextIndex < session.todos.length) {
               const gitNotes: string[] = [];
@@ -401,7 +448,7 @@ export function registerTransitionTool(
                 const commit = await autoCommitTodo(
                   pi,
                   session,
-                  completedIndex,
+                  completedTodoIndex,
                 );
                 gitNotes.push(
                   commit.ok ? `📦 ${commit.message}` : `⚠️ ${commit.message}`,
@@ -442,7 +489,7 @@ export function registerTransitionTool(
 
               // Defer compaction — will run in next before_agent_start
               PENDING_COMPACT =
-                `Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
+                `${RESET_MARKER} Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
                 `Preserve: unified plan, TODO list progress, key decisions. ` +
                 `Discard: previous TODO implementation details, verification output, code diffs.`;
 
@@ -462,6 +509,68 @@ export function registerTransitionTool(
             }
           }
 
+          // Finalization for all-done path: commit + push must succeed
+          const finalGitNotes: string[] = [];
+          if (settings.git?.enabled !== false) {
+            const finalCommit = await autoCommitFinal(
+              pi,
+              session,
+              completedTodoIndex,
+            );
+            if (!finalCommit.ok) {
+              session.state = 'compound';
+              setSession(session);
+              updateStatusBar(ctx, session);
+              return textResult(
+                `❌ Final commit failed. Workflow cannot complete yet.\n\n${finalCommit.message}`,
+                session,
+              );
+            }
+            finalGitNotes.push(`📦 ${finalCommit.message}`);
+
+            if (settings.git?.pushOnComplete !== false) {
+              const finalPush = await autoPush(pi, session.gitBranch);
+              if (!finalPush.ok) {
+                session.state = 'compound';
+                setSession(session);
+                updateStatusBar(ctx, session);
+                return textResult(
+                  `❌ Final push failed. Workflow cannot complete yet.\n\n${finalPush.message}`,
+                  session,
+                );
+              }
+              finalGitNotes.push(`🚀 ${finalPush.message}`);
+            }
+          }
+
+          const completedTodoCount = session.todos.length;
+          const todoSummary =
+            completedTodoCount > 0
+              ? `**TODOs completed:** ${completedTodoCount}/${completedTodoCount}\n`
+              : '';
+
+          // Workflow cleanup policy
+          session.todos = [];
+          session.activeTodoIndex = -1;
+          session.planContent = '';
+          session.verifyPlanResult = '';
+          session.retryCount = 0;
+          session.startupPrepRequired = false;
+          session.startupPrepNote = '';
+          session.startupPrepLocked = false;
+          session.gitBranch = undefined;
+
+          // Remove currentWork entry for this workflow
+          try {
+            const memory = loadMemory(ctx.cwd);
+            memory.currentWork = memory.currentWork.filter(
+              (w) => !w.what.startsWith(`[${session.id}]`),
+            );
+            saveMemory(ctx.cwd, memory);
+          } catch {
+            // Ignore cleanup errors
+          }
+
           // All TODOs done (or no TODOs) — workflow complete
           session.state = 'done';
           session.completed = true;
@@ -470,14 +579,9 @@ export function registerTransitionTool(
 
           // Defer compaction — will run in next before_agent_start
           PENDING_COMPACT =
-            `Workflow "${session.description}" completed. ` +
+            `${RESET_MARKER} Workflow "${session.description}" completed. ` +
             `Preserve: task description, final outcome, key decisions. ` +
             `Discard: implementation details, verification output, code diffs.`;
-
-          const todoSummary =
-            session.todos.length > 0
-              ? `**TODOs completed:** ${session.todos.length}/${session.todos.length}\n`
-              : '';
 
           return textResult(
             '🎉 Workflow Complete!\n\n' +
@@ -485,6 +589,9 @@ export function registerTransitionTool(
               `**ID:** ${session.id}\n` +
               todoSummary +
               (solutionPath ? `**Solution saved:** ${solutionPath}\n` : '') +
+              (finalGitNotes.length > 0
+                ? `**Git automation:**\n${finalGitNotes.join('\n')}\n`
+                : '') +
               '\nLearnings from this workflow have been captured for future reference.',
             session,
           );

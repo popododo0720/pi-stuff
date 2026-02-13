@@ -48,7 +48,7 @@ async function safeGitStatus(pi: ExtensionAPI): Promise<GitStateCheckResult> {
 
 async function safeGitWorktreeList(
   pi: ExtensionAPI,
-): Promise<{ summary: string; error?: string }> {
+): Promise<{ summary: string; count?: number; error?: string }> {
   try {
     const result = await pi.exec('git', ['worktree', 'list']);
     if (result.code !== 0) {
@@ -61,7 +61,7 @@ async function safeGitWorktreeList(
     }
 
     const output = result.stdout.trim();
-    if (!output) return { summary: 'No worktree info.' };
+    if (!output) return { summary: 'No worktree info.', count: 0 };
 
     const lines = output
       .split('\n')
@@ -73,6 +73,7 @@ async function safeGitWorktreeList(
         count > 1
           ? `Detected ${count} worktrees.`
           : `Detected ${count} worktree.`,
+      count,
     };
   } catch (e) {
     return {
@@ -80,6 +81,57 @@ async function safeGitWorktreeList(
       error: e instanceof Error ? e.message : 'git worktree list failed',
     };
   }
+}
+
+function toBranchSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
+}
+
+async function ensureWorkflowBranch(
+  pi: ExtensionAPI,
+  workflowId: string,
+  description: string,
+): Promise<{ branch?: string; message?: string; error?: string }> {
+  const slug = toBranchSlug(description || 'workflow') || 'workflow';
+  const branch = `wf/${workflowId}-${slug}`;
+
+  const current = await pi.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (current.code !== 0) {
+    return {
+      error:
+        current.stderr.trim() ||
+        `failed to detect current branch (exit ${current.code})`,
+    };
+  }
+
+  const exists = await pi.exec('git', ['rev-parse', '--verify', branch]);
+  if (exists.code === 0) {
+    const checkout = await pi.exec('git', ['checkout', branch]);
+    if (checkout.code !== 0) {
+      return {
+        error:
+          checkout.stderr.trim() ||
+          `git checkout failed (exit ${checkout.code})`,
+      };
+    }
+    return {
+      branch,
+      message: `Switched to existing workflow branch: ${branch}`,
+    };
+  }
+
+  const create = await pi.exec('git', ['checkout', '-b', branch]);
+  if (create.code !== 0) {
+    return {
+      error:
+        create.stderr.trim() || `git checkout -b failed (exit ${create.code})`,
+    };
+  }
+  return { branch, message: `Created workflow branch: ${branch}` };
 }
 
 /**
@@ -97,6 +149,7 @@ export function registerWorkflowCommand(
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const description = args.trim();
       const currentSession = getSession();
+      const settings = loadSettings(ctx.cwd);
 
       // Confirm replacement if a workflow is already active
       if (currentSession && currentSession.state !== 'done') {
@@ -148,6 +201,9 @@ export function registerWorkflowCommand(
         startupPrepLocked: false,
       };
 
+      const requireCleanStart = settings.git?.requireCleanStart !== false;
+      const useWorkflowBranch = settings.git?.useWorkflowBranch !== false;
+
       if (gitStatus.checkFailed) {
         // Unknown git state -> force prep TODO #1
         session.startupPrepRequired = true;
@@ -172,8 +228,8 @@ export function registerWorkflowCommand(
           '⚠️ Git state check failed. Added mandatory TODO #1 for repository preparation.',
           'warning',
         );
-      } else if (gitStatus.dirty) {
-        // Dirty tree -> ask user cleanup strategy and force TODO #1
+      } else if (gitStatus.dirty && requireCleanStart) {
+        // Dirty tree + clean start required -> ask strategy and force TODO #1
         const strategyOptions = [
           'Commit current changes before feature work',
           'Stash current changes before feature work',
@@ -207,12 +263,46 @@ export function registerWorkflowCommand(
         ];
         session.activeTodoIndex = 0;
       } else {
-        // Clean tree -> proceed directly
+        // Clean tree (or dirty allowed by settings) -> proceed directly
         session.startupPrepRequired = false;
         session.startupPrepLocked = false;
         session.startupPrepNote =
-          `Clean git tree. ${worktreeInfo.summary}` +
+          (gitStatus.dirty
+            ? 'Dirty git tree allowed by settings. '
+            : 'Clean git tree. ') +
+          `${worktreeInfo.summary}` +
           (worktreeInfo.error ? ` (${worktreeInfo.error})` : '');
+      }
+
+      if (worktreeInfo.count && worktreeInfo.count > 1) {
+        ctx.ui.notify(
+          `ℹ️ Multiple worktrees detected (${worktreeInfo.count}). Worktree switching is manual; this workflow only manages branch strategy.`,
+          'info',
+        );
+      }
+
+      if (
+        !session.startupPrepRequired &&
+        useWorkflowBranch &&
+        !gitStatus.checkFailed
+      ) {
+        const branchResult = await ensureWorkflowBranch(
+          pi,
+          session.id,
+          session.description,
+        );
+        if (branchResult.branch) {
+          session.gitBranch = branchResult.branch;
+        }
+        if (branchResult.message) {
+          ctx.ui.notify(branchResult.message, 'info');
+        }
+        if (branchResult.error) {
+          ctx.ui.notify(
+            `⚠️ Workflow branch setup failed. Continuing on current branch. (${branchResult.error})`,
+            'warning',
+          );
+        }
       }
 
       // Clean up previous workflow only after new-start decisions are finalized
@@ -233,7 +323,6 @@ export function registerWorkflowCommand(
       updateStatusBar(ctx, session);
 
       // Apply plan stage config
-      const settings = loadSettings(ctx.cwd);
       await applyStageConfig(pi, ctx, settings.stages.plan);
 
       // Show different message for new vs returning users

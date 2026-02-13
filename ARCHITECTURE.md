@@ -74,6 +74,52 @@ flowchart TD
     end
 ```
 
+## Startup Git/Branch Flow
+
+```mermaid
+flowchart TD
+    WF["/workflow command"] --> CHECK["git/worktree check"]
+    CHECK -->|dirty + requireCleanStart| PREP["Inject mandatory TODO #1 (prep)"]
+    CHECK -->|clean| BRANCH["ensure workflow branch wf/<id>-<slug>"]
+    CHECK -->|check failed| PREP
+    PREP --> PLAN["plan stage"]
+    BRANCH --> PLAN
+```
+
+## Git Automation Flow
+
+```mermaid
+flowchart TD
+    COMP["compoundDone"] --> MORE{"more TODOs?"}
+    MORE -->|yes| TODOGIT["auto commit (per TODO)<br/>optional auto push"]
+    TODOGIT --> NEXT["next TODO implement"]
+    MORE -->|no| FINALGIT["final auto commit + auto push"]
+    FINALGIT --> PUSHOK{"push ok?"}
+    PUSHOK -->|yes| DONE["done"]
+    PUSHOK -->|no| BLOCK["stay in compound (completion blocked)"]
+```
+
+## Reset Marker Compaction Hook
+
+```mermaid
+sequenceDiagram
+    participant T as transition.ts
+    participant I as index.ts
+    participant P as Pi compaction
+
+    T->>I: set PENDING_COMPACT with [WF_RESET] marker
+    I->>P: before_agent_start -> ctx.compact(...)
+    P->>I: session_before_compact event
+    I->>P: if reset marker, return extension compaction result
+    Note over I,P: session_before_compact + reset marker path
+```
+
+## Context Injection Policy
+
+- Always-on memory is minimal (core conventions + matched rules).
+- solutions/patterns/gotchas/decisions are injected by **top-k** relevance search.
+- reset marker compaction reduces stale history carry-over.
+
 ## Verification Prompt Structure
 
 ```mermaid
@@ -227,12 +273,13 @@ graph LR
     subgraph Injection["System Prompt"]
         CONV --> PROMPT["Always injected"]
         RULES --> MATCH["Injected if pattern<br/>matches recent files"]
-        PAT --> PROMPT
-        GOT --> PROMPT
-        DEC --> PROMPT
+        PAT --> TOPK["On-demand top-k<br/>relevance injection"]
+        GOT --> TOPK
+        DEC --> TOPK
+        TOPK --> PROMPT
     end
 
     subgraph Solutions["docs/solutions/*.md"]
-        SOL["Past solutions"] --> PLAN_INJ["Injected during<br/>plan stage only"]
+        SOL["Past solutions"] --> PLAN_INJ["Injected during plan stage<br/>with top-k filtering"]
     end
 ```

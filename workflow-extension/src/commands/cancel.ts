@@ -48,9 +48,13 @@ export function registerCancelCommand(
         // Ignore memory cleanup errors
       }
 
+      const branchNote = session.gitBranch
+        ? ` Workflow branch retained: ${session.gitBranch} (cleanup manually if needed).`
+        : '';
+
       setSession(null);
       updateStatusBar(ctx, null);
-      ctx.ui.notify('Workflow cancelled.', 'info');
+      ctx.ui.notify(`Workflow cancelled.${branchNote}`, 'info');
     },
   });
 }
