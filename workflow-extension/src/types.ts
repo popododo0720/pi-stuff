@@ -48,6 +48,9 @@ export interface ProjectMemory {
   workflows: Array<{ name: string; description: string }>;
   currentWork: Array<{ what: string; why: string; startedAt: string }>;
   notes: string[];
+  patterns: string[];
+  gotchas: string[];
+  decisions: string[];
 }
 
 export interface WorkflowSettings {
@@ -56,11 +59,16 @@ export interface WorkflowSettings {
   thinkingLevel: ThinkingLevel;
 }
 
+export interface ModelVerificationResult {
+  model: string;
+  passed: boolean;
+  output: string;
+  criticalCount: number;
+  warningCount: number;
+  infoCount: number;
+}
+
 export interface VerificationResult {
   passed: boolean;
-  results: Array<{
-    model: string;
-    passed: boolean;
-    output: string;
-  }>;
+  results: ModelVerificationResult[];
 }

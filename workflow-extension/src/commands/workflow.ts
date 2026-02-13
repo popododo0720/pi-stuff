@@ -77,6 +77,9 @@ export function registerWorkflowCommand(
             workflows: [],
             currentWork: [],
             notes: [],
+            patterns: [],
+            gotchas: [],
+            decisions: [],
           });
         }
       } catch {

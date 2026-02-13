@@ -28,7 +28,8 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
     label: 'Project Memory',
     description:
       'Manage project memory. Store/retrieve/delete: global conventions, ' +
-      'conditional rules (directory/file pattern based), key workflows, current work, notes. ' +
+      'conditional rules (directory/file pattern based), key workflows, current work, notes, ' +
+      'patterns, gotchas, decisions. ' +
       "Rules use 'pattern|rule' format (e.g. 'src/api/**|error handling required'). " +
       'Save any project information worth remembering.',
     parameters: Type.Object({
@@ -39,6 +40,9 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
         'workflows',
         'currentWork',
         'notes',
+        'patterns',
+        'gotchas',
+        'decisions',
       ] as const),
       value: Type.Optional(
         Type.String({
@@ -60,6 +64,9 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
         // ── Get: display category contents ──────────────────────
         case 'get': {
           const data = memory[params.category];
+          if (!Array.isArray(data)) {
+            return t(`${params.category}: (invalid data — use clear to reset)`);
+          }
           const text =
             data.length === 0
               ? `${params.category}: (empty)`
@@ -86,7 +93,12 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
           }
 
           const value = params.value.slice(0, MAX_MEMORY_VALUE_LENGTH);
-          const arr = memory[params.category] as unknown[];
+          const arr = memory[params.category];
+          if (!Array.isArray(arr)) {
+            return t(
+              `${params.category} has invalid data. Try clearing it first.`,
+            );
+          }
           if (arr.length >= MAX_MEMORY_ENTRIES) {
             return t(
               `${params.category} reached max entries (${MAX_MEMORY_ENTRIES}).`,
@@ -110,7 +122,10 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
             memory.rules.push({ pattern, rule });
           } else if (
             params.category === 'conventions' ||
-            params.category === 'notes'
+            params.category === 'notes' ||
+            params.category === 'patterns' ||
+            params.category === 'gotchas' ||
+            params.category === 'decisions'
           ) {
             memory[params.category].push(value);
           } else if (params.category === 'workflows') {
@@ -139,7 +154,12 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
           if (params.index === undefined) {
             return t('index is required.');
           }
-          const arr = memory[params.category] as unknown[];
+          const arr = memory[params.category];
+          if (!Array.isArray(arr)) {
+            return t(
+              `${params.category} has invalid data. Try clearing it first.`,
+            );
+          }
           if (params.index < 0 || params.index >= arr.length) {
             return t(`Index out of range (0~${arr.length - 1}).`);
           }

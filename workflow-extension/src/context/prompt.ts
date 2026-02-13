@@ -112,6 +112,23 @@ export function memoryToContext(
     parts.push(`### Notes\n${memory.notes.map((n) => `- ${n}`).join('\n')}`);
   }
 
+  // Structured compound memory
+  if (memory.patterns.length > 0) {
+    parts.push(
+      `### Patterns\n${memory.patterns.map((p) => `- ${p}`).join('\n')}`,
+    );
+  }
+  if (memory.gotchas.length > 0) {
+    parts.push(
+      `### Gotchas\n${memory.gotchas.map((g) => `- ${g}`).join('\n')}`,
+    );
+  }
+  if (memory.decisions.length > 0) {
+    parts.push(
+      `### Decisions\n${memory.decisions.map((d) => `- ${d}`).join('\n')}`,
+    );
+  }
+
   if (parts.length === 0) return '';
   return (
     '\n\n## Project Memory\n\n' +

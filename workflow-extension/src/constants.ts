@@ -109,7 +109,8 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- **Verification criteria** — concrete, executable checks (grep, lint command, test command).\n' +
     '- **What must NOT change** — explicit scope boundaries.\n\n' +
     'When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
-    'Do NOT transition until the user explicitly approves.',
+    'Do NOT transition until the user explicitly approves.\n' +
+    'Discussing the plan is NOT approval. Wait for explicit words like "approve", "go", "submit", "승인", "ㄱㄱ", "제출해".',
 
   verifyPlan:
     '## Current Stage: 🔍 Plan Verification\n\n' +
@@ -129,6 +130,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
     '- Track progress: maintain a mental checklist of plan items. Do NOT stop until all items are complete.\n' +
     '- If stuck on one item, note the blocker and continue with the next.\n' +
+    '- After all code changes, update README.md (introduction, installation, usage) and architecture diagram (mermaid code flow) if project structure changed.\n' +
     '- When all implementation is complete, call workflow_transition(action: "implDone").',
 
   verifyImpl:
@@ -142,18 +144,17 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +
-    'The implementation is complete. Now capture what you learned.\n\n' +
-    'Analyze this workflow and extract reusable knowledge:\n' +
-    '1. **What worked well** — patterns, approaches, or tools that were effective.\n' +
-    '2. **What went wrong** — mistakes, failed approaches, or issues encountered.\n' +
-    '3. **Reusable insight** — the key takeaway that would help in future similar tasks.\n' +
-    '4. **Conventions to add** — if you discovered project preferences, save them via project_memory.\n' +
-    '5. **Documentation** — update README.md and architecture diagrams (mermaid) if project structure changed.\n' +
-    '6. **Memory cleanup** — review existing project memory (conventions, rules, notes) and remove outdated or redundant entries. ' +
-    'Use project_memory(action: "remove", category: "...", index: N) to clean up.\n\n' +
-    'Then call workflow_transition(action: "compoundDone", content: "<compound summary>").\n' +
-    'The summary will be saved to docs/solutions/ for future reference.\n' +
-    'Keep it concise but specific — focus on what would actually help next time.',
+    'The implementation is complete. Complete ALL steps before calling compoundDone.\n\n' +
+    '### Mandatory Checklist\n' +
+    '1. **Analyze** — what worked well, what went wrong, reusable insight.\n' +
+    '2. **Save patterns** — recurring code patterns discovered → project_memory(action: "add", category: "patterns", value: "...")\n' +
+    '3. **Save gotchas** — mistakes found and fixed → project_memory(action: "add", category: "gotchas", value: "...")\n' +
+    '4. **Save decisions** — architecture choices with rationale → project_memory(action: "add", category: "decisions", value: "...")\n' +
+    '5. **Save conventions** — if you discovered project preferences → project_memory(category: "conventions")\n' +
+    '6. **Memory cleanup** — review existing project memory and remove outdated entries. ' +
+    'Use project_memory(action: "remove", category: "...", index: N).\n' +
+    '7. Call workflow_transition(action: "compoundDone", content: "<compound summary>").\n\n' +
+    'The summary will be saved to docs/solutions/ for future reference.',
 
   done: '',
 };

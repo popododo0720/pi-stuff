@@ -131,7 +131,7 @@ export function registerTransitionTool(
             }
 
             session.retryCount++;
-            session.state = 'plan';
+            session.state = 'verifyPlan';
             session.verifyPlanResult = formatVerificationSummary(result);
             const resultPath = saveVerificationResult(
               ctx.cwd,
@@ -219,7 +219,7 @@ export function registerTransitionTool(
             }
 
             session.retryCount++;
-            session.state = 'implement';
+            session.state = 'verifyImpl';
             const implResultPath = saveVerificationResult(
               ctx.cwd,
               'impl',

@@ -28,11 +28,14 @@ export function loadMemory(cwd: string): ProjectMemory {
     const path = resolveMemoryPath(cwd);
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
     return {
-      conventions: raw.conventions ?? [],
-      rules: raw.rules ?? [],
-      workflows: raw.workflows ?? [],
-      currentWork: raw.currentWork ?? [],
-      notes: raw.notes ?? [],
+      conventions: Array.isArray(raw.conventions) ? raw.conventions : [],
+      rules: Array.isArray(raw.rules) ? raw.rules : [],
+      workflows: Array.isArray(raw.workflows) ? raw.workflows : [],
+      currentWork: Array.isArray(raw.currentWork) ? raw.currentWork : [],
+      notes: Array.isArray(raw.notes) ? raw.notes : [],
+      patterns: Array.isArray(raw.patterns) ? raw.patterns : [],
+      gotchas: Array.isArray(raw.gotchas) ? raw.gotchas : [],
+      decisions: Array.isArray(raw.decisions) ? raw.decisions : [],
     };
   } catch {
     return {
@@ -41,6 +44,9 @@ export function loadMemory(cwd: string): ProjectMemory {
       workflows: [],
       currentWork: [],
       notes: [],
+      patterns: [],
+      gotchas: [],
+      decisions: [],
     };
   }
 }

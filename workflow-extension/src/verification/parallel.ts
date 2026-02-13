@@ -13,10 +13,26 @@ import {
 import { join, resolve } from 'node:path';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { loadCustomChecks } from '../storage/checks';
-import type { VerificationResult, WorkflowSettings } from '../types';
+import type {
+  ModelVerificationResult,
+  VerificationResult,
+  WorkflowSettings,
+} from '../types';
 
 /** Max retry attempts when a model returns empty output */
 const MAX_EMPTY_RETRIES = 2;
+
+/** Count severity markers in verification output */
+function parseSeverity(output: string): {
+  critical: number;
+  warning: number;
+  info: number;
+} {
+  const critical = (output.match(/🔴/g) || []).length;
+  const warning = (output.match(/🟡/g) || []).length;
+  const info = (output.match(/🔵/g) || []).length;
+  return { critical, warning, info };
+}
 
 /**
  * Execute a single model verification with retry on empty response.
@@ -29,7 +45,7 @@ async function runSingleModel(
   timeout: number,
   thinkingLevel: string,
   signal?: AbortSignal,
-): Promise<{ model: string; passed: boolean; output: string }> {
+): Promise<ModelVerificationResult> {
   // Model format is "provider/model-id" — split for CLI args
   const [provider, ...modelParts] = model.split('/');
   const modelId = modelParts.join('/');
@@ -58,7 +74,15 @@ async function runSingleModel(
       const passed =
         upperOutput.includes('VERDICT: PASS') ||
         upperOutput.includes('VERDICT:PASS');
-      return { model, passed, output };
+      const severity = parseSeverity(output);
+      return {
+        model,
+        passed,
+        output,
+        criticalCount: severity.critical,
+        warningCount: severity.warning,
+        infoCount: severity.info,
+      };
     } catch (e) {
       // On last attempt, return error; otherwise retry
       if (attempt === MAX_EMPTY_RETRIES) {
@@ -66,6 +90,9 @@ async function runSingleModel(
           model,
           passed: false,
           output: `Process execution failed: ${e instanceof Error ? e.message : 'Unknown error'}`,
+          criticalCount: 0,
+          warningCount: 0,
+          infoCount: 0,
         };
       }
     }
@@ -75,6 +102,9 @@ async function runSingleModel(
     model,
     passed: false,
     output: 'Empty response after all retry attempts.',
+    criticalCount: 0,
+    warningCount: 0,
+    infoCount: 0,
   };
 }
 
@@ -124,21 +154,29 @@ export async function runParallelVerification(
         'Only FAIL for: wrong approach, missing critical steps, or architectural flaws.\n\n' +
         'Write a brief verification result. ' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.'
-      : 'You are a code implementation verifier. ' +
-        'Verify the implementation against the following plan:\n\n' +
+      : 'You are a strict code verifier AND adversarial code breaker.\n\n' +
         `Task: ${description}\n\n` +
         `Plan:\n${planContent}\n\n` +
-        'Read the project files and check:\n' +
+        'Read the project files and perform TWO phases:\n\n' +
+        '## Phase 1: Implementation Verification\n' +
         '1. Are all planned items implemented?\n' +
         '2. Does the code work correctly? (Run tests if possible)\n' +
         '3. Is anything missing?\n' +
-        '4. Code quality:\n' +
-        '   - SOLID principles (single responsibility, open-closed, etc.)\n' +
-        '   - No unnecessary complexity (YAGNI, KISS)\n' +
-        '   - Clean separation of concerns and architecture\n' +
-        '   - No security issues (hardcoded secrets, unvalidated input, injection risks)\n' +
-        '   - Extensibility — easy to add features without modifying existing code\n\n' +
-        'Write a detailed verification result. ' +
+        '4. Code quality — SOLID, YAGNI/KISS, separation of concerns, security, extensibility\n\n' +
+        '## Phase 2: Adversarial Testing\n' +
+        'Try to break this code. Find concrete inputs, edge cases, or scenarios that would:\n' +
+        '- Crash the program or cause unhandled exceptions\n' +
+        '- Produce wrong results\n' +
+        '- Expose security vulnerabilities\n' +
+        '- Violate the stated requirements\n\n' +
+        '## Classify each finding:\n' +
+        '🔴 CRITICAL: Real bugs, security vulnerabilities, crashes, wrong results, missing planned items\n' +
+        '🟡 WARNING: Convention violations, naming issues, unhandled edge cases\n' +
+        '🔵 INFO: Style suggestions, optimization opportunities\n\n' +
+        '## Verdict rules:\n' +
+        '- Any 🔴 CRITICAL or 🟡 WARNING → VERDICT: FAIL (with specific scenarios)\n' +
+        '- Only 🔵 INFO findings → VERDICT: PASS (note the suggestions)\n' +
+        '- No findings → VERDICT: PASS\n\n' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.';
 
   // Append project-specific checks from docs/checks/*.md
@@ -159,6 +197,41 @@ export async function runParallelVerification(
     ),
   );
 
+  // Add self-critique as 3rd parallel verifier for impl verification
+  if (type === 'impl' && settings.verifyModels.length > 0) {
+    const selfCritiquePrompt =
+      'You are a meticulous code reviewer performing a thorough self-critique.\n\n' +
+      `Task: ${description}\n\n` +
+      `Plan:\n${planContent}\n\n` +
+      'Read the project files and perform an exhaustive self-review:\n\n' +
+      '1. **Plan compliance** — compare every planned item against the implementation. Is anything missing or partially done?\n' +
+      '2. **Boundary values** — for each function, check input/output edge cases: null, undefined, empty strings, empty arrays, zero, negative numbers\n' +
+      '3. **Import/export chain** — verify all imports resolve correctly and exports are used as intended across files\n' +
+      '4. **Type correctness** — check interface contracts, type narrowing, and casting safety\n' +
+      '5. **Error handling** — find uncaught exceptions, missing try/catch, unhandled promise rejections\n' +
+      '6. **Integration side effects** — does this change break any existing code that depends on modified functions/types?\n\n' +
+      '## Classify each finding:\n' +
+      '🔴 CRITICAL: Real bugs, type errors, crashes, missing planned items\n' +
+      '🟡 WARNING: Convention violations, naming issues, unhandled edge cases\n' +
+      '🔵 INFO: Style suggestions, optimization opportunities\n\n' +
+      '## Verdict rules:\n' +
+      '- Any 🔴 CRITICAL or 🟡 WARNING → VERDICT: FAIL (with details)\n' +
+      '- Only 🔵 INFO findings → VERDICT: PASS (note the suggestions)\n' +
+      '- No findings → VERDICT: PASS\n\n' +
+      'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.';
+
+    promises.push(
+      runSingleModel(
+        `${settings.verifyModels[0]}`,
+        selfCritiquePrompt,
+        pi,
+        settings.verifyTimeout,
+        settings.thinkingLevel,
+        signal,
+      ).then((r) => ({ ...r, model: `${r.model} (self-critique)` })),
+    );
+  }
+
   const results = await Promise.all(promises);
   // All models must pass for overall success
   const passed = results.every((r) => r.passed);
@@ -173,9 +246,13 @@ export function formatVerificationSummary(results: VerificationResult): string {
   return results.results
     .map((r) => {
       const status = r.passed ? '✅ PASS' : '❌ FAIL';
+      const severity =
+        r.criticalCount + r.warningCount + r.infoCount > 0
+          ? ` (🔴${r.criticalCount} 🟡${r.warningCount} 🔵${r.infoCount})`
+          : '';
       const output =
         r.output.length > 300 ? `${r.output.slice(0, 300)}...` : r.output;
-      return `[${r.model}] ${status}\n${output}`;
+      return `[${r.model}] ${status}${severity}\n${output}`;
     })
     .join('\n\n');
 }
