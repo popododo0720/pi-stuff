@@ -48,6 +48,18 @@ export function registerCancelCommand(
         // Ignore memory cleanup errors
       }
 
+      // Write cancel marker to session history so reconstruction skips this workflow
+      pi.appendEntry({
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'workflow_transition',
+          toolCallId: `cancel-${Date.now()}`,
+          content: [{ type: 'text', text: 'Workflow cancelled.' }],
+          details: { cancelled: true },
+        },
+      });
+
       setSession(null);
       updateStatusBar(ctx, null);
       ctx.ui.notify('Workflow cancelled.', 'info');

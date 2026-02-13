@@ -48,7 +48,12 @@ export default function (pi: ExtensionAPI) {
       if (entry.type !== 'message') continue;
       const msg = entry.message;
       if (msg.role !== 'toolResult' || msg.toolName !== TOOL_NAME) continue;
-      if (msg.details) session = msg.details as WorkflowSession;
+      const details = msg.details as Record<string, unknown> | undefined;
+      if (details?.cancelled) {
+        session = null;
+      } else if (details) {
+        session = details as WorkflowSession;
+      }
     }
     // Backward compat: default fields for legacy sessions
     if (session && session.completed === undefined) {
