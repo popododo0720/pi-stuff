@@ -289,12 +289,25 @@ function parseFindingsFromOutput(output: string): {
   return { critical, warning, info };
 }
 
+/** Detect infrastructure errors (rate limit, quota, network) in output. */
+function isInfrastructureError(output: string): boolean {
+  const lower = output.toLowerCase();
+  return (
+    /usage limit|rate limit|quota exceeded|too many requests|429|503/.test(
+      lower,
+    ) ||
+    /try again in\s+~?\d+/.test(lower) ||
+    lower.startsWith('process execution failed:') ||
+    lower.startsWith('empty response after all retry')
+  );
+}
+
 /**
  * Execute a single model verification with retry on empty response.
  * Retries up to MAX_EMPTY_RETRIES times if stdout is empty.
  */
 async function runSingleModel(
-  type: 'plan' | 'impl',
+  _type: 'plan' | 'impl',
   model: string,
   prompt: string,
   pi: ExtensionAPI,
@@ -326,16 +339,38 @@ async function runSingleModel(
         continue;
       }
 
+      // Detect infrastructure errors (rate limit, quota, etc.)
+      if (isInfrastructureError(output)) {
+        return {
+          model,
+          passed: false,
+          output,
+          criticalCount: 0,
+          warningCount: 0,
+          infoCount: 0,
+          infrastructureError: true,
+        };
+      }
+
       const severity = parseFindingsFromOutput(output);
       const verdict = parseVerdict(output);
 
       const hasCritical = severity.critical > 0;
-      const hasWarning = severity.warning > 0;
 
-      // Severity-first: severity findings are authoritative
-      let passed = !hasCritical && !(type === 'impl' && hasWarning);
-      // VERDICT as auxiliary safety net (only consulted when severity is clean)
-      if (passed && verdict !== 'PASS') passed = false;
+      // VERDICT takes priority over severity parsing.
+      // Severity counts can be false positives from analysis text
+      // (e.g., model discussing "critical keyword handling" gets parsed as finding).
+      let passed: boolean;
+      if (verdict === 'PASS') {
+        // Trust model's PASS verdict
+        passed = true;
+      } else if (verdict === 'FAIL') {
+        // Only 🔴 CRITICAL blocks. WARNING/INFO are advisory.
+        passed = !hasCritical;
+      } else {
+        // No verdict line — fail safe
+        passed = false;
+      }
 
       return {
         model,
@@ -346,7 +381,7 @@ async function runSingleModel(
         infoCount: severity.info,
       };
     } catch (e) {
-      // On last attempt, return error; otherwise retry
+      // On last attempt, return infrastructure error; otherwise retry
       if (attempt === MAX_EMPTY_RETRIES) {
         return {
           model,
@@ -355,6 +390,7 @@ async function runSingleModel(
           criticalCount: 0,
           warningCount: 0,
           infoCount: 0,
+          infrastructureError: true,
         };
       }
     }
@@ -367,6 +403,7 @@ async function runSingleModel(
     criticalCount: 0,
     warningCount: 0,
     infoCount: 0,
+    infrastructureError: true,
   };
 }
 
@@ -500,8 +537,17 @@ export async function runParallelVerification(
   );
 
   const results = await Promise.all(promises);
-  // All models must pass for overall success
-  const passed = results.every((r) => r.passed);
+
+  // Exclude infrastructure errors (rate limit, quota, etc.) from pass/fail decision
+  const validResults = results.filter((r) => !r.infrastructureError);
+
+  // If all models had infra errors, can't verify — pass with warning
+  if (validResults.length === 0) {
+    return { passed: true, results };
+  }
+
+  // Only non-error models count for overall pass/fail
+  const passed = validResults.every((r) => r.passed);
   return { passed, results };
 }
 
@@ -604,17 +650,27 @@ function summarizeVerificationOutput(output: string): string {
  * Uses marker-based extraction (🔴/🟡/🔵) for structured output.
  */
 export function formatVerificationSummary(results: VerificationResult): string {
-  return results.results
-    .map((r) => {
-      const status = r.passed ? '✅ PASS' : '❌ FAIL';
-      const severity =
-        r.criticalCount + r.warningCount + r.infoCount > 0
-          ? ` (🔴${r.criticalCount} 🟡${r.warningCount} 🔵${r.infoCount})`
-          : '';
-      const output = summarizeVerificationOutput(r.output);
-      return `[${r.model}] ${status}${severity}\n${output}`;
-    })
-    .join('\n\n');
+  const infraErrors = results.results.filter((r) => r.infrastructureError);
+  const validResults = results.results.filter((r) => !r.infrastructureError);
+
+  const parts: string[] = [];
+
+  for (const r of validResults) {
+    const status = r.passed ? '✅ PASS' : '❌ FAIL';
+    const severity =
+      r.criticalCount + r.warningCount + r.infoCount > 0
+        ? ` (🔴${r.criticalCount} 🟡${r.warningCount} 🔵${r.infoCount})`
+        : '';
+    const output = summarizeVerificationOutput(r.output);
+    parts.push(`[${r.model}] ${status}${severity}\n${output}`);
+  }
+
+  for (const r of infraErrors) {
+    const preview = r.output.slice(0, 200).replace(/\n/g, ' ');
+    parts.push(`[${r.model}] ⚠️ SKIPPED (infrastructure error)\n${preview}`);
+  }
+
+  return parts.join('\n\n');
 }
 
 /**

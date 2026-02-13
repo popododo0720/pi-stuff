@@ -104,6 +104,7 @@ export interface ModelVerificationResult {
   criticalCount: number;
   warningCount: number;
   infoCount: number;
+  infrastructureError?: boolean;
 }
 
 export interface VerificationResult {

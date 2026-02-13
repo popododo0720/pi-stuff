@@ -384,21 +384,42 @@ export function registerTransitionTool(
               params.content,
             );
 
+            const infraErrors = result.results.filter(
+              (r) => r.infrastructureError,
+            );
+            const validResults = result.results.filter(
+              (r) => !r.infrastructureError,
+            );
+            const infraNote =
+              infraErrors.length > 0
+                ? `\n⚠️ ${infraErrors.length} model(s) skipped (infrastructure error: rate limit/quota/timeout)\n`
+                : '';
+
             if (result.passed) {
-              // Verified → move to compound
+              // Verified → move to compound (CRITICAL-only gate: no critical = pass)
               session.state = 'compound';
               session.retryCount = 0;
               setSession(session);
               updateStatusBar(ctx, session);
               await applyStageConfig(pi, ctx, settings.stages.compound);
+
+              const summary = formatVerificationSummary(result);
+              const hasWarnings = validResults.some((r) => r.warningCount > 0);
+              const reportNote = hasWarnings
+                ? '\n\n📋 **Verification Report** (advisory — not blocking):\n'
+                : '\n\n';
+
               return textResult(
-                '✅ Implementation verified! Moving to compound stage.\n\n' +
-                  'Analyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").\n\n' +
-                  formatVerificationSummary(result),
+                '✅ Implementation verified! Moving to compound stage.\n' +
+                  infraNote +
+                  reportNote +
+                  summary +
+                  '\n\nAnalyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").',
                 session,
               );
             }
 
+            // CRITICAL found — hard gate
             session.retryCount++;
             session.state = 'verifyImpl';
             const implResultPath = saveVerificationResult(
@@ -410,7 +431,9 @@ export function registerTransitionTool(
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
-              `❌ Implementation verification failed (attempt ${session.retryCount}). Please fix.\n\n` +
+              `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n` +
+                infraNote +
+                '\n' +
                 formatVerificationSummary(result) +
                 (implResultPath
                   ? `\n\n📋 Full results: ${implResultPath}`
