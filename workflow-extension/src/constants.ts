@@ -101,8 +101,13 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- **Summary** — what and why, in one paragraph.\n' +
     '- **Step-by-step tasks** — each with exact file path (from project root) and specific change description.\n' +
     '- **For each file**: what to add/modify/delete and where (after which function, which line area).\n' +
+    '  Include: function signatures, type definitions, import changes — enough that the implementer has zero ambiguity.\n' +
+    '- **Cross-file impact** — if a type/function/export changes, list EVERY consumer file that must update.\n' +
     '- **Verification criteria** — concrete, executable checks (grep, lint command, test command).\n' +
-    '- **What must NOT change** — explicit scope boundaries.\n\n' +
+    '- **What must NOT change** — explicit scope boundaries.\n' +
+    '- **IMPORTANT**: The plan is the SINGLE SOURCE OF TRUTH for verification.\n' +
+    '  Verifiers will ONLY check items in the plan. If something is not in the plan, it will not be verified.\n' +
+    '  If something should be done, it MUST be in the plan.\n\n' +
     'When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
     'Do NOT transition until the user explicitly approves.\n' +
     'Discussing the plan is NOT approval. Wait for explicit words like "approve", "go", "submit", "승인", "ㄱㄱ", "제출해".',
@@ -130,10 +135,13 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '  2. Run type checker if available (e.g. `npx tsc --noEmit`) and fix all errors.\n' +
     '  3. Run tests if available (e.g. `npm test`) and fix all failures.\n' +
     '  4. Update README.md and ARCHITECTURE.md to reflect current state.\n' +
-    '  5. **Self-critique**: Read every changed file. Compare against the plan item by item.\n' +
-    '     Check: missing items, edge cases (null/empty/zero), type safety, error handling, integration side effects.\n' +
-    '     Fix any issues found. This is NOT optional.\n' +
-    '  Do NOT call implDone until ALL of the above pass.\n' +
+    '  5. **Self-critique (MANDATORY — do NOT skip)**:\n' +
+    '     a. Re-read the Approved Plan above. Make a numbered checklist of every step.\n' +
+    '     b. For each step, read the actual file and confirm the change exists.\n' +
+    '     c. Check: missing steps, edge cases (null/empty/zero), type safety, error handling.\n' +
+    '     d. If ANY step is missing or incomplete, implement it NOW before continuing.\n' +
+    '     e. Run `grep` or other verification criteria from the plan to confirm.\n' +
+    '  Do NOT call implDone until ALL plan steps are verified present.\n' +
     '- When calling implDone, include implementation notes in content:\n' +
     '  workflow_transition(action: "implDone", content: "<notes about decisions, known trade-offs, context for verifiers>")\n' +
     '  This helps verifiers understand your reasoning and avoids false positives.\n\n' +
