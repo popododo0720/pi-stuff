@@ -110,4 +110,5 @@ export interface ModelVerificationResult {
 export interface VerificationResult {
   passed: boolean;
   results: ModelVerificationResult[];
+  halted?: boolean;
 }

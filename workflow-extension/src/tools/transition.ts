@@ -299,6 +299,24 @@ export function registerTransitionTool(
               signal,
             );
 
+            // Infrastructure error → revert to plan, stop loop
+            if (result.halted) {
+              session.state = 'plan';
+              setSession(session);
+              updateStatusBar(ctx, session);
+              const haltedModels = result.results
+                .filter((r) => r.infrastructureError)
+                .map((r) => r.model)
+                .join(', ');
+              return textResult(
+                '⛔ Plan verification halted — model infrastructure error.\n\n' +
+                  `Affected: ${haltedModels}\n\n` +
+                  'Retry `approvePlan` when the model is available again.' +
+                  (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
+                session,
+              );
+            }
+
             if (result.passed) {
               session.state = 'implement';
               session.retryCount = 0;
@@ -384,16 +402,27 @@ export function registerTransitionTool(
               params.content,
             );
 
-            const infraErrors = result.results.filter(
-              (r) => r.infrastructureError,
-            );
+            // Infrastructure error → revert to implement, stop loop
+            if (result.halted) {
+              session.state = 'implement';
+              setSession(session);
+              updateStatusBar(ctx, session);
+              const haltedModels = result.results
+                .filter((r) => r.infrastructureError)
+                .map((r) => r.model)
+                .join(', ');
+              return textResult(
+                '⛔ Verification halted — model infrastructure error (rate limit / quota / timeout).\n\n' +
+                  `Affected: ${haltedModels}\n\n` +
+                  'Retry `implDone` when the model is available again.\n' +
+                  'This is NOT a code issue — do NOT modify code to fix this.',
+                session,
+              );
+            }
+
             const validResults = result.results.filter(
               (r) => !r.infrastructureError,
             );
-            const infraNote =
-              infraErrors.length > 0
-                ? `\n⚠️ ${infraErrors.length} model(s) skipped (infrastructure error: rate limit/quota/timeout)\n`
-                : '';
 
             if (result.passed) {
               // Verified → move to compound (CRITICAL-only gate: no critical = pass)
@@ -411,7 +440,6 @@ export function registerTransitionTool(
 
               return textResult(
                 '✅ Implementation verified! Moving to compound stage.\n' +
-                  infraNote +
                   reportNote +
                   summary +
                   '\n\nAnalyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").',
@@ -431,9 +459,7 @@ export function registerTransitionTool(
             setSession(session);
             updateStatusBar(ctx, session);
             return textResult(
-              `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n` +
-                infraNote +
-                '\n' +
+              `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n\n` +
                 formatVerificationSummary(result) +
                 (implResultPath
                   ? `\n\n📋 Full results: ${implResultPath}`
