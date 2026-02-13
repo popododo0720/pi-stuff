@@ -146,18 +146,37 @@ export async function runParallelVerification(
   // Build verification prompt based on type
   let prompt =
     type === 'plan'
-      ? 'You are reviewing a PLAN, not code. Evaluate at the design level.\n\n' +
+      ? 'You are a senior architect reviewing a PLAN before implementation begins.\n\n' +
         `Task: ${description}\n\n` +
         `Plan:\n${planContent}\n\n` +
-        'Evaluate:\n' +
-        '1. Does the plan address the right problem?\n' +
-        '2. Is the approach sound and complete?\n' +
-        '3. Are file targets identified? (exact line numbers NOT required)\n' +
-        '4. Are there obvious missing steps or architectural risks?\n\n' +
-        'Do NOT fail for: missing exact line numbers, missing exact code snippets, ' +
-        'verification criteria depth, or minor wording issues.\n' +
-        'Only FAIL for: wrong approach, missing critical steps, or architectural flaws.\n\n' +
-        'Write a brief verification result. ' +
+        'Read relevant source files to understand the current codebase, then evaluate the plan:\n\n' +
+        '## 1. Correctness & Completeness\n' +
+        '- Does the plan address the right problem?\n' +
+        '- Are ALL steps listed? (no implicit "also do X" — every change must be explicit)\n' +
+        '- Are file targets identified? (exact line numbers NOT required)\n' +
+        '- For each changed function/type: are ALL consumers listed that need updating?\n' +
+        '- Are input validation and error handling covered for new/changed functions?\n\n' +
+        '## 2. Architecture & Design\n' +
+        '- Does the approach follow existing patterns in the codebase?\n' +
+        '- Is there unnecessary duplication? (could existing utils be reused?)\n' +
+        '- Are responsibilities cleanly separated? (SRP, no god functions)\n' +
+        '- Will this create circular dependencies or tight coupling?\n\n' +
+        '## 3. Security & Robustness\n' +
+        '- Are untrusted inputs validated? (user input, file I/O, JSON parsing)\n' +
+        '- Are edge cases considered? (empty, null, malformed, boundary values)\n' +
+        '- Could the changes break existing functionality? (side effects)\n\n' +
+        '## 4. Implementability\n' +
+        '- Is each step unambiguous enough that a developer can implement without guessing?\n' +
+        '- Are function signatures and type definitions specified for new APIs?\n\n' +
+        '## Classify each finding:\n' +
+        '🔴 CRITICAL: Wrong approach, missing critical step, architectural flaw, security vulnerability, breaking change not addressed\n' +
+        '🟡 WARNING: Missing consumer update, missing input validation, missing edge case handling, ambiguous step\n' +
+        '🔵 INFO: Style suggestion, minor optimization, nitpick\n\n' +
+        '## Verdict rules:\n' +
+        '- Any 🔴 CRITICAL or 🟡 WARNING → VERDICT: FAIL\n' +
+        '- Only 🔵 INFO → VERDICT: PASS\n' +
+        '- No findings → VERDICT: PASS\n\n' +
+        'Do NOT fail for: missing exact line numbers, missing exact code snippets, or minor wording.\n' +
         'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.'
       : 'You are a strict code verifier AND adversarial code breaker.\n\n' +
         `Task: ${description}\n\n` +

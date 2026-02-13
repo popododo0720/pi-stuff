@@ -46,7 +46,7 @@ async function pickModel(
  */
 async function pickModels(
   ctx: ExtensionCommandContext,
-  _current: string[],
+  current: string[],
 ): Promise<string[] | undefined> {
   const available = ctx.modelRegistry
     .getAvailable()
@@ -65,6 +65,9 @@ async function pickModels(
       ...(selected.length > 0
         ? [`✅ Done (selected: ${selected.join(', ')})`]
         : []),
+      ...(current.length > 0 && selected.length === 0
+        ? ['🗑️ Clear all']
+        : []),
       ...remaining,
     ];
 
@@ -75,8 +78,10 @@ async function pickModels(
 
     if (pick === undefined) {
       picking = false;
-    } else if (pick === options[0] && selected.length > 0) {
+    } else if (pick.startsWith('✅ Done') && selected.length > 0) {
       picking = false;
+    } else if (pick === '🗑️ Clear all') {
+      return [];
     } else {
       selected.push(pick);
       ctx.ui.notify(`+ ${pick}`, 'info');
