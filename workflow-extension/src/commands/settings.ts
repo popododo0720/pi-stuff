@@ -127,6 +127,7 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
       let configuring = true;
       while (configuring) {
         const rm = settings.repoMap;
+        const g = settings.git;
         const menuItems = [
           `📝 Plan (model: ${s.plan?.model || '(current)'}, thinking: ${s.plan?.thinking || '(current)'})`,
           `🔍 Verify (models: ${s.verify?.models?.join(', ') || 'none'}, thinking: ${s.verify?.thinking || '(current)'})`,
@@ -134,6 +135,7 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           `🧠 Compound (model: ${s.compound?.model || '(current)'}, thinking: ${s.compound?.thinking || '(current)'})`,
           `⏱️ Verify timeout (${settings.verifyTimeout / 1000}s)`,
           `🗺️ Repo Map (${rm?.enabled === false ? 'off' : 'on'}, budget: ${rm?.tokenBudget ?? 2048})`,
+          `🧬 Git Automation (${g?.enabled === false ? 'off' : 'on'}, commit/todo: ${g?.commitPerTodo === false ? 'off' : 'on'}, push/todo: ${g?.pushPerTodo === true ? 'on' : 'off'})`,
           '✅ Done',
         ];
 
@@ -284,6 +286,42 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
                 ctx.ui.notify('Enter a number between 256 and 8192.', 'error');
               }
             }
+          }
+        } else if (choice.startsWith('🧬')) {
+          // ── Git automation config ────────────────────────────────
+          const git = settings.git ?? {};
+          const sub = await ctx.ui.select('Git Automation settings', [
+            `Enabled (${git.enabled === false ? 'off' : 'on'})`,
+            `Commit per TODO (${git.commitPerTodo === false ? 'off' : 'on'})`,
+            `Push per TODO (${git.pushPerTodo === true ? 'on' : 'off'})`,
+            `Push on Complete (${git.pushOnComplete === false ? 'off' : 'on'})`,
+            `Require Clean Start (${git.requireCleanStart === false ? 'off' : 'on'})`,
+            `Use Workflow Branch (${git.useWorkflowBranch === false ? 'off' : 'on'})`,
+          ]);
+
+          const pickBoolean = async (title: string) =>
+            await ctx.ui.select(title, ['on', 'off']);
+
+          if (sub?.startsWith('Enabled')) {
+            const pick = await pickBoolean('Git automation enabled');
+            if (pick) settings.git = { ...git, enabled: pick === 'on' };
+          } else if (sub?.startsWith('Commit per TODO')) {
+            const pick = await pickBoolean('Auto commit per TODO');
+            if (pick) settings.git = { ...git, commitPerTodo: pick === 'on' };
+          } else if (sub?.startsWith('Push per TODO')) {
+            const pick = await pickBoolean('Auto push per TODO');
+            if (pick) settings.git = { ...git, pushPerTodo: pick === 'on' };
+          } else if (sub?.startsWith('Push on Complete')) {
+            const pick = await pickBoolean('Auto push on complete');
+            if (pick) settings.git = { ...git, pushOnComplete: pick === 'on' };
+          } else if (sub?.startsWith('Require Clean Start')) {
+            const pick = await pickBoolean('Require clean git tree at start');
+            if (pick)
+              settings.git = { ...git, requireCleanStart: pick === 'on' };
+          } else if (sub?.startsWith('Use Workflow Branch')) {
+            const pick = await pickBoolean('Use workflow branch strategy');
+            if (pick)
+              settings.git = { ...git, useWorkflowBranch: pick === 'on' };
           }
         }
       }

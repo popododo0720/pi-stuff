@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
 import type {
+  GitAutomationConfig,
   RepoMapConfig,
   StageConfig,
   StageConfigs,
@@ -29,6 +30,29 @@ function validateStageConfig(raw: unknown): StageConfig | undefined {
   if (typeof r.thinking === 'string' && VALID_THINKING.has(r.thinking))
     config.thinking = r.thinking as StageConfig['thinking'];
   return config.model || config.thinking ? config : undefined;
+}
+
+function validateGitConfig(raw: unknown): GitAutomationConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const config: GitAutomationConfig = {};
+
+  // Backward compatibility: autoCommit/autoPush -> commitPerTodo/pushPerTodo
+  if (typeof r.autoCommit === 'boolean') config.commitPerTodo = r.autoCommit;
+  if (typeof r.autoPush === 'boolean') config.pushPerTodo = r.autoPush;
+
+  if (typeof r.enabled === 'boolean') config.enabled = r.enabled;
+  if (typeof r.commitPerTodo === 'boolean')
+    config.commitPerTodo = r.commitPerTodo;
+  if (typeof r.pushPerTodo === 'boolean') config.pushPerTodo = r.pushPerTodo;
+  if (typeof r.pushOnComplete === 'boolean')
+    config.pushOnComplete = r.pushOnComplete;
+  if (typeof r.requireCleanStart === 'boolean')
+    config.requireCleanStart = r.requireCleanStart;
+  if (typeof r.useWorkflowBranch === 'boolean')
+    config.useWorkflowBranch = r.useWorkflowBranch;
+
+  return Object.keys(config).length > 0 ? config : undefined;
 }
 
 function validateRepoMapConfig(raw: unknown): RepoMapConfig | undefined {
@@ -105,11 +129,13 @@ export function loadSettings(cwd: string): WorkflowSettings {
         : DEFAULT_SETTINGS.verifyTimeout;
 
     const repoMap = validateRepoMapConfig(raw.repoMap);
+    const git = validateGitConfig(raw.git) ?? DEFAULT_SETTINGS.git;
 
     return {
       verifyTimeout: timeout,
       stages,
       ...(repoMap ? { repoMap } : {}),
+      ...(git ? { git } : {}),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, stages: {} };

@@ -14,6 +14,74 @@ import { applyStageConfig } from '../tools/transition';
 import type { WorkflowSession } from '../types';
 import { cleanupVerificationResults } from '../verification';
 
+interface GitStateCheckResult {
+  dirty: boolean;
+  checkFailed: boolean;
+  error?: string;
+}
+
+async function safeGitStatus(pi: ExtensionAPI): Promise<GitStateCheckResult> {
+  try {
+    const result = await pi.exec('git', ['status', '--porcelain']);
+    if (result.code !== 0) {
+      return {
+        dirty: true,
+        checkFailed: true,
+        error:
+          result.stderr.trim() ||
+          `git status failed with exit code ${result.code}`,
+      };
+    }
+
+    return {
+      dirty: result.stdout.trim().length > 0,
+      checkFailed: false,
+    };
+  } catch (e) {
+    return {
+      dirty: true,
+      checkFailed: true,
+      error: e instanceof Error ? e.message : 'git status failed',
+    };
+  }
+}
+
+async function safeGitWorktreeList(
+  pi: ExtensionAPI,
+): Promise<{ summary: string; error?: string }> {
+  try {
+    const result = await pi.exec('git', ['worktree', 'list']);
+    if (result.code !== 0) {
+      return {
+        summary: 'Worktree check failed.',
+        error:
+          result.stderr.trim() ||
+          `git worktree list failed with exit code ${result.code}`,
+      };
+    }
+
+    const output = result.stdout.trim();
+    if (!output) return { summary: 'No worktree info.' };
+
+    const lines = output
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const count = lines.length;
+    return {
+      summary:
+        count > 1
+          ? `Detected ${count} worktrees.`
+          : `Detected ${count} worktree.`,
+    };
+  } catch (e) {
+    return {
+      summary: 'Worktree check failed.',
+      error: e instanceof Error ? e.message : 'git worktree list failed',
+    };
+  }
+}
+
 /**
  * Register the /workflow command.
  * Creates a new workflow session and initializes memory if needed.
@@ -39,35 +107,6 @@ export function registerWorkflowCommand(
         if (!confirmed) return;
       }
 
-      // Clean up previous workflow
-      cleanupVerificationResults(ctx.cwd);
-      if (currentSession) {
-        try {
-          const memory = loadMemory(ctx.cwd);
-          memory.currentWork = memory.currentWork.filter(
-            (w) => !w.what.startsWith(`[${currentSession.id}]`),
-          );
-          saveMemory(ctx.cwd, memory);
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
-
-      // Create new session with unique ID
-      const id = generateWorkflowId();
-      const session: WorkflowSession = {
-        id,
-        state: 'plan',
-        description: description || 'Workflow',
-        planContent: '',
-        verifyPlanResult: '',
-        retryCount: 0,
-        completed: false,
-        todos: [],
-        activeTodoIndex: -1,
-      };
-      setSession(session);
-
       // Initialize memory file if it doesn't exist
       let hasMemory = false;
       try {
@@ -88,6 +127,109 @@ export function registerWorkflowCommand(
         // Ignore memory initialization errors
       }
 
+      // Check git/worktree state first
+      const gitStatus = await safeGitStatus(pi);
+      const worktreeInfo = await safeGitWorktreeList(pi);
+
+      // Create new session with unique ID
+      const id = generateWorkflowId();
+      const session: WorkflowSession = {
+        id,
+        state: 'plan',
+        description: description || 'Workflow',
+        planContent: '',
+        verifyPlanResult: '',
+        retryCount: 0,
+        completed: false,
+        todos: [],
+        activeTodoIndex: -1,
+        startupPrepRequired: false,
+        startupPrepNote: '',
+        startupPrepLocked: false,
+      };
+
+      if (gitStatus.checkFailed) {
+        // Unknown git state -> force prep TODO #1
+        session.startupPrepRequired = true;
+        session.startupPrepLocked = true;
+        session.startupPrepNote =
+          `Git state check failed: ${gitStatus.error || 'unknown error'}. ` +
+          `${worktreeInfo.summary}` +
+          (worktreeInfo.error ? ` (${worktreeInfo.error})` : '');
+        session.todos = [
+          {
+            title:
+              'Git/Worktree preparation: resolve git state check failure before feature work',
+            status: 'active',
+          },
+          {
+            title: `Main workflow task: ${session.description}`,
+            status: 'pending',
+          },
+        ];
+        session.activeTodoIndex = 0;
+        ctx.ui.notify(
+          '⚠️ Git state check failed. Added mandatory TODO #1 for repository preparation.',
+          'warning',
+        );
+      } else if (gitStatus.dirty) {
+        // Dirty tree -> ask user cleanup strategy and force TODO #1
+        const strategyOptions = [
+          'Commit current changes before feature work',
+          'Stash current changes before feature work',
+          'Proceed without cleanup (risky)',
+          'Cancel workflow start',
+        ];
+        const selected = await ctx.ui.select(
+          'Dirty git tree detected',
+          strategyOptions,
+        );
+
+        if (!selected || selected === 'Cancel workflow start') {
+          ctx.ui.notify('Workflow start cancelled.', 'info');
+          return;
+        }
+
+        session.startupPrepRequired = true;
+        session.startupPrepLocked = true;
+        session.startupPrepNote =
+          `Dirty tree detected. User cleanup strategy: ${selected}. ${worktreeInfo.summary}` +
+          (worktreeInfo.error ? ` (${worktreeInfo.error})` : '');
+        session.todos = [
+          {
+            title: `Git/Worktree preparation: ${selected}`,
+            status: 'active',
+          },
+          {
+            title: `Main workflow task: ${session.description}`,
+            status: 'pending',
+          },
+        ];
+        session.activeTodoIndex = 0;
+      } else {
+        // Clean tree -> proceed directly
+        session.startupPrepRequired = false;
+        session.startupPrepLocked = false;
+        session.startupPrepNote =
+          `Clean git tree. ${worktreeInfo.summary}` +
+          (worktreeInfo.error ? ` (${worktreeInfo.error})` : '');
+      }
+
+      // Clean up previous workflow only after new-start decisions are finalized
+      cleanupVerificationResults(ctx.cwd);
+      if (currentSession) {
+        try {
+          const memory = loadMemory(ctx.cwd);
+          memory.currentWork = memory.currentWork.filter(
+            (w) => !w.what.startsWith(`[${currentSession.id}]`),
+          );
+          saveMemory(ctx.cwd, memory);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      setSession(session);
       updateStatusBar(ctx, session);
 
       // Apply plan stage config
@@ -95,12 +237,19 @@ export function registerWorkflowCommand(
       await applyStageConfig(pi, ctx, settings.stages.plan);
 
       // Show different message for new vs returning users
-      ctx.ui.notify(
-        hasMemory
-          ? '📝 Entered planning mode. Tell me what to build.'
-          : "🚀 Starting project setup. Let's organize conventions first.",
-        'info',
-      );
+      if (session.startupPrepRequired) {
+        ctx.ui.notify(
+          '🧹 Added mandatory TODO #1 for git/worktree preparation before feature work.',
+          'info',
+        );
+      } else {
+        ctx.ui.notify(
+          hasMemory
+            ? '📝 Entered planning mode. Tell me what to build.'
+            : "🚀 Starting project setup. Let's organize conventions first.",
+          'info',
+        );
+      }
     },
   });
 }

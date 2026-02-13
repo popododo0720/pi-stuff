@@ -65,6 +65,89 @@ function textResult(text: string, session?: WorkflowSession) {
   };
 }
 
+async function runGit(
+  pi: ExtensionAPI,
+  args: string[],
+): Promise<{ ok: boolean; stdout: string; stderr: string; code: number }> {
+  try {
+    const result = await pi.exec('git', args);
+    return {
+      ok: result.code === 0,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      code: result.code,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: e instanceof Error ? e.message : 'git command failed',
+      code: -1,
+    };
+  }
+}
+
+async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
+  const status = await runGit(pi, ['status', '--porcelain']);
+  if (!status.ok) return false;
+  return status.stdout.length > 0;
+}
+
+async function autoCommitTodo(
+  pi: ExtensionAPI,
+  session: WorkflowSession,
+  todoIndex: number,
+): Promise<{ ok: boolean; message: string }> {
+  const add = await runGit(pi, ['add', '-A']);
+  if (!add.ok) {
+    return {
+      ok: false,
+      message: `git add failed: ${add.stderr || `exit ${add.code}`}`,
+    };
+  }
+
+  const hasChanges = await hasUncommittedChanges(pi);
+  if (!hasChanges) {
+    return { ok: true, message: 'No changes to commit for this TODO.' };
+  }
+
+  const todo = session.todos[todoIndex];
+  const title = todo?.title ?? 'unknown';
+  const msg = `chore(workflow): TODO #${todoIndex + 1} - ${title}`;
+  const commit = await runGit(pi, ['commit', '-m', msg]);
+  if (!commit.ok) {
+    return {
+      ok: false,
+      message: `git commit failed: ${commit.stderr || `exit ${commit.code}`}`,
+    };
+  }
+
+  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD']);
+  return {
+    ok: true,
+    message: `Committed TODO #${todoIndex + 1}${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
+  };
+}
+
+async function autoPush(
+  pi: ExtensionAPI,
+  branch?: string,
+): Promise<{ ok: boolean; message: string }> {
+  const push = branch
+    ? await runGit(pi, ['push', 'origin', branch])
+    : await runGit(pi, ['push']);
+  if (!push.ok) {
+    return {
+      ok: false,
+      message: `git push failed: ${push.stderr || `exit ${push.code}`}`,
+    };
+  }
+  return {
+    ok: true,
+    message: branch ? `Pushed origin/${branch}` : 'Pushed current branch',
+  };
+}
+
 /**
  * Register the workflow_transition tool.
  * Handles all state transitions with automatic parallel verification.
@@ -303,11 +386,35 @@ export function registerTransitionTool(
             session.activeTodoIndex >= 0 &&
             session.activeTodoIndex < session.todos.length
           ) {
+            const completedIndex = session.activeTodoIndex;
+
             // Mark current TODO as done
-            session.todos[session.activeTodoIndex].status = 'done';
-            const nextIndex = session.activeTodoIndex + 1;
+            session.todos[completedIndex].status = 'done';
+            const nextIndex = completedIndex + 1;
 
             if (nextIndex < session.todos.length) {
+              const gitNotes: string[] = [];
+              if (
+                settings.git?.enabled !== false &&
+                settings.git?.commitPerTodo !== false
+              ) {
+                const commit = await autoCommitTodo(
+                  pi,
+                  session,
+                  completedIndex,
+                );
+                gitNotes.push(
+                  commit.ok ? `📦 ${commit.message}` : `⚠️ ${commit.message}`,
+                );
+
+                if (commit.ok && settings.git?.pushPerTodo) {
+                  const push = await autoPush(pi, session.gitBranch);
+                  gitNotes.push(
+                    push.ok ? `🚀 ${push.message}` : `⚠️ ${push.message}`,
+                  );
+                }
+              }
+
               // Advance to next TODO — skip plan stage, go straight to implement
               session.todos[nextIndex].status = 'active';
               session.activeTodoIndex = nextIndex;
@@ -344,6 +451,9 @@ export function registerTransitionTool(
                   `${todoList}\n\n` +
                   (solutionPath
                     ? `**Solution saved:** ${solutionPath}\n\n`
+                    : '') +
+                  (gitNotes.length > 0
+                    ? `**Git automation:**\n${gitNotes.join('\n')}\n\n`
                     : '') +
                   `Now implement TODO #${nextIndex + 1}: "${session.todos[nextIndex].title}"\n` +
                   `Refer to the TODO #${nextIndex + 1} section in the approved plan above.`,
@@ -395,19 +505,66 @@ export function registerTransitionTool(
                 'All TODO items are empty. Provide non-empty strings.',
               );
             }
-            session.todos = titles.map((title, i) => ({
-              title,
-              status: i === 0 ? ('active' as const) : ('pending' as const),
-            }));
-            session.activeTodoIndex = 0;
+            const prepTodo =
+              session.startupPrepLocked && session.todos.length > 0
+                ? session.todos[0]
+                : null;
+
+            if (prepTodo) {
+              // Preserve mandatory startup prep as TODO #1.
+              // Rebuild remaining list from user titles, replacing any auto placeholder.
+              session.todos = [
+                { title: prepTodo.title, status: prepTodo.status },
+                ...titles.map((title, i) => ({
+                  title,
+                  status:
+                    prepTodo.status === 'done' && i === 0
+                      ? ('active' as const)
+                      : ('pending' as const),
+                })),
+              ];
+
+              let activeIndex = session.todos.findIndex(
+                (t) => t.status === 'active',
+              );
+              if (activeIndex < 0) {
+                if (prepTodo.status === 'done' && session.todos.length > 1) {
+                  session.todos[1].status = 'active';
+                  activeIndex = 1;
+                } else {
+                  session.todos[0].status = 'active';
+                  activeIndex = 0;
+                }
+              }
+              session.activeTodoIndex = activeIndex;
+            } else {
+              session.todos = titles.map((title, i) => ({
+                title,
+                status: i === 0 ? ('active' as const) : ('pending' as const),
+              }));
+              session.activeTodoIndex = 0;
+            }
+
             setSession(session);
 
             const todoList = session.todos
-              .map((t, i) => `${i === 0 ? '🔨' : '⬜'} ${i + 1}. ${t.title}`)
+              .map((t, i) => {
+                const icon =
+                  t.status === 'done'
+                    ? '✅'
+                    : t.status === 'active'
+                      ? '🔨'
+                      : '⬜';
+                return `${icon} ${i + 1}. ${t.title}`;
+              })
               .join('\n');
+            const effectiveCount = session.todos.length;
             return textResult(
-              `📋 TODO list set (${titles.length} items):\n${todoList}\n\n` +
-                `Now create ONE unified plan covering ALL ${titles.length} TODO items.\n` +
+              `📋 TODO list set (${effectiveCount} items):\n${todoList}\n\n` +
+                (prepTodo
+                  ? '⚠️ Preserved mandatory TODO #1 for git/worktree preparation.\n\n'
+                  : '') +
+                `Now create ONE unified plan covering ALL ${effectiveCount} TODO items.\n` +
                 `Structure the plan with clear sections (## TODO #1, ## TODO #2, etc.).\n` +
                 `All TODOs will be planned together, then implemented sequentially.`,
               session,

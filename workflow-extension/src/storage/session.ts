@@ -112,6 +112,17 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
           : raw.state === 'done',
       todos,
       activeTodoIndex,
+      startupPrepRequired:
+        typeof raw.startupPrepRequired === 'boolean'
+          ? raw.startupPrepRequired
+          : false,
+      startupPrepNote:
+        typeof raw.startupPrepNote === 'string' ? raw.startupPrepNote : '',
+      startupPrepLocked:
+        typeof raw.startupPrepLocked === 'boolean'
+          ? raw.startupPrepLocked
+          : false,
+      gitBranch: typeof raw.gitBranch === 'string' ? raw.gitBranch : undefined,
     };
   } catch {
     return null;

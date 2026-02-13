@@ -29,6 +29,10 @@ export interface WorkflowSession {
   completed: boolean;
   todos: TodoItem[];
   activeTodoIndex: number;
+  startupPrepRequired?: boolean;
+  startupPrepNote?: string;
+  startupPrepLocked?: boolean;
+  gitBranch?: string;
 }
 
 export interface ConditionalRule {
@@ -75,10 +79,20 @@ export interface RepoMapConfig {
   tokenBudget?: number;
 }
 
+export interface GitAutomationConfig {
+  enabled?: boolean;
+  commitPerTodo?: boolean;
+  pushPerTodo?: boolean;
+  pushOnComplete?: boolean;
+  requireCleanStart?: boolean;
+  useWorkflowBranch?: boolean;
+}
+
 export interface WorkflowSettings {
   verifyTimeout: number;
   stages: StageConfigs;
   repoMap?: RepoMapConfig;
+  git?: GitAutomationConfig;
 }
 
 export interface ModelVerificationResult {

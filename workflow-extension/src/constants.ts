@@ -34,6 +34,14 @@ export const DEFAULT_CONVENTIONS: string[] = [
 export const DEFAULT_SETTINGS: WorkflowSettings = {
   verifyTimeout: 120_000,
   stages: {},
+  git: {
+    enabled: true,
+    commitPerTodo: true,
+    pushPerTodo: false,
+    pushOnComplete: true,
+    requireCleanStart: true,
+    useWorkflowBranch: true,
+  },
 };
 
 // State maps
@@ -58,7 +66,7 @@ export const STATE_LABELS: Record<WorkflowState, string> = {
 export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
   approvePlan: ['plan', 'verifyPlan'],
   implDone: ['implement', 'verifyImpl'],
-  replan: ['implement', 'verifyImpl'],
+  replan: ['implement', 'verifyImpl', 'verifyPlan'],
   compoundDone: ['compound'],
   setTodos: ['plan'],
 };
@@ -85,6 +93,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     'Call workflow_transition(action: "setTodos", content: \'["item1", "item2", "item3"]\')\n' +
     '**After setting TODOs, write ONE unified plan covering ALL TODO items in separate sections.**\n' +
     'Each TODO will be implemented sequentially, but planned together for better architecture.\n\n' +
+    '⚠️ If startup git/worktree preparation is required, keep that mandatory TODO as #1 and plan it first before feature work.\n\n' +
     '### Phase 1: Pre-Analysis (before planning)\n' +
     'Analyze the request for:\n' +
     '- Ambiguities or unclear requirements — ask the user to clarify.\n' +
