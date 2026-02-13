@@ -1,6 +1,6 @@
 # Workflow Extension for Pi
 
-A workflow automation extension for the [Pi coding agent](https://github.com/mariozechner/pi-coding-agent) that enforces a structured development cycle: **Plan → Verify → Implement → Verify → Compound → Done**.
+A workflow automation extension for Pi coding agent (`@mariozechner/pi-coding-agent`) that enforces a structured development cycle: **Plan → Verify → Implement → Verify → Compound → Done**.
 
 ## Features
 
@@ -22,7 +22,7 @@ A workflow automation extension for the [Pi coding agent](https://github.com/mar
 
 ### Prerequisites
 
-- [Pi coding agent](https://github.com/mariozechner/pi-coding-agent) installed
+- Pi coding agent (`@mariozechner/pi-coding-agent`) installed
 - Node.js 18+
 
 ### Setup
