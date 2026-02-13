@@ -183,6 +183,7 @@ export function registerTransitionTool(
               pi,
               ctx.cwd,
               signal,
+              params.content,
             );
 
             if (result.passed) {

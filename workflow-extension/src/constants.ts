@@ -131,8 +131,13 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '  2. Run type checker if available (e.g. `npx tsc --noEmit`) and fix all errors.\n' +
     '  3. Run tests if available (e.g. `npm test`) and fix all failures.\n' +
     '  4. Update README.md and ARCHITECTURE.md to reflect current state.\n' +
+    '  5. **Self-critique**: Read every changed file. Compare against the plan item by item.\n' +
+    '     Check: missing items, edge cases (null/empty/zero), type safety, error handling, integration side effects.\n' +
+    '     Fix any issues found. This is NOT optional.\n' +
     '  Do NOT call implDone until ALL of the above pass.\n' +
-    '- When all checks pass, call workflow_transition(action: "implDone").\n\n' +
+    '- When calling implDone, include implementation notes in content:\n' +
+    '  workflow_transition(action: "implDone", content: "<notes about decisions, known trade-offs, context for verifiers>")\n' +
+    '  This helps verifiers understand your reasoning and avoids false positives.\n\n' +
     '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:
