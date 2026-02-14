@@ -596,6 +596,7 @@ export function registerTransitionTool(
             }
 
             setSession(session);
+            updateStatusBar(ctx, session);
 
             const todoList = session.todos
               .map((t, i) => {
