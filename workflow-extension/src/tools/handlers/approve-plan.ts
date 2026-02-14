@@ -117,12 +117,24 @@ export async function handleApprovePlan(
   } catch (e) {
     const isNoModels =
       e instanceof Error && e.message.includes('No verification models');
-    return {
-      text: isNoModels
-        ? '⚠️ No verification models. Falling back to manual verification. Use /workflow-settings to configure.' +
-          (savedPath ? `\n📄 Plan saved: ${savedPath}` : '')
-        : '⚠️ Auto-verification error. Falling back to manual verification.' +
+    if (isNoModels) {
+      session.state = 'implement';
+      session.retryCount = 0;
+      session.verifyPlanResult =
+        'Auto-verification unavailable — no models configured';
+      return {
+        text:
+          '⚠️ No verification models configured. Skipping verification.' +
           (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
+        stageConfig: settings.stages.implement,
+      };
+    }
+    session.state = 'plan';
+    return {
+      text:
+        '⚠️ Auto-verification error. Returned to plan stage — retry approvePlan when ready.' +
+        (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
+      stageConfig: settings.stages.plan,
     };
   }
 }

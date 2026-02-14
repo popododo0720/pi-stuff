@@ -10,7 +10,7 @@ import { updateStatusBar } from '../context/status';
 import { loadSettings } from '../storage/settings';
 import type { StageConfig, WorkflowSession } from '../types';
 import { compactManager } from './compact';
-import type { HandlerContext } from './handlers';
+import type { HandlerContext, HandlerResult } from './handlers';
 import { handlers } from './handlers';
 
 /** Apply stage-specific model and thinking level. */
@@ -111,7 +111,18 @@ export function registerTransitionTool(
       };
 
       // ── Execute handler ──────────────────────────────────────
-      const result = await handler(hctx);
+      const originalState = session.state;
+      let result: HandlerResult;
+      try {
+        result = await handler(hctx);
+      } catch (e) {
+        session.state = originalState;
+        setSession(session);
+        updateStatusBar(ctx, session);
+        return textResult(
+          `❌ Internal error during ${params.action}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
 
       // ── Guaranteed post-processing (single point, never skipped) ──
       setSession(session);
