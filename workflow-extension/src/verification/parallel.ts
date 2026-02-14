@@ -360,7 +360,7 @@ export async function runParallelVerification(
  * Extract structured findings sections + verdict for summary display.
  * Ignores free-text analysis, only shows ## CRITICAL/WARNING/INFO sections.
  */
-function summarizeVerificationOutput(output: string): string {
+export function summarizeVerificationOutput(output: string): string {
   const MAX_LENGTH = 1500;
   const lines = output.split('\n');
   const findings: string[] = [];

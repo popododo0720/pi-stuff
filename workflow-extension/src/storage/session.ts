@@ -127,6 +127,14 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
         typeof raw.gitWorktreePath === 'string'
           ? raw.gitWorktreePath
           : undefined,
+      compoundMemorySnapshot:
+        typeof raw.compoundMemorySnapshot === 'object' &&
+        raw.compoundMemorySnapshot !== null &&
+        typeof raw.compoundMemorySnapshot.patterns === 'number' &&
+        typeof raw.compoundMemorySnapshot.gotchas === 'number' &&
+        typeof raw.compoundMemorySnapshot.decisions === 'number'
+          ? raw.compoundMemorySnapshot
+          : undefined,
     };
   } catch {
     return null;

@@ -186,6 +186,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '4. **Save decisions** — architecture choices with rationale → project_memory(action: "add", category: "decisions", value: "...")\n' +
     '5. **Save conventions** — project preferences discovered → project_memory(category: "conventions")\n' +
     '6. **Memory cleanup** — remove outdated entries: project_memory(action: "remove", category: "...", index: N)\n' +
+    "   ⚠️ **compoundDone will be REJECTED** if you haven't saved at least one new pattern, gotcha, or decision via project_memory.\n" +
     '7. **Git cleanup (MANDATORY — do NOT call compoundDone until ALL sub-steps verified)**:\n' +
     '   Execute each sub-step, verify success, then proceed to the next:\n' +
     '   a. `git add -A && git status` — check for remaining changes\n' +

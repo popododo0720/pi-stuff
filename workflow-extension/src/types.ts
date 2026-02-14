@@ -39,6 +39,11 @@ export interface WorkflowSession {
   startupPrepLocked?: boolean;
   gitBranch?: string;
   gitWorktreePath?: string;
+  compoundMemorySnapshot?: {
+    patterns: number;
+    gotchas: number;
+    decisions: number;
+  };
 }
 
 export interface ConditionalRule {

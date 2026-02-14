@@ -140,8 +140,25 @@ export async function handleCompoundDone(
 ): Promise<HandlerResult> {
   const { session } = hctx;
 
-  // ── Auto-promotion: patterns with count >= 3 → critical.md ──
+  // ── Capture gate: require at least one new learning ──
   const memory = loadMemory(hctx.ctx.cwd);
+  const prevCounts = session.compoundMemorySnapshot;
+  if (prevCounts) {
+    const hasNew =
+      memory.patterns.length > prevCounts.patterns ||
+      memory.gotchas.length > prevCounts.gotchas ||
+      memory.decisions.length > prevCounts.decisions;
+    if (!hasNew) {
+      return {
+        text:
+          '⚠️ No new learnings captured.\n' +
+          'Use project_memory(action: "add") to save at least one pattern, gotcha, or decision before calling compoundDone.\n' +
+          'If this task truly had no learnings, add a gotcha or decision explaining why.',
+      };
+    }
+  }
+
+  // ── Auto-promotion: patterns with count >= 3 → critical.md ──
   const promoted: string[] = [];
   const remaining = memory.patterns.filter((p) => {
     if (p.count >= 3) {
