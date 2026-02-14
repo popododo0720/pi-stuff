@@ -139,7 +139,8 @@ export function loadSettings(cwd: string): WorkflowSettings {
       ...(repoMap ? { repoMap } : {}),
       ...(git ? { git } : {}),
     };
-  } catch {
+  } catch (e) {
+    console.error('[workflow] loadSettings failed:', e);
     return { ...DEFAULT_SETTINGS, stages: {} };
   }
 }

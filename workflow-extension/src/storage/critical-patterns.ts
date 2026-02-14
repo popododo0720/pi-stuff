@@ -33,7 +33,8 @@ export function loadCriticalPatterns(cwd: string): string {
     const path = resolveCriticalPath(cwd);
     if (!existsSync(path)) return '';
     return readFileSync(path, 'utf-8').trim();
-  } catch {
+  } catch (e) {
+    console.error('[workflow] loadCriticalPatterns failed:', e);
     return '';
   }
 }

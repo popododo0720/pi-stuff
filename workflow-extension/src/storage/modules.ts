@@ -43,7 +43,8 @@ export function listModules(cwd: string): string[] {
     return readdirSync(dir)
       .filter((f) => f.endsWith('.json'))
       .map((f) => f.replace('.json', ''));
-  } catch {
+  } catch (e) {
+    console.error('[workflow] listModules failed:', e);
     return [];
   }
 }
@@ -63,7 +64,8 @@ export function loadModule(cwd: string, name: string): ModuleConventions {
       conventions: raw.conventions ?? [],
       rules: raw.rules ?? [],
     };
-  } catch {
+  } catch (e) {
+    console.error('[workflow] loadModule failed:', e);
     return { path: '', conventions: [], rules: [] };
   }
 }

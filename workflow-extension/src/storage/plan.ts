@@ -39,7 +39,8 @@ export function savePlanDocument(
       `workflow: true\n---\n\n`;
     writeFileSync(filePath, frontmatter + content, 'utf-8');
     return filePath;
-  } catch {
+  } catch (e) {
+    console.error('[workflow] savePlan failed:', e);
     return null;
   }
 }

@@ -359,8 +359,8 @@ async function finalizeWorkflow(
       (w) => !w.what.startsWith(`[${session.id}]`),
     );
     saveMemory(hctx.ctx.cwd, curMemory);
-  } catch {
-    // Ignore cleanup errors
+  } catch (e) {
+    console.error('[workflow] currentWork cleanup failed:', e);
   }
 
   return {

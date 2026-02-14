@@ -44,8 +44,8 @@ export function saveSessionToDisk(
   if (!session) {
     try {
       if (existsSync(path)) unlinkSync(path);
-    } catch {
-      // Ignore delete errors
+    } catch (e) {
+      console.error('[workflow] session delete failed:', e);
     }
     return;
   }
@@ -56,8 +56,8 @@ export function saveSessionToDisk(
       encoding: 'utf-8',
       mode: 0o600,
     });
-  } catch {
-    // Ignore save errors — in-memory state is still valid
+  } catch (e) {
+    console.error('[workflow] session save failed:', e);
   }
 }
 
@@ -140,7 +140,8 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
           ? raw.gitSkipAttempted
           : undefined,
     };
-  } catch {
+  } catch (e) {
+    console.error('[workflow] loadSession failed:', e);
     return null;
   }
 }

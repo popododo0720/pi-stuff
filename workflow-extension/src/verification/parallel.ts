@@ -467,7 +467,8 @@ export function saveVerificationResult(
       .join('\n\n---\n\n');
     writeFileSync(filePath, content, 'utf-8');
     return filePath;
-  } catch {
+  } catch (e) {
+    console.error('[workflow] saveVerificationResult failed:', e);
     return null;
   }
 }
@@ -480,7 +481,7 @@ export function cleanupVerificationResults(cwd: string): void {
       unlinkSync(join(dir, file));
     }
     rmdirSync(dir);
-  } catch {
-    // Ignore cleanup errors
+  } catch (e) {
+    console.error('[workflow] cleanupVerificationResults failed:', e);
   }
 }

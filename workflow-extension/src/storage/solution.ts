@@ -45,7 +45,8 @@ export function saveSolution(
       '---\n\n';
     writeFileSync(filePath, frontmatter + content, 'utf-8');
     return filePath;
-  } catch {
+  } catch (e) {
+    console.error('[workflow] saveSolution failed:', e);
     return null;
   }
 }

@@ -65,8 +65,8 @@ export function registerWorkflowCommand(
             decisions: [],
           });
         }
-      } catch {
-        // Ignore memory initialization errors
+      } catch (e) {
+        console.error('[workflow] memory init failed:', e);
       }
 
       // Check git/worktree state first
@@ -273,8 +273,8 @@ export function registerWorkflowCommand(
             (w) => !w.what.startsWith(`[${currentSession.id}]`),
           );
           saveMemory(ctx.cwd, memory);
-        } catch {
-          // Ignore cleanup errors
+        } catch (e) {
+          console.error('[workflow] memory cleanup failed:', e);
         }
       }
 

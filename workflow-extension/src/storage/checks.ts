@@ -18,12 +18,14 @@ export function loadCustomChecks(cwd: string): string[] {
       .map((f) => {
         try {
           return readFileSync(join(dir, f), 'utf-8');
-        } catch {
+        } catch (e) {
+          console.error('[workflow] loadCustomCheck read failed:', e);
           return '';
         }
       })
       .filter(Boolean);
-  } catch {
+  } catch (e) {
+    console.error('[workflow] loadCustomChecks failed:', e);
     return [];
   }
 }

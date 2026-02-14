@@ -44,8 +44,8 @@ export function registerCancelCommand(
           (w) => !w.what.startsWith(`[${session?.id}]`),
         );
         saveMemory(ctx.cwd, memory);
-      } catch {
-        // Ignore memory cleanup errors
+      } catch (e) {
+        console.error('[workflow] cancel cleanup failed:', e);
       }
 
       const branchNote = session.gitBranch

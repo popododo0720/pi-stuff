@@ -54,7 +54,8 @@ export function loadMemory(cwd: string): ProjectMemory {
       gotchas: Array.isArray(raw.gotchas) ? raw.gotchas : [],
       decisions: Array.isArray(raw.decisions) ? raw.decisions : [],
     };
-  } catch {
+  } catch (e) {
+    console.error('[workflow] loadMemory failed:', e);
     return {
       conventions: [],
       rules: [],
