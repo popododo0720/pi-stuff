@@ -24,10 +24,7 @@ import {
   getGitCwd,
 } from './git-automation';
 
-/**
- * Apply stage-specific model and thinking level.
- * Skips if config is undefined or fields are not set.
- */
+/** Apply stage-specific model and thinking level. */
 export async function applyStageConfig(
   pi: ExtensionAPI,
   ctx: {
@@ -60,10 +57,7 @@ function textResult(text: string, session?: WorkflowSession) {
   };
 }
 
-/**
- * Register the workflow_transition tool.
- * Handles all state transitions with automatic parallel verification.
- */
+/** Register the workflow_transition tool. */
 export function registerTransitionTool(
   pi: ExtensionAPI,
   getSession: () => WorkflowSession | null,
@@ -99,7 +93,6 @@ export function registerTransitionTool(
 
       const settings = loadSettings(ctx.cwd);
 
-      // Validate transition is allowed from current state
       const allowed = VALID_TRANSITIONS[params.action];
       if (!allowed || !allowed.includes(session.state)) {
         return textResult(
@@ -108,7 +101,6 @@ export function registerTransitionTool(
       }
 
       switch (params.action) {
-        // ── Plan approved → auto-verify ──────────────────────────
         case 'approvePlan': {
           if (!params.content?.trim()) {
             return textResult('Plan content is empty.');
@@ -233,7 +225,6 @@ export function registerTransitionTool(
           }
         }
 
-        // ── Implementation done → auto-verify ────────────────────
         case 'implDone': {
           session.state = 'verifyImpl';
           setSession(session);
@@ -349,7 +340,6 @@ export function registerTransitionTool(
           }
         }
 
-        // ── Compound done → advance TODO or finish ────────────────
         case 'compoundDone': {
           const summary = params.content?.trim() || '';
           let solutionPath: string | null = null;
@@ -551,7 +541,6 @@ export function registerTransitionTool(
           );
         }
 
-        // ── Set TODOs for multi-item workflows ──────────────────
         case 'setTodos': {
           try {
             const raw: unknown[] = JSON.parse(params.content || '[]');
@@ -637,7 +626,6 @@ export function registerTransitionTool(
           }
         }
 
-        // ── Replan ───────────────────────────────────────────────
         case 'replan':
           session.state = 'plan';
           session.verifyPlanResult = '';
@@ -645,7 +633,6 @@ export function registerTransitionTool(
           break;
       }
 
-      // Common exit
       setSession(session);
       updateStatusBar(ctx, session);
 
