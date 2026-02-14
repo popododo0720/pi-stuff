@@ -1,28 +1,17 @@
-// tools/transition.ts — workflow_transition tool
-// Manages state machine: plan → verify → implement → verify → compound → done.
+// tools/transition.ts — workflow_transition tool (executor)
+// Thin executor: validates → delegates to handler → guarantees post-processing.
+// All action logic lives in tools/handlers/*.ts.
 
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { STATE_EMOJI, TOOL_NAME, VALID_TRANSITIONS } from '../constants';
+import { TOOL_NAME, VALID_TRANSITIONS } from '../constants';
 import { updateStatusBar } from '../context/status';
-import { loadMemory, saveMemory } from '../storage/memory';
-import { savePlanDocument } from '../storage/plan';
 import { loadSettings } from '../storage/settings';
-import { saveSolution } from '../storage/solution';
 import type { StageConfig, WorkflowSession } from '../types';
-import {
-  formatVerificationSummary,
-  runParallelVerification,
-  saveVerificationResult,
-} from '../verification';
-import { compactManager, RESET_MARKER } from './compact';
-import {
-  autoCommitFinal,
-  autoCommitTodo,
-  autoPush,
-  getGitCwd,
-} from './git-automation';
+import { compactManager } from './compact';
+import type { HandlerContext } from './handlers';
+import { handlers } from './handlers';
 
 /** Apply stage-specific model and thinking level. */
 export async function applyStageConfig(
@@ -49,7 +38,7 @@ export async function applyStageConfig(
   }
 }
 
-// Helper to build a text content response
+/** Build a text content response for tool return. */
 function textResult(text: string, session?: WorkflowSession) {
   return {
     content: [{ type: 'text' as const, text }],
@@ -86,6 +75,7 @@ export function registerTransitionTool(
       reason: Type.Optional(Type.String({ description: 'Failure reason' })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      // ── Pre-validation ───────────────────────────────────────
       const session = getSession();
       if (!session) {
         return textResult('No active workflow. Start with /workflow.');
@@ -100,549 +90,41 @@ export function registerTransitionTool(
         );
       }
 
-      switch (params.action) {
-        case 'approvePlan': {
-          if (!params.content?.trim()) {
-            return textResult('Plan content is empty.');
-          }
-          session.planContent = params.content;
-
-          const savedPath = savePlanDocument(
-            ctx.cwd,
-            session.description,
-            params.content,
-          );
-
-          session.state = 'verifyPlan';
-          setSession(session);
-          updateStatusBar(ctx, session);
-
-          onUpdate?.({
-            content: [
-              {
-                type: 'text' as const,
-                text:
-                  `🔍 Verifying plan... (${(settings.stages.verify?.models ?? []).join(' + ') || 'no models'})` +
-                  (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
-              },
-            ],
-          });
-
-          try {
-            const result = await runParallelVerification(
-              'plan',
-              session.planContent,
-              session.description,
-              settings,
-              pi,
-              ctx.cwd,
-              signal,
-            );
-
-            // Infrastructure error → revert to plan, stop loop
-            if (result.halted) {
-              session.state = 'plan';
-              const haltResultPath = saveVerificationResult(
-                ctx.cwd,
-                'plan',
-                result,
-                session.id,
-              );
-              setSession(session);
-              updateStatusBar(ctx, session);
-              const haltedModels = result.results
-                .filter((r) => r.infrastructureError)
-                .map((r) => r.model)
-                .join(', ');
-              return textResult(
-                '⛔ Plan verification halted — model infrastructure error.\n\n' +
-                  `Affected: ${haltedModels}\n\n` +
-                  formatVerificationSummary(result) +
-                  '\n\nRetry `approvePlan` when the model is available again.' +
-                  (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
-                  (haltResultPath
-                    ? `\n📋 Full results: ${haltResultPath}`
-                    : ''),
-                session,
-              );
-            }
-
-            if (result.passed) {
-              session.state = 'implement';
-              session.retryCount = 0;
-              const summary = formatVerificationSummary(result);
-              const hasWarnings = summary.includes('🟡');
-              const hasInfo = summary.includes('🔵');
-              session.verifyPlanResult =
-                hasWarnings || hasInfo
-                  ? `Plan passed with notes:\n${summary}`
-                  : 'Auto-verification passed';
-              setSession(session);
-              updateStatusBar(ctx, session);
-              await applyStageConfig(pi, ctx, settings.stages.implement);
-              return textResult(
-                '✅ Plan verified! Moving to implementation.' +
-                  (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
-                  (hasWarnings
-                    ? '\n\n⚠️ **Address these warnings during implementation:**'
-                    : '') +
-                  `\n\n${summary}`,
-                session,
-              );
-            }
-
-            session.retryCount++;
-            session.state = 'verifyPlan';
-            session.verifyPlanResult = formatVerificationSummary(result);
-            const resultPath = saveVerificationResult(
-              ctx.cwd,
-              'plan',
-              result,
-              session.id,
-            );
-            setSession(session);
-            updateStatusBar(ctx, session);
-            return textResult(
-              `❌ Plan verification failed (attempt ${session.retryCount}). Please revise.\n\n` +
-                formatVerificationSummary(result) +
-                (resultPath ? `\n\n📋 Full results: ${resultPath}` : ''),
-              session,
-            );
-          } catch (e) {
-            const isNoModels =
-              e instanceof Error &&
-              e.message.includes('No verification models');
-            setSession(session);
-            updateStatusBar(ctx, session);
-            return textResult(
-              isNoModels
-                ? '⚠️ No verification models. Falling back to manual verification. Use /workflow-settings to configure.' +
-                    (savedPath ? `\n📄 Plan saved: ${savedPath}` : '')
-                : '⚠️ Auto-verification error. Falling back to manual verification.' +
-                    (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
-              session,
-            );
-          }
-        }
-
-        case 'implDone': {
-          session.state = 'verifyImpl';
-          setSession(session);
-          updateStatusBar(ctx, session);
-
-          onUpdate?.({
-            content: [
-              {
-                type: 'text' as const,
-                text: `🔍 Verifying implementation... (${(settings.stages.verify?.models ?? []).join(' + ') || 'no models'})`,
-              },
-            ],
-          });
-
-          try {
-            const result = await runParallelVerification(
-              'impl',
-              session.planContent,
-              session.description,
-              settings,
-              pi,
-              ctx.cwd,
-              signal,
-              params.content,
-            );
-
-            // Infrastructure error → revert to implement, stop loop
-            if (result.halted) {
-              session.state = 'implement';
-              const haltResultPath = saveVerificationResult(
-                ctx.cwd,
-                'impl',
-                result,
-                session.id,
-              );
-              setSession(session);
-              updateStatusBar(ctx, session);
-              const haltedModels = result.results
-                .filter((r) => r.infrastructureError)
-                .map((r) => r.model)
-                .join(', ');
-              return textResult(
-                '⛔ Verification halted — model infrastructure error (rate limit / quota / timeout).\n\n' +
-                  `Affected: ${haltedModels}\n\n` +
-                  formatVerificationSummary(result) +
-                  '\n\nRetry `implDone` when the model is available again.\n' +
-                  'This is NOT a code issue — do NOT modify code to fix this.' +
-                  (haltResultPath
-                    ? `\n\n📋 Full results: ${haltResultPath}`
-                    : ''),
-                session,
-              );
-            }
-
-            const validResults = result.results.filter(
-              (r) => !r.infrastructureError,
-            );
-
-            if (result.passed) {
-              // Verified → move to compound (CRITICAL-only gate: no critical = pass)
-              session.state = 'compound';
-              session.retryCount = 0;
-              setSession(session);
-              updateStatusBar(ctx, session);
-              await applyStageConfig(pi, ctx, settings.stages.compound);
-
-              const summary = formatVerificationSummary(result);
-              const hasWarnings = validResults.some((r) => r.warningCount > 0);
-              const reportNote = hasWarnings
-                ? '\n\n📋 **Verification Report** (advisory — not blocking):\n'
-                : '\n\n';
-
-              return textResult(
-                '✅ Implementation verified! Moving to compound stage.\n' +
-                  reportNote +
-                  summary +
-                  '\n\nAnalyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").',
-                session,
-              );
-            }
-
-            // CRITICAL found — hard gate
-            session.retryCount++;
-            session.state = 'verifyImpl';
-            const implResultPath = saveVerificationResult(
-              ctx.cwd,
-              'impl',
-              result,
-              session.id,
-            );
-            setSession(session);
-            updateStatusBar(ctx, session);
-            return textResult(
-              `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n\n` +
-                formatVerificationSummary(result) +
-                (implResultPath
-                  ? `\n\n📋 Full results: ${implResultPath}`
-                  : ''),
-              session,
-            );
-          } catch (e) {
-            const isNoModels =
-              e instanceof Error &&
-              e.message.includes('No verification models');
-            setSession(session);
-            updateStatusBar(ctx, session);
-            return textResult(
-              isNoModels
-                ? '⚠️ No verification models. Falling back to manual verification. Use /workflow-settings to configure.'
-                : '⚠️ Auto-verification error. Falling back to manual verification.',
-              session,
-            );
-          }
-        }
-
-        case 'compoundDone': {
-          const summary = params.content?.trim() || '';
-          let solutionPath: string | null = null;
-          if (summary) {
-            solutionPath = saveSolution(
-              ctx.cwd,
-              session.description,
-              summary,
-              session.id,
-            );
-          }
-
-          let completedTodoIndex: number | null = null;
-          const gitCwd = getGitCwd(ctx.cwd);
-
-          // Check if there are more TODOs to process
-          if (
-            session.activeTodoIndex >= 0 &&
-            session.activeTodoIndex < session.todos.length
-          ) {
-            completedTodoIndex = session.activeTodoIndex;
-
-            // Mark current TODO as done
-            session.todos[completedTodoIndex].status = 'done';
-            const nextIndex = completedTodoIndex + 1;
-
-            if (nextIndex < session.todos.length) {
-              const gitNotes: string[] = [];
-              if (
-                settings.git?.enabled !== false &&
-                settings.git?.commitPerTodo !== false
-              ) {
-                const commit = await autoCommitTodo(
-                  pi,
-                  session,
-                  completedTodoIndex,
-                  gitCwd,
-                );
-                gitNotes.push(
-                  commit.ok ? `📦 ${commit.message}` : `⚠️ ${commit.message}`,
-                );
-
-                if (commit.ok && settings.git?.pushPerTodo) {
-                  const push = await autoPush(pi, session.gitBranch, gitCwd);
-                  gitNotes.push(
-                    push.ok ? `🚀 ${push.message}` : `⚠️ ${push.message}`,
-                  );
-                }
-              }
-
-              // Advance to next TODO — skip plan stage, go straight to implement
-              session.todos[nextIndex].status = 'active';
-              session.activeTodoIndex = nextIndex;
-              session.state = 'implement';
-              // Keep planContent and verifyPlanResult — already verified unified plan
-              session.retryCount = 0;
-              setSession(session);
-              updateStatusBar(ctx, session);
-              await applyStageConfig(pi, ctx, settings.stages.implement);
-
-              const doneCount = session.todos.filter(
-                (t) => t.status === 'done',
-              ).length;
-              const todoList = session.todos
-                .map((t, i) => {
-                  const icon =
-                    t.status === 'done'
-                      ? '✅'
-                      : t.status === 'active'
-                        ? '🔨'
-                        : '⬜';
-                  return `${icon} ${i + 1}. ${t.title}`;
-                })
-                .join('\n');
-
-              // Defer compaction — will run in next before_agent_start
-              compactManager.setPending(
-                `${RESET_MARKER} Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
-                  `Preserve: unified plan, TODO list progress, key decisions. ` +
-                  `Discard: previous TODO implementation details, verification output, code diffs.`,
-              );
-
-              return textResult(
-                `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
-                  `${todoList}\n\n` +
-                  (solutionPath
-                    ? `**Solution saved:** ${solutionPath}\n\n`
-                    : '') +
-                  (gitNotes.length > 0
-                    ? `**Git automation:**\n${gitNotes.join('\n')}\n\n`
-                    : '') +
-                  `Now implement TODO #${nextIndex + 1}: "${session.todos[nextIndex].title}"\n` +
-                  `Refer to the TODO #${nextIndex + 1} section in the approved plan above.`,
-                session,
-              );
-            }
-          }
-
-          // Finalization for all-done path: commit + push must succeed
-          const finalGitNotes: string[] = [];
-          if (settings.git?.enabled !== false) {
-            const finalCommit = await autoCommitFinal(
-              pi,
-              session,
-              completedTodoIndex,
-              gitCwd,
-            );
-            if (!finalCommit.ok) {
-              session.state = 'compound';
-              setSession(session);
-              updateStatusBar(ctx, session);
-              return textResult(
-                `❌ Final commit failed. Workflow cannot complete yet.\n\n${finalCommit.message}`,
-                session,
-              );
-            }
-            finalGitNotes.push(`📦 ${finalCommit.message}`);
-
-            if (settings.git?.pushOnComplete !== false) {
-              const branchStrategyEnabled =
-                settings.git?.useWorkflowWorktree !== false ||
-                settings.git?.useWorkflowBranch !== false;
-
-              if (!session.gitBranch) {
-                finalGitNotes.push(
-                  branchStrategyEnabled
-                    ? '⚠️ Final push skipped: workflow branch target is missing (e.g., startup prep path).'
-                    : '⚠️ Final push skipped: branch/worktree strategy is disabled, so no explicit push target is available.',
-                );
-              } else {
-                const finalPush = await autoPush(pi, session.gitBranch, gitCwd);
-                if (!finalPush.ok) {
-                  session.state = 'compound';
-                  setSession(session);
-                  updateStatusBar(ctx, session);
-                  return textResult(
-                    `❌ Final push failed. Workflow cannot complete yet.\n\n${finalPush.message}`,
-                    session,
-                  );
-                }
-                finalGitNotes.push(`🚀 ${finalPush.message}`);
-              }
-            }
-          }
-
-          const completedTodoCount = session.todos.length;
-          const todoSummary =
-            completedTodoCount > 0
-              ? `**TODOs completed:** ${completedTodoCount}/${completedTodoCount}\n`
-              : '';
-
-          // Workflow cleanup policy
-          session.todos = [];
-          session.activeTodoIndex = -1;
-          session.planContent = '';
-          session.verifyPlanResult = '';
-          session.retryCount = 0;
-          session.startupPrepRequired = false;
-          session.startupPrepNote = '';
-          session.startupPrepLocked = false;
-          session.gitBranch = undefined;
-          session.gitWorktreePath = undefined;
-
-          // Remove currentWork entry for this workflow
-          try {
-            const memory = loadMemory(ctx.cwd);
-            memory.currentWork = memory.currentWork.filter(
-              (w) => !w.what.startsWith(`[${session.id}]`),
-            );
-            saveMemory(ctx.cwd, memory);
-          } catch {
-            // Ignore cleanup errors
-          }
-
-          // All TODOs done (or no TODOs) — workflow complete
-          session.state = 'done';
-          session.completed = true;
-          setSession(session);
-          updateStatusBar(ctx, session);
-
-          // Defer compaction — will run in next before_agent_start
-          compactManager.setPending(
-            `${RESET_MARKER} Workflow "${session.description}" completed. ` +
-              `Preserve: task description, final outcome, key decisions. ` +
-              `Discard: implementation details, verification output, code diffs.`,
-          );
-
-          return textResult(
-            '🎉 Workflow Complete!\n\n' +
-              `**Task:** ${session.description}\n` +
-              `**ID:** ${session.id}\n` +
-              todoSummary +
-              (solutionPath ? `**Solution saved:** ${solutionPath}\n` : '') +
-              (finalGitNotes.length > 0
-                ? `**Git automation:**\n${finalGitNotes.join('\n')}\n`
-                : '') +
-              '\nLearnings from this workflow have been captured for future reference.',
-            session,
-          );
-        }
-
-        case 'setTodos': {
-          try {
-            const raw: unknown[] = JSON.parse(params.content || '[]');
-            if (!Array.isArray(raw) || raw.length === 0) {
-              return textResult(
-                'Invalid TODO list. Provide a JSON array of strings.',
-              );
-            }
-            const titles = raw.map((t) => String(t).trim()).filter(Boolean);
-            if (titles.length === 0) {
-              return textResult(
-                'All TODO items are empty. Provide non-empty strings.',
-              );
-            }
-            const prepTodo =
-              session.startupPrepLocked && session.todos.length > 0
-                ? session.todos[0]
-                : null;
-
-            if (prepTodo) {
-              // Preserve mandatory startup prep as TODO #1.
-              // Rebuild remaining list from user titles, replacing any auto placeholder.
-              session.todos = [
-                { title: prepTodo.title, status: prepTodo.status },
-                ...titles.map((title, i) => ({
-                  title,
-                  status:
-                    prepTodo.status === 'done' && i === 0
-                      ? ('active' as const)
-                      : ('pending' as const),
-                })),
-              ];
-
-              let activeIndex = session.todos.findIndex(
-                (t) => t.status === 'active',
-              );
-              if (activeIndex < 0) {
-                if (prepTodo.status === 'done' && session.todos.length > 1) {
-                  session.todos[1].status = 'active';
-                  activeIndex = 1;
-                } else {
-                  session.todos[0].status = 'active';
-                  activeIndex = 0;
-                }
-              }
-              session.activeTodoIndex = activeIndex;
-            } else {
-              session.todos = titles.map((title, i) => ({
-                title,
-                status: i === 0 ? ('active' as const) : ('pending' as const),
-              }));
-              session.activeTodoIndex = 0;
-            }
-
-            setSession(session);
-            updateStatusBar(ctx, session);
-
-            const todoList = session.todos
-              .map((t, i) => {
-                const icon =
-                  t.status === 'done'
-                    ? '✅'
-                    : t.status === 'active'
-                      ? '🔨'
-                      : '⬜';
-                return `${icon} ${i + 1}. ${t.title}`;
-              })
-              .join('\n');
-            const effectiveCount = session.todos.length;
-            return textResult(
-              `📋 TODO list set (${effectiveCount} items):\n${todoList}\n\n` +
-                (prepTodo
-                  ? '⚠️ Preserved mandatory TODO #1 for git/worktree preparation.\n\n'
-                  : '') +
-                `Now create ONE unified plan covering ALL ${effectiveCount} TODO items.\n` +
-                `Structure the plan with clear sections (## TODO #1, ## TODO #2, etc.).\n` +
-                `All TODOs will be planned together, then implemented sequentially.`,
-              session,
-            );
-          } catch {
-            return textResult(
-              'Failed to parse TODO list. Use JSON array format: ["item1", "item2"]',
-            );
-          }
-        }
-
-        case 'replan':
-          session.state = 'plan';
-          session.verifyPlanResult = '';
-          await applyStageConfig(pi, ctx, settings.stages.plan);
-          break;
+      const handler = handlers[params.action];
+      if (!handler) {
+        return textResult(`Unknown action: ${params.action}`);
       }
 
+      // ── Build handler context ────────────────────────────────
+      const hctx: HandlerContext = {
+        session,
+        settings,
+        params,
+        pi,
+        ctx,
+        signal,
+        onUpdate,
+        flush: () => {
+          setSession(session);
+          updateStatusBar(ctx, session);
+        },
+      };
+
+      // ── Execute handler ──────────────────────────────────────
+      const result = await handler(hctx);
+
+      // ── Guaranteed post-processing (single point, never skipped) ──
       setSession(session);
       updateStatusBar(ctx, session);
 
-      const statusText =
-        session.state === 'done'
-          ? `${STATE_EMOJI.done} Workflow complete! Task: "${session.description}"`
-          : `${STATE_EMOJI[session.state]} Transitioned to: ${session.state} | Task: "${session.description}"`;
+      if (result.stageConfig) {
+        await applyStageConfig(pi, ctx, result.stageConfig);
+      }
+      if (result.compact) {
+        compactManager.setPending(result.compact);
+      }
 
-      return textResult(statusText, session);
+      return textResult(result.text, session);
     },
   });
 }

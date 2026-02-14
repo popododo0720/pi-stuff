@@ -1,0 +1,128 @@
+// tools/handlers/approve-plan.ts — approvePlan action handler
+// Saves plan, runs parallel verification, transitions based on result.
+
+import { savePlanDocument } from '../../storage/plan';
+import {
+  formatVerificationSummary,
+  runParallelVerification,
+  saveVerificationResult,
+} from '../../verification';
+import type { HandlerContext, HandlerResult } from './types';
+
+export async function handleApprovePlan(
+  hctx: HandlerContext,
+): Promise<HandlerResult> {
+  const { session, settings, params, pi, ctx, signal, onUpdate } = hctx;
+
+  if (!params.content?.trim()) {
+    return { text: 'Plan content is empty.' };
+  }
+
+  session.planContent = params.content;
+  const savedPath = savePlanDocument(
+    ctx.cwd,
+    session.description,
+    params.content,
+  );
+
+  // Transition to verifyPlan and flush so status bar shows verification state
+  session.state = 'verifyPlan';
+  hctx.flush();
+
+  onUpdate?.({
+    content: [
+      {
+        type: 'text' as const,
+        text:
+          `🔍 Verifying plan... (${(settings.stages.verify?.models ?? []).join(' + ') || 'no models'})` +
+          (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
+      },
+    ],
+  });
+
+  try {
+    const result = await runParallelVerification(
+      'plan',
+      session.planContent,
+      session.description,
+      settings,
+      pi,
+      ctx.cwd,
+      signal,
+    );
+
+    // Infrastructure error → revert to plan
+    if (result.halted) {
+      session.state = 'plan';
+      const haltResultPath = saveVerificationResult(
+        ctx.cwd,
+        'plan',
+        result,
+        session.id,
+      );
+      const haltedModels = result.results
+        .filter((r) => r.infrastructureError)
+        .map((r) => r.model)
+        .join(', ');
+      return {
+        text:
+          '⛔ Plan verification halted — model infrastructure error.\n\n' +
+          `Affected: ${haltedModels}\n\n` +
+          formatVerificationSummary(result) +
+          '\n\nRetry `approvePlan` when the model is available again.' +
+          (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
+          (haltResultPath ? `\n📋 Full results: ${haltResultPath}` : ''),
+      };
+    }
+
+    // Passed → implement
+    if (result.passed) {
+      session.state = 'implement';
+      session.retryCount = 0;
+      const summary = formatVerificationSummary(result);
+      const hasWarnings = summary.includes('🟡');
+      const hasInfo = summary.includes('🔵');
+      session.verifyPlanResult =
+        hasWarnings || hasInfo
+          ? `Plan passed with notes:\n${summary}`
+          : 'Auto-verification passed';
+      return {
+        text:
+          '✅ Plan verified! Moving to implementation.' +
+          (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
+          (hasWarnings
+            ? '\n\n⚠️ **Address these warnings during implementation:**'
+            : '') +
+          `\n\n${summary}`,
+        stageConfig: settings.stages.implement,
+      };
+    }
+
+    // Failed → stay in verifyPlan
+    session.retryCount++;
+    session.state = 'verifyPlan';
+    session.verifyPlanResult = formatVerificationSummary(result);
+    const resultPath = saveVerificationResult(
+      ctx.cwd,
+      'plan',
+      result,
+      session.id,
+    );
+    return {
+      text:
+        `❌ Plan verification failed (attempt ${session.retryCount}). Please revise.\n\n` +
+        formatVerificationSummary(result) +
+        (resultPath ? `\n\n📋 Full results: ${resultPath}` : ''),
+    };
+  } catch (e) {
+    const isNoModels =
+      e instanceof Error && e.message.includes('No verification models');
+    return {
+      text: isNoModels
+        ? '⚠️ No verification models. Falling back to manual verification. Use /workflow-settings to configure.' +
+          (savedPath ? `\n📄 Plan saved: ${savedPath}` : '')
+        : '⚠️ Auto-verification error. Falling back to manual verification.' +
+          (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
+    };
+  }
+}

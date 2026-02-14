@@ -27,10 +27,10 @@ function tokenizeQuery(text: string): string[] {
     .toLowerCase()
     .split(/\W+/)
     .map((t) => t.trim())
-    .filter((t) => t.length >= 3);
+    .filter((t) => t.length >= 2);
 }
 
-const MAX_MEMORY_CONTEXT_CHARS = 4000;
+const MAX_MEMORY_CONTEXT_CHARS = 6000;
 
 function selectRelevantItems(
   items: string[],
@@ -122,18 +122,27 @@ export function memoryToContext(
     }
   }
 
-  // Structured compound memory (search-based top-k)
+  // Structured compound memory (search-based top-k, scales with memory size)
   const keywords = tokenizeQuery(query);
-  const topK = 3;
+  const dynamicTopK = (items: string[]) =>
+    Math.min(5, Math.max(1, Math.ceil(items.length / 3)));
 
-  const relevantPatterns = selectRelevantItems(memory.patterns, keywords, topK);
+  const relevantPatterns = selectRelevantItems(
+    memory.patterns,
+    keywords,
+    dynamicTopK(memory.patterns),
+  );
   if (relevantPatterns.length > 0) {
     parts.push(
       `### Patterns\n${relevantPatterns.map((p) => `- ${p}`).join('\n')}`,
     );
   }
 
-  const relevantGotchas = selectRelevantItems(memory.gotchas, keywords, topK);
+  const relevantGotchas = selectRelevantItems(
+    memory.gotchas,
+    keywords,
+    dynamicTopK(memory.gotchas),
+  );
   if (relevantGotchas.length > 0) {
     parts.push(
       `### Gotchas\n${relevantGotchas.map((g) => `- ${g}`).join('\n')}`,
@@ -143,7 +152,7 @@ export function memoryToContext(
   const relevantDecisions = selectRelevantItems(
     memory.decisions,
     keywords,
-    topK,
+    dynamicTopK(memory.decisions),
   );
   if (relevantDecisions.length > 0) {
     parts.push(

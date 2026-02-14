@@ -278,22 +278,43 @@ export async function runParallelVerification(
         '1. **Correctness & Completeness** — right problem? all steps listed? all consumers updated?\n' +
         '2. **Architecture & Design** — follows existing patterns? no duplication? SRP?\n' +
         '3. **Security & Robustness** — inputs validated? edge cases? side effects?\n' +
-        '4. **Implementability** — unambiguous steps? signatures specified?\n\n' +
+        '4. **Implementability** — unambiguous steps? signatures specified?\n' +
+        '5. **Architecture & SOLID Compliance** (design-level, not code-level)\n' +
+        '   - Does the planned structure follow SRP? (each file/module = single responsibility)\n' +
+        '   - Is the design extensible without modifying existing code? (OCP)\n' +
+        '   - Are dependencies on abstractions rather than concretions? (DIP)\n' +
+        '   - Any unnecessary complexity or over-engineering? (KISS/YAGNI)\n' +
+        '   Classification: CRITICAL if fixable within plan scope, WARNING if needs larger structural change.\n\n' +
         'Plans describe WHAT to do, not every implementation detail. ' +
         'Do NOT fail for: missing exact line numbers, minor wording, ' +
         'or things a competent developer would naturally handle.\n'
       : 'You are a strict code verifier AND adversarial code breaker.\n\n' +
         `Task: ${description}\n\n` +
         `Plan:\n${planContent}\n\n` +
-        'Read the project files and perform TWO phases:\n\n' +
+        'Read the project files and perform THREE phases:\n\n' +
         '**Phase 1: Implementation Verification**\n' +
         '- Are all planned items implemented?\n' +
         '- Does the code work correctly?\n' +
-        '- Code quality — SOLID, YAGNI/KISS, security\n' +
         'Verify by reading actual source files, NOT git diff.\n\n' +
         '**Phase 2: Adversarial Testing**\n' +
         'Try to break this code with concrete inputs/edge cases that would crash, ' +
-        'produce wrong results, or expose vulnerabilities.\n';
+        'produce wrong results, or expose vulnerabilities.\n\n' +
+        '**Phase 3: Clean Code & Architecture Review**\n' +
+        'Evaluate each changed/new file for:\n' +
+        '- SRP: Does each function/class have exactly one reason to change? Functions >40 lines are suspect.\n' +
+        '- OCP: Can new behavior be added via extension, not modification? Check for exhaustive switch/if-else chains.\n' +
+        '- LSP: Do subtypes/implementations honor their contracts?\n' +
+        '- ISP: Are interfaces minimal and focused?\n' +
+        '- DIP: Do modules depend on abstractions? Check for direct `new` of dependencies.\n' +
+        '- KISS: Is the solution the simplest that works? Remove unnecessary abstractions.\n' +
+        '- YAGNI: Is every piece of code currently needed? No speculative generality.\n' +
+        '- Clean Code: Intention-revealing names, no magic numbers, no duplication (DRY), small functions.\n\n' +
+        'Classification:\n' +
+        '- CRITICAL: Violation in NEW or CHANGED code, fixable within current PR scope\n' +
+        '  (e.g. new function with 2+ responsibilities, duplicated logic, missing error handling, magic numbers)\n' +
+        '- WARNING: Violation in EXISTING code or requiring structural change beyond current scope\n' +
+        '  (e.g. legacy patterns, cross-cutting concerns, existing tight coupling)\n' +
+        '  Warnings are recorded and addressed in future planning cycles.\n';
 
   // Append implementation notes
   if (type === 'impl' && implNotes?.trim()) {
