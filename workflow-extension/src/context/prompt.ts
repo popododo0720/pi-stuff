@@ -13,7 +13,7 @@ import { generateRepoMap } from '../repomap/index';
 import { loadMemory, resolveMemoryPath } from '../storage/memory';
 import { listModules, loadMatchingModules } from '../storage/modules';
 import { loadSettings } from '../storage/settings';
-import { findRelevantSolutions } from '../storage/solution';
+import { findSolutionIndex } from '../storage/solution';
 import type {
   ConditionalRule,
   ModuleConventions,
@@ -22,37 +22,7 @@ import type {
 } from '../types';
 import { extractRecentFilePaths, matchesPattern } from './pattern';
 
-function tokenizeQuery(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/\W+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 2);
-}
-
 const MAX_MEMORY_CONTEXT_CHARS = 6000;
-
-function selectRelevantItems(
-  items: string[],
-  keywords: string[],
-  topK: number,
-): string[] {
-  if (items.length === 0) return [];
-  if (keywords.length === 0) return [];
-
-  const scored = items
-    .map((item, index) => {
-      const lower = item.toLowerCase();
-      const score = keywords.filter((k) => lower.includes(k)).length;
-      return { item, score, index };
-    })
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score || a.index - b.index)
-    .slice(0, topK)
-    .map((s) => s.item);
-
-  return scored;
-}
 
 /**
  * Convert project memory + matched modules into a prompt section.
@@ -65,7 +35,6 @@ export function memoryToContext(
     name: string;
     data: ModuleConventions;
   }> = [],
-  query = '',
 ): string {
   const parts: string[] = [];
 
@@ -122,41 +91,19 @@ export function memoryToContext(
     }
   }
 
-  // Structured compound memory (search-based top-k, scales with memory size)
-  const keywords = tokenizeQuery(query);
-  const dynamicTopK = (items: string[]) =>
-    Math.min(5, Math.max(1, Math.ceil(items.length / 3)));
-
-  const relevantPatterns = selectRelevantItems(
-    memory.patterns,
-    keywords,
-    dynamicTopK(memory.patterns),
-  );
-  if (relevantPatterns.length > 0) {
+  // Compound learnings — show availability (model searches on demand via project_memory get)
+  const compoundCounts: string[] = [];
+  if (memory.patterns.length > 0)
+    compoundCounts.push(`patterns: ${memory.patterns.length}`);
+  if (memory.gotchas.length > 0)
+    compoundCounts.push(`gotchas: ${memory.gotchas.length}`);
+  if (memory.decisions.length > 0)
+    compoundCounts.push(`decisions: ${memory.decisions.length}`);
+  if (compoundCounts.length > 0) {
     parts.push(
-      `### Patterns\n${relevantPatterns.map((p) => `- ${p}`).join('\n')}`,
-    );
-  }
-
-  const relevantGotchas = selectRelevantItems(
-    memory.gotchas,
-    keywords,
-    dynamicTopK(memory.gotchas),
-  );
-  if (relevantGotchas.length > 0) {
-    parts.push(
-      `### Gotchas\n${relevantGotchas.map((g) => `- ${g}`).join('\n')}`,
-    );
-  }
-
-  const relevantDecisions = selectRelevantItems(
-    memory.decisions,
-    keywords,
-    dynamicTopK(memory.decisions),
-  );
-  if (relevantDecisions.length > 0) {
-    parts.push(
-      `### Decisions\n${relevantDecisions.map((d) => `- ${d}`).join('\n')}`,
+      '### Compound Learnings (searchable)\n' +
+        `Available: ${compoundCounts.join(', ')}.\n` +
+        'Use project_memory(action: "get", category: "...") to review when relevant.',
     );
   }
 
@@ -174,6 +121,52 @@ export function memoryToContext(
   }
 
   return memoryBlock;
+}
+
+/**
+ * Extract only the current TODO section from the full plan.
+ * Includes preamble + completed TODO summaries + current TODO full content.
+ * Falls back to full plan if no ## TODO # pattern found.
+ */
+function extractCurrentTodoPlan(
+  planContent: string,
+  todoIndex: number,
+  todos: Array<{ title: string; status: string }>,
+): string {
+  const todoHeadingRe = /^## TODO #\d+/m;
+  if (!todoHeadingRe.test(planContent)) return planContent;
+
+  const parts: string[] = [];
+
+  // Preamble (content before first ## TODO)
+  const firstTodoPos = planContent.search(todoHeadingRe);
+  if (firstTodoPos > 0) {
+    parts.push(planContent.slice(0, firstTodoPos).trim());
+  }
+
+  // Completed TODOs — one-liner summary
+  const completedLines = todos
+    .map((t, i) =>
+      t.status === 'done' ? `✅ TODO #${i + 1}: ${t.title} (completed)` : null,
+    )
+    .filter(Boolean);
+  if (completedLines.length > 0) {
+    parts.push(completedLines.join('\n'));
+  }
+
+  // Current TODO section — full content
+  const currentNum = todoIndex + 1;
+  const currentRe = new RegExp(
+    `(## TODO #${currentNum}\\b[\\s\\S]*?)(?=\\n## TODO #\\d+\\b|$)`,
+  );
+  const match = planContent.match(currentRe);
+  if (match) {
+    parts.push(match[1].trim());
+  } else {
+    return planContent; // fallback
+  }
+
+  return parts.join('\n\n');
 }
 
 /**
@@ -195,19 +188,7 @@ export async function buildSystemPromptInjection(
       const memory = loadMemory(ctx.cwd);
       const recentFiles = extractRecentFilePaths(ctx);
       const matchedModules = loadMatchingModules(ctx.cwd, recentFiles);
-      const activeTodoTitle =
-        session &&
-        session.activeTodoIndex >= 0 &&
-        session.activeTodoIndex < session.todos.length
-          ? session.todos[session.activeTodoIndex].title
-          : '';
-      const query = `${session?.description ?? ''} ${activeTodoTitle} ${recentFiles.join(' ')}`;
-      memoryContext = memoryToContext(
-        memory,
-        recentFiles,
-        matchedModules,
-        query,
-      );
+      memoryContext = memoryToContext(memory, recentFiles, matchedModules);
       needsOnboarding =
         memory.conventions.length === 0 &&
         memory.rules.length === 0 &&
@@ -252,26 +233,32 @@ export async function buildSystemPromptInjection(
   // Stage-specific guide
   const stageGuide = STAGE_GUIDES[session.state] || '';
 
-  // Include relevant past solutions for reference during planning
+  // Past solutions — show index in all stages for on-demand reference
   let solutionContext = '';
-  if (session.state === 'plan') {
-    const solutions = findRelevantSolutions(ctx.cwd, session.description, {
-      topK: 3,
-      maxBodyChars: 300,
-      minScore: 1,
-    });
-    if (solutions) {
-      solutionContext =
-        '\n\n### Past Solutions (from previous workflows)\n' +
-        'Reference these when planning similar tasks:\n' +
-        solutions;
-    }
+  const solutionIdx = findSolutionIndex(ctx.cwd);
+  if (solutionIdx) {
+    solutionContext =
+      '\n\n### Past Solutions (searchable)\n' +
+      solutionIdx +
+      '\nRead specific solution files when relevant.';
   }
 
-  // Include approved plan content if available
-  const planContext = session.planContent
-    ? `\n\n### Approved Plan\n<plan_content>\n${session.planContent}\n</plan_content>`
-    : '';
+  // Include approved plan — full during plan/verify, current TODO section during implement
+  let planContext = '';
+  if (session.planContent) {
+    const isImplementing =
+      session.state === 'implement' || session.state === 'verifyImpl';
+    const hasTodos = session.activeTodoIndex >= 0 && session.todos.length > 0;
+    const planText =
+      isImplementing && hasTodos
+        ? extractCurrentTodoPlan(
+            session.planContent,
+            session.activeTodoIndex,
+            session.todos,
+          )
+        : session.planContent;
+    planContext = `\n\n### Approved Plan\n<plan_content>\n${planText}\n</plan_content>`;
+  }
 
   // Include previous failure reason when retrying plan
   const failContext =
