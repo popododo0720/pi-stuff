@@ -55,11 +55,18 @@ const BASH_WRITE_PATTERNS: RegExp[] = [
   /(?:^|[;&|]\s*)cat\s*>/, // cat > file
 ];
 
+/** States where git commands are allowed despite general bash write block */
+const GIT_ALLOWED_STATES: Set<WorkflowState> = new Set(['compound']);
+
 /**
  * Check if a bash command contains file-modifying patterns.
+ * @param allowGit - When true, git commands are excluded from write detection
  */
-export function isBashWriteCommand(command: string): boolean {
-  return BASH_WRITE_PATTERNS.some((pattern) => pattern.test(command));
+export function isBashWriteCommand(command: string, allowGit = false): boolean {
+  const patterns = allowGit
+    ? BASH_WRITE_PATTERNS.filter((p) => !p.source.includes('git\\s+'))
+    : BASH_WRITE_PATTERNS;
+  return patterns.some((pattern) => pattern.test(command));
 }
 
 /**
@@ -91,7 +98,8 @@ export function shouldBlockToolCall(
     toolArgs?.command &&
     typeof toolArgs.command === 'string'
   ) {
-    if (isBashWriteCommand(toolArgs.command)) {
+    const allowGit = GIT_ALLOWED_STATES.has(state);
+    if (isBashWriteCommand(toolArgs.command, allowGit)) {
       return {
         block: true,
         reason: `${BLOCK_REASONS[state] ?? 'Not allowed.'} Detected file-modifying command.`,
