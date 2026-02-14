@@ -405,6 +405,12 @@ export function registerTransitionTool(
             // Infrastructure error → revert to implement, stop loop
             if (result.halted) {
               session.state = 'implement';
+              const haltResultPath = saveVerificationResult(
+                ctx.cwd,
+                'impl',
+                result,
+                session.id,
+              );
               setSession(session);
               updateStatusBar(ctx, session);
               const haltedModels = result.results
@@ -414,8 +420,12 @@ export function registerTransitionTool(
               return textResult(
                 '⛔ Verification halted — model infrastructure error (rate limit / quota / timeout).\n\n' +
                   `Affected: ${haltedModels}\n\n` +
-                  'Retry `implDone` when the model is available again.\n' +
-                  'This is NOT a code issue — do NOT modify code to fix this.',
+                  formatVerificationSummary(result) +
+                  '\n\nRetry `implDone` when the model is available again.\n' +
+                  'This is NOT a code issue — do NOT modify code to fix this.' +
+                  (haltResultPath
+                    ? `\n\n📋 Full results: ${haltResultPath}`
+                    : ''),
                 session,
               );
             }

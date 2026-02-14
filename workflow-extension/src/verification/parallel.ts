@@ -175,21 +175,6 @@ async function runSingleModel(
       const severity = parseStructuredFindings(output);
       const verdict = parseVerdict(output);
       const hasCritical = severity.critical > 0;
-      const totalFindings =
-        severity.critical + severity.warning + severity.info;
-
-      // No verdict + no structured findings → model didn't follow format
-      if (!verdict && totalFindings === 0) {
-        return {
-          model,
-          passed: false,
-          output,
-          criticalCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          infrastructureError: true,
-        };
-      }
 
       // VERDICT takes priority. Only 🔴 CRITICAL blocks.
       let passed: boolean;
@@ -198,7 +183,7 @@ async function runSingleModel(
       } else if (verdict === 'FAIL') {
         passed = !hasCritical;
       } else {
-        // No verdict but has findings → fail safe
+        // No verdict → fail safe (model didn't follow format)
         passed = false;
       }
 
@@ -239,25 +224,26 @@ async function runSingleModel(
 // ── Structured output format instruction ─────────────────────────
 
 const STRUCTURED_FORMAT_INSTRUCTION =
-  '\n\n## Required Output Format\n' +
-  'Structure your response EXACTLY as follows:\n\n' +
-  '(Your analysis — discuss freely here)\n\n' +
+  '\n\n---\n' +
+  '## ⚠️ MANDATORY Output Format — responses not following this format are DISCARDED\n\n' +
+  'Your response MUST end with these EXACT sections. Responses without them are invalid.\n\n' +
   '## CRITICAL\n' +
   '- [finding with file path and specific issue]\n' +
-  '(Write "None" if no critical issues)\n\n' +
+  '(Write "- None" if no critical issues)\n\n' +
   '## WARNING\n' +
   '- [finding]\n' +
-  '(Write "None" if no warnings)\n\n' +
+  '(Write "- None" if no warnings)\n\n' +
   '## INFO\n' +
   '- [finding]\n' +
-  '(Write "None" if no info items)\n\n' +
-  'VERDICT: PASS or FAIL\n\n' +
+  '(Write "- None" if no info items)\n\n' +
+  'VERDICT: PASS\n\n' +
   'Rules:\n' +
+  '- You MUST include all four sections above (## CRITICAL, ## WARNING, ## INFO, VERDICT)\n' +
   '- List findings ONLY as bullet points (- ) inside their section\n' +
-  '- Do NOT put severity keywords in analysis text outside these sections\n' +
   '- Any CRITICAL finding → VERDICT: FAIL\n' +
   '- WARNING/INFO only → VERDICT: PASS\n' +
-  '- VERDICT must be the LAST line of your response\n';
+  '- VERDICT must be the LAST line of your response\n' +
+  '- Analysis text can go BEFORE the ## CRITICAL section\n';
 
 // ── Parallel verification ────────────────────────────────────────
 
