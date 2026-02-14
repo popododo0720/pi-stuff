@@ -123,6 +123,10 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
           ? raw.startupPrepLocked
           : false,
       gitBranch: typeof raw.gitBranch === 'string' ? raw.gitBranch : undefined,
+      gitWorktreePath:
+        typeof raw.gitWorktreePath === 'string'
+          ? raw.gitWorktreePath
+          : undefined,
     };
   } catch {
     return null;

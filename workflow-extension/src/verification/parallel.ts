@@ -1,6 +1,6 @@
 // verification/parallel.ts — Parallel model verification
 // Runs plan/impl verification against multiple models via `pi -p`.
-// Retries on empty responses to handle transient failures.
+// Uses structured output format (## CRITICAL / ## WARNING / ## INFO sections).
 
 import {
   existsSync,
@@ -22,22 +22,98 @@ import type {
 /** Max retry attempts when a model returns empty output */
 const MAX_EMPTY_RETRIES = 2;
 
-/** Count severity markers in verification output */
-function parseSeverity(output: string): {
+// ── Structured output parser ─────────────────────────────────────
+// Models are prompted to output findings in ## CRITICAL / ## WARNING / ## INFO
+// sections with bullet points. This parser reads only those sections.
+
+function parseVerdict(output: string): 'PASS' | 'FAIL' | undefined {
+  const lines = output.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim().replace(/\*{1,2}/g, '');
+    const match = line.match(/^VERDICT\s*:\s*(PASS|FAIL)\s*$/i);
+    if (match) return match[1].toUpperCase() as 'PASS' | 'FAIL';
+  }
+  return undefined;
+}
+
+/**
+ * Parse structured findings from model output.
+ * Only counts bullet items inside ## CRITICAL / ## WARNING / ## INFO sections.
+ * Analysis text outside these sections is ignored (no false positives).
+ */
+function parseStructuredFindings(output: string): {
   critical: number;
   warning: number;
   info: number;
 } {
-  const critical = (output.match(/🔴/g) || []).length;
-  const warning = (output.match(/🟡/g) || []).length;
-  const info = (output.match(/🔵/g) || []).length;
+  type Section = 'critical' | 'warning' | 'info';
+  let section: Section | null = null;
+  let critical = 0;
+  let warning = 0;
+  let info = 0;
+
+  for (const rawLine of output.split('\n')) {
+    const line = rawLine.trim();
+
+    // Section headers (##, ###, or plain)
+    if (/^#{1,3}\s*CRITICAL/i.test(line)) {
+      section = 'critical';
+      continue;
+    }
+    if (/^#{1,3}\s*WARNING/i.test(line)) {
+      section = 'warning';
+      continue;
+    }
+    if (/^#{1,3}\s*INFO/i.test(line)) {
+      section = 'info';
+      continue;
+    }
+
+    // End section on other headers or VERDICT
+    if (/^#{1,3}\s/.test(line) || /^VERDICT\s*:/i.test(line)) {
+      section = null;
+      continue;
+    }
+
+    // Count bullet items in current section
+    if (!section) continue;
+    const bullet = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.+)$/);
+    if (!bullet) continue;
+
+    const text = bullet[1].trim();
+    // Skip "None", "N/A", "No critical issues", etc.
+    if (
+      /^(?:none|n\/a|na|null|0|no\s+\w+\s+(?:issues?|findings?|items?))/i.test(
+        text,
+      )
+    ) {
+      continue;
+    }
+
+    if (section === 'critical') critical++;
+    if (section === 'warning') warning++;
+    if (section === 'info') info++;
+  }
+
   return { critical, warning, info };
 }
 
-/**
- * Execute a single model verification with retry on empty response.
- * Retries up to MAX_EMPTY_RETRIES times if stdout is empty.
- */
+/** Detect infrastructure errors (rate limit, quota, network) in output.
+ *  Only checks first 500 chars (error messages appear early, not in analysis). */
+function isInfrastructureError(output: string): boolean {
+  const prefix = output.slice(0, 500).toLowerCase();
+  return (
+    /usage limit|rate limit|quota exceeded|too many requests/.test(prefix) ||
+    /\b(429|503)\b.*error/i.test(prefix) ||
+    /error.*\b(429|503)\b/i.test(prefix) ||
+    /try again in\s+~?\d+/.test(prefix) ||
+    prefix.startsWith('process execution failed:') ||
+    prefix.startsWith('empty response after all retry')
+  );
+}
+
+// ── Single model execution ───────────────────────────────────────
+
 async function runSingleModel(
   model: string,
   prompt: string,
@@ -46,12 +122,14 @@ async function runSingleModel(
   thinkingLevel: string,
   signal?: AbortSignal,
 ): Promise<ModelVerificationResult> {
-  // Model format is "provider/model-id" — split for CLI args
   const [provider, ...modelParts] = model.split('/');
   const modelId = modelParts.join('/');
   const args = [
     '-p',
     prompt,
+    '--no-extensions',
+    '--tools',
+    'read,bash,grep,find,ls',
     '--provider',
     provider,
     '--model',
@@ -65,16 +143,52 @@ async function runSingleModel(
       const result = await pi.exec('pi', args, { signal, timeout });
       const output = `${result.stdout}\n${result.stderr}`.trim();
 
-      // Retry if output is empty (concurrency issue)
       if (!output && attempt < MAX_EMPTY_RETRIES) {
         continue;
       }
 
-      const upperOutput = output.toUpperCase();
-      const passed =
-        upperOutput.includes('VERDICT: PASS') ||
-        upperOutput.includes('VERDICT:PASS');
-      const severity = parseSeverity(output);
+      // Empty output on final attempt → infrastructure error
+      if (!output) {
+        return {
+          model,
+          passed: false,
+          output: 'Empty response after all retry attempts.',
+          criticalCount: 0,
+          warningCount: 0,
+          infoCount: 0,
+          infrastructureError: true,
+        };
+      }
+
+      // Infrastructure error — halt verification loop
+      if (isInfrastructureError(output)) {
+        return {
+          model,
+          passed: false,
+          output,
+          criticalCount: 0,
+          warningCount: 0,
+          infoCount: 0,
+          infrastructureError: true,
+        };
+      }
+
+      const severity = parseStructuredFindings(output);
+      const verdict = parseVerdict(output);
+      const hasCritical = severity.critical > 0;
+
+      // VERDICT takes priority, but CRITICAL findings always block.
+      let passed: boolean;
+      if (verdict === 'PASS') {
+        // Trust PASS, but override if model contradicts itself (listed criticals but said PASS)
+        passed = !hasCritical;
+      } else if (verdict === 'FAIL') {
+        passed = !hasCritical;
+      } else {
+        // No verdict → fail safe (model didn't follow format)
+        passed = false;
+      }
+
       return {
         model,
         passed,
@@ -84,7 +198,6 @@ async function runSingleModel(
         infoCount: severity.info,
       };
     } catch (e) {
-      // On last attempt, return error; otherwise retry
       if (attempt === MAX_EMPTY_RETRIES) {
         return {
           model,
@@ -93,6 +206,7 @@ async function runSingleModel(
           criticalCount: 0,
           warningCount: 0,
           infoCount: 0,
+          infrastructureError: true,
         };
       }
     }
@@ -105,24 +219,36 @@ async function runSingleModel(
     criticalCount: 0,
     warningCount: 0,
     infoCount: 0,
+    infrastructureError: true,
   };
 }
 
-/**
- * Run parallel verification across configured models.
- * Each model receives the same prompt and must output VERDICT: PASS or VERDICT: FAIL.
- * All models must pass for overall success.
- *
- * Retries on empty responses up to 2 times per model.
- *
- * @param type - 'plan' for plan verification, 'impl' for implementation verification
- * @param planContent - The approved plan content
- * @param description - Task description
- * @param settings - Workflow settings with model list and timeout
- * @param pi - Extension API for exec()
- * @param signal - Optional abort signal
- * @throws Error if no verification models are configured
- */
+// ── Structured output format instruction ─────────────────────────
+
+const STRUCTURED_FORMAT_INSTRUCTION =
+  '\n\n---\n' +
+  '## ⚠️ MANDATORY Output Format — responses not following this format are DISCARDED\n\n' +
+  'Your response MUST end with these EXACT sections. Responses without them are invalid.\n\n' +
+  '## CRITICAL\n' +
+  '- [finding with file path and specific issue]\n' +
+  '(Write "- None" if no critical issues)\n\n' +
+  '## WARNING\n' +
+  '- [finding]\n' +
+  '(Write "- None" if no warnings)\n\n' +
+  '## INFO\n' +
+  '- [finding]\n' +
+  '(Write "- None" if no info items)\n\n' +
+  'VERDICT: PASS or FAIL\n\n' +
+  'Rules:\n' +
+  '- You MUST include all four sections above (## CRITICAL, ## WARNING, ## INFO, VERDICT)\n' +
+  '- List findings ONLY as bullet points (- ) inside their section\n' +
+  '- Any CRITICAL finding → VERDICT: FAIL\n' +
+  '- WARNING/INFO only → VERDICT: PASS\n' +
+  '- VERDICT must be the LAST line of your response\n' +
+  '- Analysis text can go BEFORE the ## CRITICAL section\n';
+
+// ── Parallel verification ────────────────────────────────────────
+
 export async function runParallelVerification(
   type: 'plan' | 'impl',
   planContent: string,
@@ -143,86 +269,66 @@ export async function runParallelVerification(
     );
   }
 
-  // Build verification prompt based on type
   let prompt =
     type === 'plan'
       ? 'You are a senior architect reviewing a PLAN before implementation begins.\n\n' +
         `Task: ${description}\n\n` +
         `Plan:\n${planContent}\n\n` +
-        'Read relevant source files to understand the current codebase, then evaluate the plan:\n\n' +
-        '## 1. Correctness & Completeness\n' +
-        '- Does the plan address the right problem?\n' +
-        '- Are ALL steps listed? (no implicit "also do X" — every change must be explicit)\n' +
-        '- Are file targets identified? (exact line numbers NOT required)\n' +
-        '- For each changed function/type: are ALL consumers listed that need updating?\n' +
-        '- Are input validation and error handling covered for new/changed functions?\n\n' +
-        '## 2. Architecture & Design\n' +
-        '- Does the approach follow existing patterns in the codebase?\n' +
-        '- Is there unnecessary duplication? (could existing utils be reused?)\n' +
-        '- Are responsibilities cleanly separated? (SRP, no god functions)\n' +
-        '- Will this create circular dependencies or tight coupling?\n\n' +
-        '## 3. Security & Robustness\n' +
-        '- Are untrusted inputs validated? (user input, file I/O, JSON parsing)\n' +
-        '- Are edge cases considered? (empty, null, malformed, boundary values)\n' +
-        '- Could the changes break existing functionality? (side effects)\n\n' +
-        '## 4. Implementability\n' +
-        '- Is each step unambiguous enough that a developer can implement without guessing?\n' +
-        '- Are function signatures and type definitions specified for new APIs?\n\n' +
-        '## Classify each finding:\n' +
-        '🔴 CRITICAL: Wrong approach, missing critical step, architectural flaw, security vulnerability, breaking change not addressed\n' +
-        '🟡 WARNING: Missing consumer update, missing input validation, missing edge case handling, ambiguous step\n' +
-        '🔵 INFO: Style suggestion, minor optimization, nitpick, implementation-level detail\n\n' +
-        '## Verdict rules:\n' +
-        '- Any 🔴 CRITICAL → VERDICT: FAIL\n' +
-        '- 🟡 WARNING only (no 🔴) → VERDICT: PASS (note warnings — implementer will address them)\n' +
-        '- Only 🔵 INFO → VERDICT: PASS\n' +
-        '- No findings → VERDICT: PASS\n\n' +
+        'Read relevant source files to understand the current codebase, then evaluate:\n\n' +
+        '1. **Correctness & Completeness** — right problem? all steps listed? all consumers updated?\n' +
+        '2. **Architecture & Design** — follows existing patterns? no duplication? SRP?\n' +
+        '3. **Security & Robustness** — inputs validated? edge cases? side effects?\n' +
+        '4. **Implementability** — unambiguous steps? signatures specified?\n' +
+        '5. **Architecture & SOLID Compliance** (design-level, not code-level)\n' +
+        '   - Does the planned structure follow SRP? (each file/module = single responsibility)\n' +
+        '   - Is the design extensible without modifying existing code? (OCP)\n' +
+        '   - Are dependencies on abstractions rather than concretions? (DIP)\n' +
+        '   - Any unnecessary complexity or over-engineering? (KISS/YAGNI)\n' +
+        '   Classification: CRITICAL if fixable within plan scope, WARNING if needs larger structural change.\n\n' +
         'Plans describe WHAT to do, not every implementation detail. ' +
-        'Do NOT fail for: missing exact line numbers, missing exact code snippets, minor wording, ' +
-        'implementation-level details (exact validation logic, exact error messages, exact variable names), ' +
-        'or things a competent developer would naturally handle during implementation.\n' +
-        'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.'
+        'Do NOT fail for: missing exact line numbers, minor wording, ' +
+        'or things a competent developer would naturally handle.\n'
       : 'You are a strict code verifier AND adversarial code breaker.\n\n' +
         `Task: ${description}\n\n` +
         `Plan:\n${planContent}\n\n` +
-        'Read the project files and perform TWO phases:\n\n' +
-        '## Phase 1: Implementation Verification\n' +
-        '1. Are all planned items implemented?\n' +
-        '2. Does the code work correctly? (Run tests if possible)\n' +
-        '3. Is anything missing?\n' +
-        '4. Code quality — SOLID, YAGNI/KISS, separation of concerns, security, extensibility\n' +
-        'IMPORTANT: Verify by reading the actual source files, NOT by git diff. ' +
-        'Git diff may include unrelated changes from previous work. ' +
-        'Only evaluate files and changes mentioned in the plan.\n\n' +
-        '## Phase 2: Adversarial Testing\n' +
-        'Try to break this code. Find concrete inputs, edge cases, or scenarios that would:\n' +
-        '- Crash the program or cause unhandled exceptions\n' +
-        '- Produce wrong results\n' +
-        '- Expose security vulnerabilities\n' +
-        '- Violate the stated requirements\n\n' +
-        '## Classify each finding:\n' +
-        '🔴 CRITICAL: Real bugs, security vulnerabilities, crashes, wrong results, missing planned items\n' +
-        '🟡 WARNING: Convention violations, naming issues, unhandled edge cases\n' +
-        '🔵 INFO: Style suggestions, optimization opportunities\n\n' +
-        '## Verdict rules:\n' +
-        '- Any 🔴 CRITICAL or 🟡 WARNING → VERDICT: FAIL (with specific scenarios)\n' +
-        '- Only 🔵 INFO findings → VERDICT: PASS (note the suggestions)\n' +
-        '- No findings → VERDICT: PASS\n\n' +
-        'IMPORTANT: You MUST end your response with exactly "VERDICT: PASS" or "VERDICT: FAIL" on its own line. Responses without an explicit VERDICT line are treated as FAIL.';
+        'Read the project files and perform THREE phases:\n\n' +
+        '**Phase 1: Implementation Verification**\n' +
+        '- Are all planned items implemented?\n' +
+        '- Does the code work correctly?\n' +
+        'Verify by reading actual source files, NOT git diff.\n\n' +
+        '**Phase 2: Adversarial Testing**\n' +
+        'Try to break this code with concrete inputs/edge cases that would crash, ' +
+        'produce wrong results, or expose vulnerabilities.\n\n' +
+        '**Phase 3: Clean Code & Architecture Review**\n' +
+        'Evaluate each changed/new file for:\n' +
+        '- SRP: Does each function/class have exactly one reason to change? Functions >40 lines are suspect.\n' +
+        '- OCP: Can new behavior be added via extension, not modification? Check for exhaustive switch/if-else chains.\n' +
+        '- LSP: Do subtypes/implementations honor their contracts?\n' +
+        '- ISP: Are interfaces minimal and focused?\n' +
+        '- DIP: Do modules depend on abstractions? Check for direct `new` of dependencies.\n' +
+        '- KISS: Is the solution the simplest that works? Remove unnecessary abstractions.\n' +
+        '- YAGNI: Is every piece of code currently needed? No speculative generality.\n' +
+        '- Clean Code: Intention-revealing names, no magic numbers, no duplication (DRY), small functions.\n\n' +
+        'Classification:\n' +
+        '- CRITICAL: Violation in NEW or CHANGED code, fixable within current PR scope\n' +
+        '  (e.g. new function with 2+ responsibilities, duplicated logic, missing error handling, magic numbers)\n' +
+        '- WARNING: Violation in EXISTING code or requiring structural change beyond current scope\n' +
+        '  (e.g. legacy patterns, cross-cutting concerns, existing tight coupling)\n' +
+        '  Warnings are recorded and addressed in future planning cycles.\n';
 
-  // Append implementation notes from the developer (impl only)
+  // Append implementation notes
   if (type === 'impl' && implNotes?.trim()) {
-    prompt +=
-      '\n\n## Implementation Notes (from developer)\n' +
-      'The developer provided the following context. Consider these when evaluating:\n' +
-      implNotes.trim();
+    prompt += `\n## Implementation Notes (from developer)\n${implNotes.trim()}`;
   }
 
-  // Append project-specific checks from docs/checks/*.md
+  // Append project-specific checks
   const checks = loadCustomChecks(cwd);
   if (checks.length > 0) {
     prompt += `\n\nProject-specific checks:\n${checks.join('\n\n')}`;
   }
+
+  // Append structured format instruction (always last)
+  prompt += STRUCTURED_FORMAT_INSTRUCTION;
 
   // Launch all models in parallel
   const promises = verifyModels.map((model) =>
@@ -237,127 +343,106 @@ export async function runParallelVerification(
   );
 
   const results = await Promise.all(promises);
-  // All models must pass for overall success
+
+  // If ANY model hit infra error → halt (don't enter fix loop)
+  const hasInfraError = results.some((r) => r.infrastructureError);
+  if (hasInfraError) {
+    return { passed: false, results, halted: true };
+  }
+
   const passed = results.every((r) => r.passed);
   return { passed, results };
 }
 
+// ── Output formatting ────────────────────────────────────────────
+
 /**
- * Summarize verification output by extracting severity markers + context.
- * Compresses raw output while preserving actionable information.
- * Falls back to raw prefix when no severity markers (🔴/🟡/🔵) are found.
- * VERDICT line is always guaranteed at the end of the summary.
+ * Extract structured findings sections + verdict for summary display.
+ * Ignores free-text analysis, only shows ## CRITICAL/WARNING/INFO sections.
  */
 function summarizeVerificationOutput(output: string): string {
   const MAX_LENGTH = 1500;
   const lines = output.split('\n');
   const findings: string[] = [];
   let verdictLine = '';
-  let infoCount = 0;
-  let hasSeverityMarkers = false;
+  let inSection = false;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (const line of lines) {
+    const trimmed = line.trim();
 
-    // VERDICT line — capture separately to guarantee placement at end
-    if (/VERDICT:/i.test(line)) {
-      verdictLine = line;
+    if (/^VERDICT\s*:/i.test(trimmed)) {
+      verdictLine = trimmed;
       continue;
     }
 
-    // 🔴 CRITICAL — include line + next 2 context lines
-    if (line.includes('🔴')) {
-      hasSeverityMarkers = true;
-      findings.push(line);
-      for (let j = 1; j <= 2 && i + j < lines.length; j++) {
-        const ctx = lines[i + j];
-        if (
-          ctx.includes('🔴') ||
-          ctx.includes('🟡') ||
-          ctx.includes('🔵') ||
-          /VERDICT:/i.test(ctx)
-        )
-          break;
-        findings.push(ctx);
-      }
+    // Capture findings section headers + content
+    if (/^#{1,3}\s*(?:CRITICAL|WARNING|INFO)/i.test(trimmed)) {
+      inSection = true;
+      findings.push(trimmed);
       continue;
     }
 
-    // 🟡 WARNING — include line + next 2 context lines
-    if (line.includes('🟡')) {
-      hasSeverityMarkers = true;
-      findings.push(line);
-      for (let j = 1; j <= 2 && i + j < lines.length; j++) {
-        const ctx = lines[i + j];
-        if (
-          ctx.includes('🔴') ||
-          ctx.includes('🟡') ||
-          ctx.includes('🔵') ||
-          /VERDICT:/i.test(ctx)
-        )
-          break;
-        findings.push(ctx);
-      }
+    // End section on other headers
+    if (/^#{1,3}\s/.test(trimmed) && inSection) {
+      inSection = false;
       continue;
     }
 
-    // 🔵 INFO — count only
-    if (line.includes('🔵')) {
-      hasSeverityMarkers = true;
-      infoCount++;
+    if (inSection && trimmed) {
+      findings.push(line); // Keep original indentation
     }
   }
 
-  // Add INFO summary
-  if (infoCount > 0) {
-    findings.push(`🔵 INFO: ${infoCount} suggestion(s) (see full results)`);
-  }
-
-  // Fallback: no severity markers found (verifier used plain text)
-  if (!hasSeverityMarkers) {
+  // Fallback: no structured sections found
+  if (findings.length === 0) {
     const fallback = output.slice(0, 500);
     const suffix = verdictLine ? `\n${verdictLine}` : '';
-    return `${fallback}\n...(no severity markers found, see full results)${suffix}`;
+    return `${fallback}\n...(unstructured output, see full results)${suffix}`;
   }
 
-  // Build summary: findings first, then VERDICT guaranteed at the end
   let summary = findings.join('\n');
+
+  // Ensure verdict at end
   if (verdictLine) {
-    const verdictSpace = verdictLine.length + 1;
-    const truncateLimit = MAX_LENGTH - verdictSpace - 40;
-    if (summary.length + verdictSpace > MAX_LENGTH) {
-      summary = `${summary.slice(0, Math.max(0, truncateLimit))}\n...(truncated, see full results)`;
+    const budget = MAX_LENGTH - verdictLine.length - 20;
+    if (summary.length > budget) {
+      summary = `${summary.slice(0, budget)}\n...(truncated)`;
     }
     summary = `${summary}\n${verdictLine}`;
   } else if (summary.length > MAX_LENGTH) {
-    summary = `${summary.slice(0, MAX_LENGTH)}\n...(truncated, see full results)`;
+    summary = `${summary.slice(0, MAX_LENGTH)}\n...(truncated)`;
   }
 
   return summary;
 }
 
-/**
- * Format verification results into a human-readable summary.
- * Uses marker-based extraction (🔴/🟡/🔵) for structured output.
- */
 export function formatVerificationSummary(results: VerificationResult): string {
-  return results.results
-    .map((r) => {
-      const status = r.passed ? '✅ PASS' : '❌ FAIL';
-      const severity =
-        r.criticalCount + r.warningCount + r.infoCount > 0
-          ? ` (🔴${r.criticalCount} 🟡${r.warningCount} 🔵${r.infoCount})`
-          : '';
-      const output = summarizeVerificationOutput(r.output);
-      return `[${r.model}] ${status}${severity}\n${output}`;
-    })
-    .join('\n\n');
+  const infraErrors = results.results.filter((r) => r.infrastructureError);
+  const validResults = results.results.filter((r) => !r.infrastructureError);
+
+  const parts: string[] = [];
+
+  for (const r of validResults) {
+    const status = r.passed ? '✅ PASS' : '❌ FAIL';
+    const counts: string[] = [];
+    if (r.criticalCount > 0) counts.push(`🔴${r.criticalCount}`);
+    if (r.warningCount > 0) counts.push(`🟡${r.warningCount}`);
+    if (r.infoCount > 0) counts.push(`🔵${r.infoCount}`);
+    const severity = counts.length > 0 ? ` (${counts.join(' ')})` : '';
+    const output = summarizeVerificationOutput(r.output);
+    parts.push(`[${r.model}] ${status}${severity}\n${output}`);
+  }
+
+  for (const r of infraErrors) {
+    const preview = r.output.slice(0, 200).replace(/\n/g, ' ');
+    parts.push(`[${r.model}] ⛔ HALTED (infrastructure error)\n${preview}`);
+  }
+
+  return parts.join('\n\n');
 }
 
-/**
- * Save full verification results to a file for detailed review.
- * Returns the saved file path, or null on failure.
- */
+// ── File I/O ─────────────────────────────────────────────────────
+
 export function saveVerificationResult(
   cwd: string,
   type: 'plan' | 'impl',
@@ -372,8 +457,12 @@ export function saveVerificationResult(
     const filePath = join(dir, `${prefix}${type}-${dateStr}.md`);
     const content = results.results
       .map((r) => {
-        const status = r.passed ? '✅ PASS' : '❌ FAIL';
-        return `## [${r.model}] ${status}\n\n${r.output}`;
+        const label = r.infrastructureError
+          ? '⛔ HALTED'
+          : r.passed
+            ? '✅ PASS'
+            : '❌ FAIL';
+        return `## [${r.model}] ${label}\n\n${r.output}`;
       })
       .join('\n\n---\n\n');
     writeFileSync(filePath, content, 'utf-8');
@@ -383,10 +472,6 @@ export function saveVerificationResult(
   }
 }
 
-/**
- * Clean up all verification result files.
- * Called when workflow completes (done state).
- */
 export function cleanupVerificationResults(cwd: string): void {
   try {
     const dir = resolve(join(cwd, '.pi', 'verifications'));

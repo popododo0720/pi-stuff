@@ -297,6 +297,7 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             `Push on Complete (${git.pushOnComplete === false ? 'off' : 'on'})`,
             `Require Clean Start (${git.requireCleanStart === false ? 'off' : 'on'})`,
             `Use Workflow Branch (${git.useWorkflowBranch === false ? 'off' : 'on'})`,
+            `Use Workflow Worktree (${git.useWorkflowWorktree === false ? 'off' : 'on'})`,
           ]);
 
           const pickBoolean = async (title: string) =>
@@ -322,6 +323,10 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             const pick = await pickBoolean('Use workflow branch strategy');
             if (pick)
               settings.git = { ...git, useWorkflowBranch: pick === 'on' };
+          } else if (sub?.startsWith('Use Workflow Worktree')) {
+            const pick = await pickBoolean('Use workflow worktree strategy');
+            if (pick)
+              settings.git = { ...git, useWorkflowWorktree: pick === 'on' };
           }
         }
       }

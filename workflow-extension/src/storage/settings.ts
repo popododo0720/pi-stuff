@@ -51,6 +51,8 @@ function validateGitConfig(raw: unknown): GitAutomationConfig | undefined {
     config.requireCleanStart = r.requireCleanStart;
   if (typeof r.useWorkflowBranch === 'boolean')
     config.useWorkflowBranch = r.useWorkflowBranch;
+  if (typeof r.useWorkflowWorktree === 'boolean')
+    config.useWorkflowWorktree = r.useWorkflowWorktree;
 
   return Object.keys(config).length > 0 ? config : undefined;
 }

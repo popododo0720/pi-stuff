@@ -12,18 +12,14 @@ import { MAX_MEMORY_ENTRIES, MAX_MEMORY_VALUE_LENGTH } from './constants';
 import { shouldBlockToolCall } from './context/guard';
 import { buildSystemPromptInjection } from './context/prompt';
 import { updateStatusBar } from './context/status';
+import { SessionManager } from './session-manager';
 import { loadMemory, saveMemory } from './storage/memory';
-import { loadSessionFromDisk, saveSessionToDisk } from './storage/session';
+import { loadSessionFromDisk } from './storage/session';
 import { loadSettings } from './storage/settings';
+import { compactManager, RESET_MARKER } from './tools/compact';
 import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
-import {
-  applyStageConfig,
-  clearPendingCompact,
-  getPendingCompact,
-  RESET_MARKER,
-  registerTransitionTool,
-} from './tools/transition';
+import { applyStageConfig, registerTransitionTool } from './tools/transition';
 import type { StageConfig, WorkflowSession, WorkflowSettings } from './types';
 import { cleanupVerificationResults } from './verification';
 
@@ -47,29 +43,36 @@ function getStageConfig(
 }
 
 export default function (pi: ExtensionAPI) {
-  // ── Session state (owned here, accessed via closures) ──────────
-  let session: WorkflowSession | null = null;
-  let currentCwd = '';
-  const getSession = () => session;
-  const setSession = (s: WorkflowSession | null) => {
-    session = s;
-    if (currentCwd) saveSessionToDisk(currentCwd, s);
-  };
+  // ── Session state (encapsulated) ───────────────────────────────
+  const sm = new SessionManager();
 
   // ── Register commands ──────────────────────────────────────────
-  registerWorkflowCommand(pi, getSession, setSession);
+  registerWorkflowCommand(
+    pi,
+    () => sm.get(),
+    (s) => sm.set(s),
+  );
   registerSettingsCommand(pi);
-  registerCancelCommand(pi, getSession, setSession);
+  registerCancelCommand(
+    pi,
+    () => sm.get(),
+    (s) => sm.set(s),
+  );
 
   // ── Register tools ─────────────────────────────────────────────
-  registerTransitionTool(pi, getSession, setSession);
+  registerTransitionTool(
+    pi,
+    () => sm.get(),
+    (s) => sm.set(s),
+  );
   registerProjectMemoryTool(pi);
   registerModuleConventionsTool(pi);
 
   // ── Session reconstruction from disk ─────────────────────────
   const reconstruct = async (ctx: ExtensionContext) => {
-    currentCwd = ctx.cwd;
-    session = loadSessionFromDisk(ctx.cwd);
+    sm.setCwd(ctx.cwd);
+    sm.restore(loadSessionFromDisk(ctx.cwd));
+    const session = sm.get();
     updateStatusBar(ctx, session);
 
     if (!session) return;
@@ -110,6 +113,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Tool call guard ─────────────────────────────────────────────
   pi.on('tool_call', async (event) => {
+    const session = sm.get();
     if (!session || session.state === 'done' || session.completed)
       return undefined;
     const result = shouldBlockToolCall(
@@ -125,12 +129,12 @@ export default function (pi: ExtensionAPI) {
 
   // ── System prompt injection ────────────────────────────────────
   pi.on('before_agent_start', async (event, ctx) => {
-    currentCwd = ctx.cwd;
+    sm.setCwd(ctx.cwd);
 
     // Execute deferred compaction from previous tool call (await completion)
-    const pendingCompact = getPendingCompact();
+    const pendingCompact = compactManager.getPending();
     if (pendingCompact) {
-      clearPendingCompact();
+      compactManager.clear();
       await new Promise<void>((resolve) => {
         ctx.compact({
           customInstructions: pendingCompact,
@@ -141,6 +145,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Auto-recover: any done workflow resumes as plan on next user message
+    const session = sm.get();
     if (session && (session.state === 'done' || session.completed)) {
       session.state = 'plan';
       session.completed = false;
@@ -153,8 +158,9 @@ export default function (pi: ExtensionAPI) {
       session.startupPrepNote = '';
       session.startupPrepLocked = false;
       session.gitBranch = undefined;
+      session.gitWorktreePath = undefined;
       cleanupVerificationResults(ctx.cwd);
-      saveSessionToDisk(ctx.cwd, session);
+      sm.set(session);
       updateStatusBar(ctx, session);
     }
 
@@ -176,6 +182,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Auto-save current work tracking ────────────────────────────
   pi.on('agent_end', async (_e, ctx) => {
+    const session = sm.get();
     if (!session) return;
 
     const memory = loadMemory(ctx.cwd);
@@ -183,7 +190,7 @@ export default function (pi: ExtensionAPI) {
     // Track new workflow as current work
     if (session.state === 'plan' && !session.planContent) {
       const alreadyTracked = memory.currentWork.some(
-        (w) => w.what === `[${session?.id}] ${session?.description}`,
+        (w) => w.what === `[${session.id}] ${session.description}`,
       );
       if (!alreadyTracked && memory.currentWork.length < MAX_MEMORY_ENTRIES) {
         memory.currentWork.push({

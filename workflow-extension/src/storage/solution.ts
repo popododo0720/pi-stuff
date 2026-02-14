@@ -14,7 +14,7 @@ import { SOLUTIONS_DIR } from '../constants';
 import { toSlug } from './plan';
 
 /** Max characters of solution body to include in prompt context */
-const MAX_SOLUTION_BODY = 500;
+const MAX_SOLUTION_BODY = 1500;
 /** Max number of solutions to include in prompt */
 const MAX_SOLUTIONS_IN_CONTEXT = 5;
 
@@ -79,11 +79,11 @@ export function findRelevantSolutions(
     );
     const minScore = Math.max(0, options?.minScore ?? 1);
 
-    // Extract keywords from task description (3+ char words)
+    // Extract keywords from task description (2+ char words for acronym matching: SRP, OCP, DIP)
     const keywords = taskDescription
       .toLowerCase()
       .split(/\W+/)
-      .filter((w) => w.length >= 3);
+      .filter((w) => w.length >= 2);
 
     if (keywords.length === 0) {
       // No keywords — just list titles
@@ -94,13 +94,18 @@ export function findRelevantSolutions(
       return titles.join('\n');
     }
 
-    // Score each solution by keyword overlap
+    // Score each solution by keyword overlap (title hits weighted 2x)
     const scored = files.map((f) => {
       const fullPath = join(dirPath, f);
       const content = safeRead(fullPath);
-      const lower = content.toLowerCase();
-      const score = keywords.filter((k) => lower.includes(k)).length;
       const title = extractTitle(dirPath, f);
+      const titleLower = title.toLowerCase();
+      const bodyLower = content.toLowerCase();
+      const score = keywords.reduce((acc, k) => {
+        const titleHit = titleLower.includes(k) ? 2 : 0;
+        const bodyHit = bodyLower.includes(k) ? 1 : 0;
+        return acc + Math.max(titleHit, bodyHit);
+      }, 0);
       const body = extractBody(content);
       return { file: f, title, body, score };
     });

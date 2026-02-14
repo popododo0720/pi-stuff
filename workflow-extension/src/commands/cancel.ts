@@ -51,10 +51,13 @@ export function registerCancelCommand(
       const branchNote = session.gitBranch
         ? ` Workflow branch retained: ${session.gitBranch} (cleanup manually if needed).`
         : '';
+      const worktreeNote = session.gitWorktreePath
+        ? ` Worktree retained: ${session.gitWorktreePath} (cleanup manually if needed).`
+        : '';
 
       setSession(null);
       updateStatusBar(ctx, null);
-      ctx.ui.notify(`Workflow cancelled.${branchNote}`, 'info');
+      ctx.ui.notify(`Workflow cancelled.${branchNote}${worktreeNote}`, 'info');
     },
   });
 }
