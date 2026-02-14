@@ -10,6 +10,7 @@ import {
   STAGE_GUIDES,
 } from '../constants';
 import { generateRepoMap } from '../repomap/index';
+import { loadCriticalPatterns } from '../storage/critical-patterns';
 import { loadMemory, resolveMemoryPath } from '../storage/memory';
 import { listModules, loadMatchingModules } from '../storage/modules';
 import { loadSettings } from '../storage/settings';
@@ -364,7 +365,25 @@ export async function buildSystemPromptInjection(
     planContext +
     failContext;
 
+  // Critical patterns — always injected, separate from memory budget
+  let criticalContext = '';
+  try {
+    const critical = loadCriticalPatterns(ctx.cwd);
+    if (critical) {
+      criticalContext =
+        '\n\n### Critical Patterns (항상 적용)\n' +
+        `<critical_patterns>\n${critical}\n</critical_patterns>`;
+    }
+  } catch {
+    /* ignore */
+  }
+
   return (
-    basePrompt + workflowFlag + workflowContext + LEARNING_GUIDE + memoryContext
+    basePrompt +
+    workflowFlag +
+    workflowContext +
+    LEARNING_GUIDE +
+    criticalContext +
+    memoryContext
   );
 }

@@ -19,6 +19,11 @@ export interface TodoItem {
   status: 'pending' | 'active' | 'done';
 }
 
+export interface PatternEntry {
+  text: string;
+  count: number;
+}
+
 export interface WorkflowSession {
   id: string;
   state: WorkflowState;
@@ -53,7 +58,7 @@ export interface ProjectMemory {
   workflows: Array<{ name: string; description: string }>;
   currentWork: Array<{ what: string; why: string; startedAt: string }>;
   notes: string[];
-  patterns: string[];
+  patterns: PatternEntry[];
   gotchas: string[];
   decisions: string[];
 }

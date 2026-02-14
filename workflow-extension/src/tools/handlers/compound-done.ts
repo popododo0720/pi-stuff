@@ -1,6 +1,7 @@
 // tools/handlers/compound-done.ts — compoundDone action handler
 // Handles TODO progression, git automation, and workflow finalization.
 
+import { appendCriticalPattern } from '../../storage/critical-patterns';
 import { loadMemory, saveMemory } from '../../storage/memory';
 import { saveSolution } from '../../storage/solution';
 import { RESET_MARKER } from '../compact';
@@ -29,6 +30,26 @@ export async function handleCompoundDone(
   hctx: HandlerContext,
 ): Promise<HandlerResult> {
   const { session } = hctx;
+
+  // ── Auto-promotion: patterns with count >= 3 → critical.md ──
+  const memory = loadMemory(hctx.ctx.cwd);
+  const promoted: string[] = [];
+  const remaining = memory.patterns.filter((p) => {
+    if (p.count >= 3) {
+      appendCriticalPattern(hctx.ctx.cwd, p.text, p.count);
+      promoted.push(p.text);
+      return false;
+    }
+    return true;
+  });
+  if (promoted.length > 0) {
+    memory.patterns = remaining;
+    saveMemory(hctx.ctx.cwd, memory);
+  }
+  const promotedNote =
+    promoted.length > 0
+      ? `📌 Promoted to Critical: ${promoted.join(', ')}\n\n`
+      : '';
 
   const summary = hctx.params.content?.trim() || '';
   let solutionPath: string | null = null;
@@ -59,15 +80,16 @@ export async function handleCompoundDone(
         summary,
         solutionPath,
         gitCwd,
+        promotedNote,
       });
     }
 
     // Last TODO — fall through to finalization
-    return await finalizeWorkflow(hctx, { solutionPath });
+    return await finalizeWorkflow(hctx, { solutionPath, promotedNote });
   }
 
   // No TODOs — finalize directly
-  return await finalizeWorkflow(hctx, { solutionPath });
+  return await finalizeWorkflow(hctx, { solutionPath, promotedNote });
 }
 
 // ── Sub-handlers ─────────────────────────────────────────────────
@@ -78,6 +100,7 @@ interface AdvanceParams {
   summary: string;
   solutionPath: string | null;
   gitCwd: string;
+  promotedNote: string;
 }
 
 async function advanceToNextTodo(
@@ -117,6 +140,7 @@ async function advanceToNextTodo(
 
   return {
     text:
+      p.promotedNote +
       `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
       `${todoList}\n\n` +
       (p.solutionPath ? `**Solution saved:** ${p.solutionPath}\n\n` : '') +
@@ -136,6 +160,7 @@ async function advanceToNextTodo(
 
 interface FinalizeParams {
   solutionPath: string | null;
+  promotedNote: string;
 }
 
 async function finalizeWorkflow(
@@ -187,6 +212,7 @@ async function finalizeWorkflow(
 
   return {
     text:
+      p.promotedNote +
       '🎉 Workflow Complete!\n\n' +
       `**Task:** ${session.description}\n` +
       `**ID:** ${session.id}\n` +

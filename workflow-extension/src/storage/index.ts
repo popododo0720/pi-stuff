@@ -1,4 +1,8 @@
 export { loadCustomChecks } from './checks';
+export {
+  appendCriticalPattern,
+  loadCriticalPatterns,
+} from './critical-patterns';
 export { loadMemory, resolveMemoryPath, saveMemory } from './memory';
 export { listModules, loadMatchingModules } from './modules';
 export { savePlanDocument, toSlug } from './plan';

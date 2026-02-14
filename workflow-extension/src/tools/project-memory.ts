@@ -11,7 +11,7 @@ import {
   MAX_RULES,
 } from '../constants';
 import { loadMemory, saveMemory } from '../storage/memory';
-import type { ConditionalRule } from '../types';
+import type { ConditionalRule, PatternEntry } from '../types';
 
 // Helper to build text response
 function t(text: string) {
@@ -76,6 +76,8 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
                     if (typeof item === 'string') return `  ${i}. ${item}`;
                     if ('pattern' in item)
                       return `  ${i}. [${(item as ConditionalRule).pattern}] ${(item as ConditionalRule).rule}`;
+                    if ('text' in item && 'count' in item)
+                      return `  ${i}. [${(item as PatternEntry).count}x] ${(item as PatternEntry).text}`;
                     if ('name' in item)
                       return `  ${i}. ${item.name}: ${item.description}`;
                     if ('what' in item)
@@ -105,7 +107,21 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
             );
           }
 
-          if (params.category === 'rules') {
+          if (params.category === 'patterns') {
+            // Fuzzy dedup: merge if substring match (10+ chars to avoid false matches)
+            const existing =
+              value.length >= 10
+                ? memory.patterns.find(
+                    (p) => p.text.includes(value) || value.includes(p.text),
+                  )
+                : undefined;
+            if (existing) {
+              existing.count++;
+              existing.text = value;
+            } else {
+              memory.patterns.push({ text: value, count: 1 });
+            }
+          } else if (params.category === 'rules') {
             if (memory.rules.length >= MAX_RULES) {
               return t(`rules reached max entries (${MAX_RULES}).`);
             }
@@ -123,7 +139,6 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
           } else if (
             params.category === 'conventions' ||
             params.category === 'notes' ||
-            params.category === 'patterns' ||
             params.category === 'gotchas' ||
             params.category === 'decisions'
           ) {
