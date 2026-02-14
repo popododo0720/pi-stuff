@@ -27,6 +27,7 @@ export function saveSolution(
   description: string,
   content: string,
   workflowId: string,
+  tags?: string[],
 ): string | null {
   try {
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -40,6 +41,7 @@ export function saveSolution(
       `date: ${dateStr}\n` +
       `workflowId: ${workflowId}\n` +
       'type: solution\n' +
+      (tags && tags.length > 0 ? `tags: [${tags.join(', ')}]\n` : '') +
       '---\n\n';
     writeFileSync(filePath, frontmatter + content, 'utf-8');
     return filePath;
@@ -94,17 +96,19 @@ export function findRelevantSolutions(
       return titles.join('\n');
     }
 
-    // Score each solution by keyword overlap (title hits weighted 2x)
+    // Score each solution by keyword overlap (tag 3x > title 2x > body 1x)
     const scored = files.map((f) => {
       const fullPath = join(dirPath, f);
       const content = safeRead(fullPath);
       const title = extractTitle(dirPath, f);
+      const tags = extractTags(dirPath, f);
       const titleLower = title.toLowerCase();
       const bodyLower = content.toLowerCase();
       const score = keywords.reduce((acc, k) => {
+        const tagHit = tags.some((t) => t.toLowerCase().includes(k)) ? 3 : 0;
         const titleHit = titleLower.includes(k) ? 2 : 0;
         const bodyHit = bodyLower.includes(k) ? 1 : 0;
-        return acc + Math.max(titleHit, bodyHit);
+        return acc + Math.max(tagHit, titleHit, bodyHit);
       }, 0);
       const body = extractBody(content);
       return { file: f, title, body, score };
@@ -136,6 +140,17 @@ export function findRelevantSolutions(
   } catch {
     return '';
   }
+}
+
+/** Extract tags from frontmatter */
+function extractTags(dirPath: string, file: string): string[] {
+  const content = safeRead(join(dirPath, file));
+  const match = content.match(/^tags:\s*\[([^\]]*)\]/m);
+  if (!match) return [];
+  return match[1]
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 /** Extract title from frontmatter */

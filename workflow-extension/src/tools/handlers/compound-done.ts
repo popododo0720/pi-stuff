@@ -26,6 +26,115 @@ function formatTodoList(
     .join('\n');
 }
 
+/** Extract top keywords from summary text for auto-tagging. */
+function extractAutoTags(summary: string): string[] {
+  const STOPWORDS = new Set([
+    'the',
+    'a',
+    'an',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'have',
+    'has',
+    'had',
+    'do',
+    'does',
+    'did',
+    'will',
+    'would',
+    'could',
+    'should',
+    'may',
+    'might',
+    'can',
+    'shall',
+    'to',
+    'of',
+    'in',
+    'for',
+    'on',
+    'with',
+    'at',
+    'by',
+    'from',
+    'as',
+    'into',
+    'through',
+    'during',
+    'before',
+    'after',
+    'above',
+    'below',
+    'between',
+    'out',
+    'off',
+    'over',
+    'under',
+    'again',
+    'further',
+    'then',
+    'once',
+    'and',
+    'but',
+    'or',
+    'nor',
+    'not',
+    'so',
+    'yet',
+    'both',
+    'each',
+    'few',
+    'more',
+    'most',
+    'other',
+    'some',
+    'such',
+    'no',
+    'only',
+    'own',
+    'same',
+    'than',
+    'too',
+    'very',
+    'just',
+    'this',
+    'that',
+    'these',
+    'those',
+    'it',
+    'its',
+    'all',
+    'any',
+    'new',
+    'use',
+    'used',
+    'using',
+    'also',
+    'added',
+    'add',
+    'file',
+    'files',
+    'change',
+    'changes',
+    'changed',
+    'update',
+  ]);
+  const words = summary
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w) => w.length >= 2 && !STOPWORDS.has(w));
+  const freq = new Map<string, number>();
+  for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1);
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([w]) => w);
+}
+
 export async function handleCompoundDone(
   hctx: HandlerContext,
 ): Promise<HandlerResult> {
@@ -52,6 +161,7 @@ export async function handleCompoundDone(
       : '';
 
   const summary = hctx.params.content?.trim() || '';
+  const tags = summary ? extractAutoTags(summary) : undefined;
   let solutionPath: string | null = null;
   if (summary) {
     solutionPath = saveSolution(
@@ -59,6 +169,7 @@ export async function handleCompoundDone(
       session.description,
       summary,
       session.id,
+      tags,
     );
   }
 
