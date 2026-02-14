@@ -127,6 +127,8 @@ async function runSingleModel(
     '-p',
     prompt,
     '--no-extensions',
+    '--tools',
+    'read,bash,grep,find,ls',
     '--provider',
     provider,
     '--model',
