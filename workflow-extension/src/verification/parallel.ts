@@ -172,6 +172,21 @@ async function runSingleModel(
       const severity = parseStructuredFindings(output);
       const verdict = parseVerdict(output);
       const hasCritical = severity.critical > 0;
+      const totalFindings =
+        severity.critical + severity.warning + severity.info;
+
+      // No verdict + no structured findings → model didn't follow format
+      if (!verdict && totalFindings === 0) {
+        return {
+          model,
+          passed: false,
+          output,
+          criticalCount: 0,
+          warningCount: 0,
+          infoCount: 0,
+          infrastructureError: true,
+        };
+      }
 
       // VERDICT takes priority. Only 🔴 CRITICAL blocks.
       let passed: boolean;
@@ -180,6 +195,7 @@ async function runSingleModel(
       } else if (verdict === 'FAIL') {
         passed = !hasCritical;
       } else {
+        // No verdict but has findings → fail safe
         passed = false;
       }
 
