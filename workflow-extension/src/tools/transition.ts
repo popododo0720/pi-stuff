@@ -1,7 +1,6 @@
 // tools/transition.ts — workflow_transition tool
 // Manages state machine: plan → verify → implement → verify → compound → done.
 
-import { resolve } from 'node:path';
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
@@ -17,21 +16,13 @@ import {
   runParallelVerification,
   saveVerificationResult,
 } from '../verification';
-
-// ── Deferred compaction ──────────────────────────────────────────
-// Tool execution 중 ctx.compact() 직접 호출 시 race condition 발생.
-// 대신 플래그만 세팅하고, before_agent_start에서 실행.
-export const RESET_MARKER = '[WF_RESET]';
-
-let PENDING_COMPACT: string | null = null;
-
-export function getPendingCompact(): string | null {
-  return PENDING_COMPACT;
-}
-
-export function clearPendingCompact(): void {
-  PENDING_COMPACT = null;
-}
+import { compactManager, RESET_MARKER } from './compact';
+import {
+  autoCommitFinal,
+  autoCommitTodo,
+  autoPush,
+  getGitCwd,
+} from './git-automation';
 
 /**
  * Apply stage-specific model and thinking level.
@@ -66,149 +57,6 @@ function textResult(text: string, session?: WorkflowSession) {
   return {
     content: [{ type: 'text' as const, text }],
     ...(session ? { details: session } : {}),
-  };
-}
-
-async function runGit(
-  pi: ExtensionAPI,
-  args: string[],
-  cwd?: string,
-): Promise<{ ok: boolean; stdout: string; stderr: string; code: number }> {
-  try {
-    const gitArgs = cwd ? ['-C', cwd, ...args] : args;
-    const result = await pi.exec('git', gitArgs);
-    return {
-      ok: result.code === 0,
-      stdout: result.stdout.trim(),
-      stderr: result.stderr.trim(),
-      code: result.code,
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      stdout: '',
-      stderr: e instanceof Error ? e.message : 'git command failed',
-      code: -1,
-    };
-  }
-}
-
-function getGitCwd(cwd: string): string {
-  return resolve(cwd);
-}
-
-async function hasUncommittedChanges(
-  pi: ExtensionAPI,
-  gitCwd: string,
-): Promise<boolean> {
-  const status = await runGit(pi, ['status', '--porcelain'], gitCwd);
-  if (!status.ok) return false;
-  return status.stdout.length > 0;
-}
-
-async function autoCommitTodo(
-  pi: ExtensionAPI,
-  session: WorkflowSession,
-  todoIndex: number,
-  gitCwd: string,
-): Promise<{ ok: boolean; message: string }> {
-  const add = await runGit(pi, ['add', '-A'], gitCwd);
-  if (!add.ok) {
-    return {
-      ok: false,
-      message: `git add failed: ${add.stderr || `exit ${add.code}`}`,
-    };
-  }
-
-  const hasChanges = await hasUncommittedChanges(pi, gitCwd);
-  if (!hasChanges) {
-    return { ok: true, message: 'No changes to commit for this TODO.' };
-  }
-
-  const todo = session.todos[todoIndex];
-  const title = todo?.title ?? 'unknown';
-  const msg = `chore(workflow): TODO #${todoIndex + 1} - ${title}`;
-  const commit = await runGit(pi, ['commit', '-m', msg], gitCwd);
-  if (!commit.ok) {
-    return {
-      ok: false,
-      message: `git commit failed: ${commit.stderr || `exit ${commit.code}`}`,
-    };
-  }
-
-  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD'], gitCwd);
-  return {
-    ok: true,
-    message: `Committed TODO #${todoIndex + 1}${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
-  };
-}
-
-async function autoCommitFinal(
-  pi: ExtensionAPI,
-  session: WorkflowSession,
-  completedTodoIndex: number | null,
-  gitCwd: string,
-): Promise<{ ok: boolean; message: string }> {
-  const add = await runGit(pi, ['add', '-A'], gitCwd);
-  if (!add.ok) {
-    return {
-      ok: false,
-      message: `git add failed: ${add.stderr || `exit ${add.code}`}`,
-    };
-  }
-
-  const hasChanges = await hasUncommittedChanges(pi, gitCwd);
-  if (!hasChanges) {
-    return { ok: true, message: 'No changes to commit for finalization.' };
-  }
-
-  const finalTitle =
-    completedTodoIndex !== null
-      ? session.todos[completedTodoIndex]?.title || 'unknown'
-      : 'workflow completion';
-  const msg =
-    completedTodoIndex !== null
-      ? `chore(workflow): final - TODO #${completedTodoIndex + 1} - ${finalTitle}`
-      : `chore(workflow): final - ${session.description}`;
-
-  const commit = await runGit(pi, ['commit', '-m', msg], gitCwd);
-  if (!commit.ok) {
-    return {
-      ok: false,
-      message: `git commit failed: ${commit.stderr || `exit ${commit.code}`}`,
-    };
-  }
-
-  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD'], gitCwd);
-  return {
-    ok: true,
-    message: `Final commit created${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
-  };
-}
-
-async function autoPush(
-  pi: ExtensionAPI,
-  branch: string | undefined,
-  gitCwd: string,
-): Promise<{ ok: boolean; message: string }> {
-  if (!branch) {
-    return {
-      ok: false,
-      message:
-        'Push target branch is not set. Push skipped to avoid unintended current-branch push.',
-    };
-  }
-
-  const push = await runGit(pi, ['push', 'origin', branch], gitCwd);
-  if (!push.ok) {
-    return {
-      ok: false,
-      message: `git push failed: ${push.stderr || `exit ${push.code}`}`,
-    };
-  }
-  return {
-    ok: true,
-    message: `Pushed origin/${branch}`,
   };
 }
 
@@ -578,10 +426,11 @@ export function registerTransitionTool(
                 .join('\n');
 
               // Defer compaction — will run in next before_agent_start
-              PENDING_COMPACT =
+              compactManager.setPending(
                 `${RESET_MARKER} Workflow "${session.description}" — TODO #${nextIndex} completed. ` +
-                `Preserve: unified plan, TODO list progress, key decisions. ` +
-                `Discard: previous TODO implementation details, verification output, code diffs.`;
+                  `Preserve: unified plan, TODO list progress, key decisions. ` +
+                  `Discard: previous TODO implementation details, verification output, code diffs.`,
+              );
 
               return textResult(
                 `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
@@ -682,10 +531,11 @@ export function registerTransitionTool(
           updateStatusBar(ctx, session);
 
           // Defer compaction — will run in next before_agent_start
-          PENDING_COMPACT =
+          compactManager.setPending(
             `${RESET_MARKER} Workflow "${session.description}" completed. ` +
-            `Preserve: task description, final outcome, key decisions. ` +
-            `Discard: implementation details, verification output, code diffs.`;
+              `Preserve: task description, final outcome, key decisions. ` +
+              `Discard: implementation details, verification output, code diffs.`,
+          );
 
           return textResult(
             '🎉 Workflow Complete!\n\n' +
