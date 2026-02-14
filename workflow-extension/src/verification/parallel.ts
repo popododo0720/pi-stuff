@@ -98,16 +98,17 @@ function parseStructuredFindings(output: string): {
   return { critical, warning, info };
 }
 
-/** Detect infrastructure errors (rate limit, quota, network) in output. */
+/** Detect infrastructure errors (rate limit, quota, network) in output.
+ *  Only checks first 500 chars (error messages appear early, not in analysis). */
 function isInfrastructureError(output: string): boolean {
-  const lower = output.toLowerCase();
+  const prefix = output.slice(0, 500).toLowerCase();
   return (
-    /usage limit|rate limit|quota exceeded|too many requests|429|503/.test(
-      lower,
-    ) ||
-    /try again in\s+~?\d+/.test(lower) ||
-    lower.startsWith('process execution failed:') ||
-    lower.startsWith('empty response after all retry')
+    /usage limit|rate limit|quota exceeded|too many requests/.test(prefix) ||
+    /\b(429|503)\b.*error/i.test(prefix) ||
+    /error.*\b(429|503)\b/i.test(prefix) ||
+    /try again in\s+~?\d+/.test(prefix) ||
+    prefix.startsWith('process execution failed:') ||
+    prefix.startsWith('empty response after all retry')
   );
 }
 
@@ -176,10 +177,11 @@ async function runSingleModel(
       const verdict = parseVerdict(output);
       const hasCritical = severity.critical > 0;
 
-      // VERDICT takes priority. Only 🔴 CRITICAL blocks.
+      // VERDICT takes priority, but CRITICAL findings always block.
       let passed: boolean;
       if (verdict === 'PASS') {
-        passed = true;
+        // Trust PASS, but override if model contradicts itself (listed criticals but said PASS)
+        passed = !hasCritical;
       } else if (verdict === 'FAIL') {
         passed = !hasCritical;
       } else {
@@ -236,7 +238,7 @@ const STRUCTURED_FORMAT_INSTRUCTION =
   '## INFO\n' +
   '- [finding]\n' +
   '(Write "- None" if no info items)\n\n' +
-  'VERDICT: PASS\n\n' +
+  'VERDICT: PASS or FAIL\n\n' +
   'Rules:\n' +
   '- You MUST include all four sections above (## CRITICAL, ## WARNING, ## INFO, VERDICT)\n' +
   '- List findings ONLY as bullet points (- ) inside their section\n' +

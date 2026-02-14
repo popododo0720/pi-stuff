@@ -302,6 +302,12 @@ export function registerTransitionTool(
             // Infrastructure error → revert to plan, stop loop
             if (result.halted) {
               session.state = 'plan';
+              const haltResultPath = saveVerificationResult(
+                ctx.cwd,
+                'plan',
+                result,
+                session.id,
+              );
               setSession(session);
               updateStatusBar(ctx, session);
               const haltedModels = result.results
@@ -311,8 +317,12 @@ export function registerTransitionTool(
               return textResult(
                 '⛔ Plan verification halted — model infrastructure error.\n\n' +
                   `Affected: ${haltedModels}\n\n` +
-                  'Retry `approvePlan` when the model is available again.' +
-                  (savedPath ? `\n📄 Plan saved: ${savedPath}` : ''),
+                  formatVerificationSummary(result) +
+                  '\n\nRetry `approvePlan` when the model is available again.' +
+                  (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
+                  (haltResultPath
+                    ? `\n📋 Full results: ${haltResultPath}`
+                    : ''),
                 session,
               );
             }
