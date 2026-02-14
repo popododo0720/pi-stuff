@@ -160,3 +160,27 @@ function safeRead(path: string): string {
     return '';
   }
 }
+
+/**
+ * Return a brief index of available solutions (date + title only).
+ * For on-demand reference — model reads specific files when needed.
+ */
+export function findSolutionIndex(cwd: string): string {
+  try {
+    const dirPath = resolve(join(cwd, SOLUTIONS_DIR));
+    if (!existsSync(dirPath)) return '';
+    const files = readdirSync(dirPath)
+      .filter((f) => f.endsWith('.md'))
+      .sort()
+      .reverse();
+    if (files.length === 0) return '';
+    return files
+      .map((f) => {
+        const title = extractTitle(dirPath, f);
+        return `- ${f.slice(0, 10)}: ${title} (${join(SOLUTIONS_DIR, f)})`;
+      })
+      .join('\n');
+  } catch {
+    return '';
+  }
+}

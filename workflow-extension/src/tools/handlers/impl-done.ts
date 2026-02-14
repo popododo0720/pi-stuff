@@ -101,10 +101,17 @@ export async function handleImplDone(
   } catch (e) {
     const isNoModels =
       e instanceof Error && e.message.includes('No verification models');
+    if (isNoModels) {
+      session.state = 'compound';
+      session.retryCount = 0;
+      return {
+        text: '⚠️ No verification models configured. Skipping verification.',
+        stageConfig: settings.stages.compound,
+      };
+    }
+    session.state = 'implement';
     return {
-      text: isNoModels
-        ? '⚠️ No verification models. Falling back to manual verification. Use /workflow-settings to configure.'
-        : '⚠️ Auto-verification error. Falling back to manual verification.',
+      text: '⚠️ Auto-verification error. Returned to implement stage — retry implDone when ready.',
     };
   }
 }
