@@ -336,6 +336,19 @@ export async function buildSystemPromptInjection(
     // Graceful degradation — skip repo map
   }
 
+  // Git context for compound cleanup
+  let gitCleanupContext = '';
+  if (session.state === 'compound' && session.gitBranch) {
+    gitCleanupContext =
+      '\n\n### Git Cleanup Info\n' +
+      `- **Workflow branch:** \`${session.gitBranch}\`\n` +
+      `- **Task:** ${session.description}\n` +
+      (session.gitWorktreePath
+        ? `- **Worktree path:** \`${session.gitWorktreePath}\`\n` +
+          '- **Mode:** worktree — use `git -C <main-repo-path>` for merge commands\n'
+        : '- **Mode:** branch — use `git checkout main` then merge\n');
+  }
+
   // Assemble workflow context block
   const workflowContext =
     '\n\n## Active Workflow\n\n' +
@@ -344,6 +357,7 @@ export async function buildSystemPromptInjection(
     repoMapContext +
     startupPrepContext +
     todoContext +
+    gitCleanupContext +
     onboardingContext +
     stageGuide +
     solutionContext +

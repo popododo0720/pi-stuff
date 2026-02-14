@@ -5,10 +5,10 @@ import { loadMemory, saveMemory } from '../../storage/memory';
 import { saveSolution } from '../../storage/solution';
 import { RESET_MARKER } from '../compact';
 import {
-  autoCommitFinal,
   autoCommitTodo,
   autoPush,
   getGitCwd,
+  hasUncommittedChanges,
 } from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
@@ -63,21 +63,11 @@ export async function handleCompoundDone(
     }
 
     // Last TODO — fall through to finalization
-    return await finalizeWorkflow(hctx, {
-      completedTodoIndex: completedIndex,
-      summary,
-      solutionPath,
-      gitCwd,
-    });
+    return await finalizeWorkflow(hctx, { solutionPath });
   }
 
   // No TODOs — finalize directly
-  return await finalizeWorkflow(hctx, {
-    completedTodoIndex: null,
-    summary,
-    solutionPath,
-    gitCwd,
-  });
+  return await finalizeWorkflow(hctx, { solutionPath });
 }
 
 // ── Sub-handlers ─────────────────────────────────────────────────
@@ -145,56 +135,23 @@ async function advanceToNextTodo(
 }
 
 interface FinalizeParams {
-  completedTodoIndex: number | null;
-  summary: string;
   solutionPath: string | null;
-  gitCwd: string;
 }
 
 async function finalizeWorkflow(
   hctx: HandlerContext,
   p: FinalizeParams,
 ): Promise<HandlerResult> {
-  const { session, settings, pi } = hctx;
-  const finalGitNotes: string[] = [];
+  const { session, pi } = hctx;
 
-  if (settings.git?.enabled !== false) {
-    const finalCommit = await autoCommitFinal(
-      pi,
-      session,
-      p.completedTodoIndex,
-      p.gitCwd,
-    );
-    if (!finalCommit.ok) {
-      session.state = 'compound';
-      return {
-        text: `❌ Final commit failed. Workflow cannot complete yet.\n\n${finalCommit.message}`,
-      };
-    }
-    finalGitNotes.push(`📦 ${finalCommit.message}`);
-
-    if (settings.git?.pushOnComplete !== false) {
-      const branchStrategyEnabled =
-        settings.git?.useWorkflowWorktree !== false ||
-        settings.git?.useWorkflowBranch !== false;
-
-      if (!session.gitBranch) {
-        finalGitNotes.push(
-          branchStrategyEnabled
-            ? '⚠️ Final push skipped: workflow branch target is missing (e.g., startup prep path).'
-            : '⚠️ Final push skipped: branch/worktree strategy is disabled, so no explicit push target is available.',
-        );
-      } else {
-        const finalPush = await autoPush(pi, session.gitBranch, p.gitCwd);
-        if (!finalPush.ok) {
-          session.state = 'compound';
-          return {
-            text: `❌ Final push failed. Workflow cannot complete yet.\n\n${finalPush.message}`,
-          };
-        }
-        finalGitNotes.push(`🚀 ${finalPush.message}`);
-      }
-    }
+  // Lightweight check: model should have completed git cleanup already
+  const gitCwd = getGitCwd(hctx.ctx.cwd);
+  const hasChanges = await hasUncommittedChanges(pi, gitCwd);
+  if (hasChanges) {
+    session.state = 'compound';
+    return {
+      text: '⚠️ Uncommitted changes detected. Complete the git cleanup checklist before calling compoundDone.',
+    };
   }
 
   const completedTodoCount = session.todos.length;
@@ -203,7 +160,7 @@ async function finalizeWorkflow(
       ? `**TODOs completed:** ${completedTodoCount}/${completedTodoCount}\n`
       : '';
 
-  // Workflow cleanup
+  // Session cleanup
   session.todos = [];
   session.activeTodoIndex = -1;
   session.planContent = '';
@@ -217,7 +174,7 @@ async function finalizeWorkflow(
   session.state = 'done';
   session.completed = true;
 
-  // Remove currentWork entry
+  // Remove currentWork
   try {
     const memory = loadMemory(hctx.ctx.cwd);
     memory.currentWork = memory.currentWork.filter(
@@ -235,10 +192,7 @@ async function finalizeWorkflow(
       `**ID:** ${session.id}\n` +
       todoSummary +
       (p.solutionPath ? `**Solution saved:** ${p.solutionPath}\n` : '') +
-      (finalGitNotes.length > 0
-        ? `**Git automation:**\n${finalGitNotes.join('\n')}\n`
-        : '') +
-      '\nLearnings from this workflow have been captured for future reference.',
+      '\nLearnings captured for future reference.',
     compact:
       `${RESET_MARKER} Workflow "${session.description}" completed. ` +
       `Preserve: task description, final outcome, key decisions. ` +

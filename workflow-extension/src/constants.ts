@@ -178,16 +178,28 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +
-    'The implementation is complete. Complete ALL steps before calling compoundDone.\n\n' +
+    'The implementation is complete. Complete ALL steps in order. Do NOT skip any step.\n\n' +
     '### Mandatory Checklist\n' +
     '1. **Analyze** — what worked well, what went wrong, reusable insight.\n' +
-    '2. **Save patterns** — recurring code patterns discovered → project_memory(action: "add", category: "patterns", value: "...")\n' +
+    '2. **Save patterns** — recurring code patterns → project_memory(action: "add", category: "patterns", value: "...")\n' +
     '3. **Save gotchas** — mistakes found and fixed → project_memory(action: "add", category: "gotchas", value: "...")\n' +
     '4. **Save decisions** — architecture choices with rationale → project_memory(action: "add", category: "decisions", value: "...")\n' +
-    '5. **Save conventions** — if you discovered project preferences → project_memory(category: "conventions")\n' +
-    '6. **Memory cleanup** — review existing project memory and remove outdated entries. ' +
-    'Use project_memory(action: "remove", category: "...", index: N).\n' +
-    '7. Call workflow_transition(action: "compoundDone", content: "<compound summary>").\n\n' +
+    '5. **Save conventions** — project preferences discovered → project_memory(category: "conventions")\n' +
+    '6. **Memory cleanup** — remove outdated entries: project_memory(action: "remove", category: "...", index: N)\n' +
+    '7. **Git cleanup (MANDATORY — do NOT call compoundDone until ALL sub-steps verified)**:\n' +
+    '   Execute each sub-step, verify success, then proceed to the next:\n' +
+    '   a. `git add -A && git status` — check for remaining changes\n' +
+    '   b. If changes exist: `git commit -m "chore(workflow): final - <description>"`\n' +
+    '   c. `git push origin <branch>` — push workflow branch\n' +
+    '   d. Switch to main: `git checkout main` (branch mode) or `git -C <repo-path> merge ...` (worktree mode)\n' +
+    '   e. `git merge <branch> --no-ff -m "merge: <description>"` — merge into main\n' +
+    '   f. `git push origin main` — push main\n' +
+    '   g. If worktree: `git worktree remove <path> --force`\n' +
+    '   h. `git branch -D <branch>` — delete local branch\n' +
+    '   i. `git push origin --delete <branch>` — delete remote branch\n' +
+    '   **If any step fails, stop and report. Do NOT proceed to compoundDone.**\n' +
+    '   Refer to the Git Cleanup Info section for branch name and worktree path.\n' +
+    '8. Call workflow_transition(action: "compoundDone", content: "<compound summary>").\n\n' +
     'The summary will be saved to docs/solutions/ for future reference.',
 
   done: '',
