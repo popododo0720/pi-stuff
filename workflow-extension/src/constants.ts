@@ -70,6 +70,7 @@ export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
   replan: ['implement', 'verifyImpl', 'verifyPlan'],
   compoundDone: ['compound'],
   setTodos: ['plan'],
+  skipVerification: ['verifyPlan', 'verifyImpl'],
 };
 
 // Guide texts
@@ -132,9 +133,9 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     'Discussing the plan is NOT approval. Wait for explicit words like "approve", "go", "submit", "승인", "ㄱㄱ", "제출해".',
 
   verifyPlan:
-    '## Current Stage: 🔍 Plan Verification — FAILED\n\n' +
-    '⚠️ MANDATORY: Fix ALL issues found by verification. Do NOT bypass or ignore verification results.\n' +
-    'Do NOT call any manual override. The ONLY path forward is to fix the plan and resubmit.\n\n' +
+    '## Current Stage: 🔍 Plan Verification — FAILED / HALTED\n\n' +
+    '⚠️ MANDATORY: Fix ALL code issues found by verification. Do NOT bypass verification for code problems.\n' +
+    'For infrastructure errors (rate limit, timeout), call workflow_transition(action: "skipVerification") to proceed.\n\n' +
     '1. Read the verification feedback above carefully.\n' +
     '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in your plan.\n' +
     '3. Discuss changes with the user if needed.\n' +
@@ -168,9 +169,9 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:
-    '## Current Stage: ✅ Implementation Verification — FAILED\n\n' +
-    '⚠️ MANDATORY: Fix ALL issues found by verification. Do NOT bypass or ignore verification results.\n' +
-    'Do NOT call any manual override. The ONLY path forward is to fix the code and resubmit.\n\n' +
+    '## Current Stage: ✅ Implementation Verification — FAILED / HALTED\n\n' +
+    '⚠️ MANDATORY: Fix ALL code issues found by verification. Do NOT bypass verification for code problems.\n' +
+    'For infrastructure errors (rate limit, timeout), call workflow_transition(action: "skipVerification") to proceed.\n\n' +
     '1. Read the verification feedback above carefully.\n' +
     '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in the implementation.\n' +
     '3. Call workflow_transition(action: "replan") to return to planning if the plan itself needs changes.\n' +
@@ -199,6 +200,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '   h. `git branch -D <branch>` — delete local branch\n' +
     '   i. `git push origin --delete <branch>` — delete remote branch\n' +
     '   **If any step fails, stop and report. Do NOT proceed to compoundDone.**\n' +
+    '   If git cleanup fails (merge conflict, permission, etc), call compoundDone again to skip and finalize.\n' +
     '   Refer to the Git Cleanup Info section for branch name and worktree path.\n' +
     '8. Call workflow_transition(action: "compoundDone", content: "<compound summary>").\n\n' +
     'The summary will be saved to docs/solutions/ for future reference.',

@@ -7,6 +7,7 @@ import { handleCompoundDone } from './compound-done';
 import { handleImplDone } from './impl-done';
 import { handleReplan } from './replan';
 import { handleSetTodos } from './set-todos';
+import { handleSkipVerification } from './skip-verification';
 import type { ActionHandler } from './types';
 
 export const handlers: Record<string, ActionHandler> = {
@@ -15,6 +16,7 @@ export const handlers: Record<string, ActionHandler> = {
   compoundDone: handleCompoundDone,
   setTodos: handleSetTodos,
   replan: handleReplan,
+  skipVerification: handleSkipVerification,
 };
 
 export type { ActionHandler, HandlerContext, HandlerResult } from './types';

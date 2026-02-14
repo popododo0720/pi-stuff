@@ -177,18 +177,9 @@ export async function handleCompoundDone(
       ? `📌 Promoted to Critical: ${promoted.join(', ')}\n\n`
       : '';
 
+  // Prepare summary + tags (saveSolution deferred to sub-handlers)
   const summary = hctx.params.content?.trim() || '';
   const tags = summary ? extractAutoTags(summary) : undefined;
-  let solutionPath: string | null = null;
-  if (summary) {
-    solutionPath = saveSolution(
-      hctx.ctx.cwd,
-      session.description,
-      summary,
-      session.id,
-      tags,
-    );
-  }
 
   const gitCwd = getGitCwd(hctx.ctx.cwd);
 
@@ -206,18 +197,18 @@ export async function handleCompoundDone(
         completedIndex,
         nextIndex,
         summary,
-        solutionPath,
+        tags,
         gitCwd,
         promotedNote,
       });
     }
 
     // Last TODO — fall through to finalization
-    return await finalizeWorkflow(hctx, { solutionPath, promotedNote });
+    return await finalizeWorkflow(hctx, { summary, tags, promotedNote });
   }
 
   // No TODOs — finalize directly
-  return await finalizeWorkflow(hctx, { solutionPath, promotedNote });
+  return await finalizeWorkflow(hctx, { summary, tags, promotedNote });
 }
 
 // ── Sub-handlers ─────────────────────────────────────────────────
@@ -226,7 +217,7 @@ interface AdvanceParams {
   completedIndex: number;
   nextIndex: number;
   summary: string;
-  solutionPath: string | null;
+  tags?: string[];
   gitCwd: string;
   promotedNote: string;
 }
@@ -256,6 +247,18 @@ async function advanceToNextTodo(
     }
   }
 
+  // Save solution (one-time, inside sub-handler)
+  let solutionPath: string | null = null;
+  if (p.summary) {
+    solutionPath = saveSolution(
+      hctx.ctx.cwd,
+      session.description,
+      p.summary,
+      session.id,
+      p.tags,
+    );
+  }
+
   // Advance session state
   session.todos[p.nextIndex].status = 'active';
   session.activeTodoIndex = p.nextIndex;
@@ -271,7 +274,7 @@ async function advanceToNextTodo(
       p.promotedNote +
       `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
       `${todoList}\n\n` +
-      (p.solutionPath ? `**Solution saved:** ${p.solutionPath}\n\n` : '') +
+      (solutionPath ? `**Solution saved:** ${solutionPath}\n\n` : '') +
       (gitNotes.length > 0
         ? `**Git automation:**\n${gitNotes.join('\n')}\n\n`
         : '') +
@@ -287,7 +290,8 @@ async function advanceToNextTodo(
 }
 
 interface FinalizeParams {
-  solutionPath: string | null;
+  summary: string;
+  tags?: string[];
   promotedNote: string;
 }
 
@@ -297,14 +301,33 @@ async function finalizeWorkflow(
 ): Promise<HandlerResult> {
   const { session, pi } = hctx;
 
-  // Lightweight check: model should have completed git cleanup already
+  // Git check with soft fail on second attempt
   const gitCwd = getGitCwd(hctx.ctx.cwd);
   const hasChanges = await hasUncommittedChanges(pi, gitCwd);
+  let gitWarning = '';
+
   if (hasChanges) {
-    session.state = 'compound';
-    return {
-      text: '⚠️ Uncommitted changes detected. Complete the git cleanup checklist before calling compoundDone.',
-    };
+    if (!session.gitSkipAttempted) {
+      session.gitSkipAttempted = true;
+      session.state = 'compound';
+      return {
+        text: '⚠️ Uncommitted changes detected. Complete git cleanup or call compoundDone again to skip.',
+      };
+    }
+    // Second attempt → warn and proceed
+    gitWarning = '⚠️ Skipped git cleanup — uncommitted changes remain.\n\n';
+  }
+
+  // Save solution (one-time, after git check passes or skips)
+  let solutionPath: string | null = null;
+  if (p.summary) {
+    solutionPath = saveSolution(
+      hctx.ctx.cwd,
+      session.description,
+      p.summary,
+      session.id,
+      p.tags,
+    );
   }
 
   const completedTodoCount = session.todos.length;
@@ -324,28 +347,31 @@ async function finalizeWorkflow(
   session.startupPrepLocked = false;
   session.gitBranch = undefined;
   session.gitWorktreePath = undefined;
+  session.gitSkipAttempted = undefined;
+  session.compoundMemorySnapshot = undefined;
   session.state = 'done';
   session.completed = true;
 
   // Remove currentWork
   try {
-    const memory = loadMemory(hctx.ctx.cwd);
-    memory.currentWork = memory.currentWork.filter(
+    const curMemory = loadMemory(hctx.ctx.cwd);
+    curMemory.currentWork = curMemory.currentWork.filter(
       (w) => !w.what.startsWith(`[${session.id}]`),
     );
-    saveMemory(hctx.ctx.cwd, memory);
+    saveMemory(hctx.ctx.cwd, curMemory);
   } catch {
     // Ignore cleanup errors
   }
 
   return {
     text:
+      gitWarning +
       p.promotedNote +
       '🎉 Workflow Complete!\n\n' +
       `**Task:** ${session.description}\n` +
       `**ID:** ${session.id}\n` +
       todoSummary +
-      (p.solutionPath ? `**Solution saved:** ${p.solutionPath}\n` : '') +
+      (solutionPath ? `**Solution saved:** ${solutionPath}\n` : '') +
       '\nLearnings captured for future reference.',
     compact:
       `${RESET_MARKER} Workflow "${session.description}" completed. ` +

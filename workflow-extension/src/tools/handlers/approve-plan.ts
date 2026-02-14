@@ -51,9 +51,9 @@ export async function handleApprovePlan(
       signal,
     );
 
-    // Infrastructure error → revert to plan
+    // Infrastructure error → stay in verifyPlan (allow skipVerification)
     if (result.halted) {
-      session.state = 'plan';
+      session.state = 'verifyPlan';
       const haltResultPath = saveVerificationResult(
         ctx.cwd,
         'plan',
@@ -70,6 +70,7 @@ export async function handleApprovePlan(
           `Affected: ${haltedModels}\n\n` +
           formatVerificationSummary(result) +
           '\n\nRetry `approvePlan` when the model is available again.' +
+          '\nCall workflow_transition(action: "skipVerification") to proceed without verification.' +
           (savedPath ? `\n📄 Plan saved: ${savedPath}` : '') +
           (haltResultPath ? `\n📋 Full results: ${haltResultPath}` : ''),
       };

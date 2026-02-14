@@ -44,6 +44,7 @@ export interface WorkflowSession {
     gotchas: number;
     decisions: number;
   };
+  gitSkipAttempted?: boolean;
 }
 
 export interface ConditionalRule {

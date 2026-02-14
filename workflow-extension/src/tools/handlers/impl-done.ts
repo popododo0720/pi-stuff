@@ -40,9 +40,9 @@ export async function handleImplDone(
       params.content,
     );
 
-    // Infrastructure error → revert to implement
+    // Infrastructure error → stay in verifyImpl (allow skipVerification)
     if (result.halted) {
-      session.state = 'implement';
+      session.state = 'verifyImpl';
       const haltResultPath = saveVerificationResult(
         ctx.cwd,
         'impl',
@@ -59,7 +59,8 @@ export async function handleImplDone(
           `Affected: ${haltedModels}\n\n` +
           formatVerificationSummary(result) +
           '\n\nRetry `implDone` when the model is available again.\n' +
-          'This is NOT a code issue — do NOT modify code to fix this.' +
+          'This is NOT a code issue — do NOT modify code to fix this.\n' +
+          'Call workflow_transition(action: "skipVerification") to proceed without verification.' +
           (haltResultPath ? `\n\n📋 Full results: ${haltResultPath}` : ''),
       };
     }

@@ -135,6 +135,10 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
         typeof raw.compoundMemorySnapshot.decisions === 'number'
           ? raw.compoundMemorySnapshot
           : undefined,
+      gitSkipAttempted:
+        typeof raw.gitSkipAttempted === 'boolean'
+          ? raw.gitSkipAttempted
+          : undefined,
     };
   } catch {
     return null;
