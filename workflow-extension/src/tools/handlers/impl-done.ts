@@ -1,10 +1,12 @@
 // tools/handlers/impl-done.ts — implDone action handler
 // Runs parallel impl verification, transitions based on result.
 
+import { loadMemory, saveMemory } from '../../storage/memory';
 import {
   formatVerificationSummary,
   runParallelVerification,
   saveVerificationResult,
+  summarizeVerificationOutput,
 } from '../../verification';
 import type { HandlerContext, HandlerResult } from './types';
 
@@ -38,9 +40,9 @@ export async function handleImplDone(
       params.content,
     );
 
-    // Infrastructure error → revert to implement
+    // Infrastructure error → stay in verifyImpl (allow skipVerification)
     if (result.halted) {
-      session.state = 'implement';
+      session.state = 'verifyImpl';
       const haltResultPath = saveVerificationResult(
         ctx.cwd,
         'impl',
@@ -57,7 +59,8 @@ export async function handleImplDone(
           `Affected: ${haltedModels}\n\n` +
           formatVerificationSummary(result) +
           '\n\nRetry `implDone` when the model is available again.\n' +
-          'This is NOT a code issue — do NOT modify code to fix this.' +
+          'This is NOT a code issue — do NOT modify code to fix this.\n' +
+          'Call workflow_transition(action: "skipVerification") to proceed without verification.' +
           (haltResultPath ? `\n\n📋 Full results: ${haltResultPath}` : ''),
       };
     }
@@ -66,6 +69,12 @@ export async function handleImplDone(
 
     // Passed → compound
     if (result.passed) {
+      const mem = loadMemory(ctx.cwd);
+      session.compoundMemorySnapshot = {
+        patterns: mem.patterns.length,
+        gotchas: mem.gotchas.length,
+        decisions: mem.decisions.length,
+      };
       session.state = 'compound';
       session.retryCount = 0;
       const summary = formatVerificationSummary(result);
@@ -86,6 +95,25 @@ export async function handleImplDone(
     // CRITICAL found → stay in verifyImpl
     session.retryCount++;
     session.state = 'verifyImpl';
+
+    // Auto-save gotcha on first failure for feedback loop
+    if (session.retryCount === 1) {
+      try {
+        const criticals = result.results
+          .filter((r) => r.criticalCount > 0)
+          .map((r) => summarizeVerificationOutput(r.output))
+          .join('; ')
+          .slice(0, 200);
+        if (criticals) {
+          const mem = loadMemory(ctx.cwd);
+          mem.gotchas.push(`[auto] Verification failure: ${criticals}`);
+          saveMemory(ctx.cwd, mem);
+        }
+      } catch {
+        /* ignore auto-gotcha errors */
+      }
+    }
+
     const implResultPath = saveVerificationResult(
       ctx.cwd,
       'impl',
@@ -102,6 +130,12 @@ export async function handleImplDone(
     const isNoModels =
       e instanceof Error && e.message.includes('No verification models');
     if (isNoModels) {
+      const mem = loadMemory(ctx.cwd);
+      session.compoundMemorySnapshot = {
+        patterns: mem.patterns.length,
+        gotchas: mem.gotchas.length,
+        decisions: mem.decisions.length,
+      };
       session.state = 'compound';
       session.retryCount = 0;
       return {

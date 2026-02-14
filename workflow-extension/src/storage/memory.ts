@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { MEMORY_DIR, MEMORY_FILE } from '../constants';
-import type { ProjectMemory } from '../types';
+import type { PatternEntry, ProjectMemory } from '../types';
 
 /**
  * Resolve the absolute path to the memory file.
@@ -33,7 +33,24 @@ export function loadMemory(cwd: string): ProjectMemory {
       workflows: Array.isArray(raw.workflows) ? raw.workflows : [],
       currentWork: Array.isArray(raw.currentWork) ? raw.currentWork : [],
       notes: Array.isArray(raw.notes) ? raw.notes : [],
-      patterns: Array.isArray(raw.patterns) ? raw.patterns : [],
+      patterns: Array.isArray(raw.patterns)
+        ? raw.patterns
+            .map((p: unknown) => {
+              if (typeof p === 'string') return { text: p, count: 1 };
+              if (
+                typeof p === 'object' &&
+                p !== null &&
+                'text' in p &&
+                'count' in p &&
+                typeof (p as Record<string, unknown>).text === 'string' &&
+                typeof (p as Record<string, unknown>).count === 'number'
+              ) {
+                return p as PatternEntry;
+              }
+              return null;
+            })
+            .filter((p): p is PatternEntry => p !== null)
+        : [],
       gotchas: Array.isArray(raw.gotchas) ? raw.gotchas : [],
       decisions: Array.isArray(raw.decisions) ? raw.decisions : [],
     };

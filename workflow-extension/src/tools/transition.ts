@@ -57,7 +57,7 @@ export function registerTransitionTool(
     label: 'Workflow Transition',
     description:
       'Transition the current workflow stage. ' +
-      'Supports: approvePlan, implDone, replan, compoundDone, setTodos.',
+      'Supports: approvePlan, implDone, replan, compoundDone, setTodos, skipVerification.',
     parameters: Type.Object({
       action: StringEnum([
         'approvePlan',
@@ -65,6 +65,7 @@ export function registerTransitionTool(
         'replan',
         'compoundDone',
         'setTodos',
+        'skipVerification',
       ] as const),
       content: Type.Optional(
         Type.String({

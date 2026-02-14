@@ -1,6 +1,7 @@
 // tools/handlers/compound-done.ts — compoundDone action handler
 // Handles TODO progression, git automation, and workflow finalization.
 
+import { appendCriticalPattern } from '../../storage/critical-patterns';
 import { loadMemory, saveMemory } from '../../storage/memory';
 import { saveSolution } from '../../storage/solution';
 import { RESET_MARKER } from '../compact';
@@ -25,21 +26,160 @@ function formatTodoList(
     .join('\n');
 }
 
+/** Extract top keywords from summary text for auto-tagging. */
+function extractAutoTags(summary: string): string[] {
+  const STOPWORDS = new Set([
+    'the',
+    'a',
+    'an',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'have',
+    'has',
+    'had',
+    'do',
+    'does',
+    'did',
+    'will',
+    'would',
+    'could',
+    'should',
+    'may',
+    'might',
+    'can',
+    'shall',
+    'to',
+    'of',
+    'in',
+    'for',
+    'on',
+    'with',
+    'at',
+    'by',
+    'from',
+    'as',
+    'into',
+    'through',
+    'during',
+    'before',
+    'after',
+    'above',
+    'below',
+    'between',
+    'out',
+    'off',
+    'over',
+    'under',
+    'again',
+    'further',
+    'then',
+    'once',
+    'and',
+    'but',
+    'or',
+    'nor',
+    'not',
+    'so',
+    'yet',
+    'both',
+    'each',
+    'few',
+    'more',
+    'most',
+    'other',
+    'some',
+    'such',
+    'no',
+    'only',
+    'own',
+    'same',
+    'than',
+    'too',
+    'very',
+    'just',
+    'this',
+    'that',
+    'these',
+    'those',
+    'it',
+    'its',
+    'all',
+    'any',
+    'new',
+    'use',
+    'used',
+    'using',
+    'also',
+    'added',
+    'add',
+    'file',
+    'files',
+    'change',
+    'changes',
+    'changed',
+    'update',
+  ]);
+  const words = summary
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w) => w.length >= 2 && !STOPWORDS.has(w));
+  const freq = new Map<string, number>();
+  for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1);
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([w]) => w);
+}
+
 export async function handleCompoundDone(
   hctx: HandlerContext,
 ): Promise<HandlerResult> {
   const { session } = hctx;
 
-  const summary = hctx.params.content?.trim() || '';
-  let solutionPath: string | null = null;
-  if (summary) {
-    solutionPath = saveSolution(
-      hctx.ctx.cwd,
-      session.description,
-      summary,
-      session.id,
-    );
+  // ── Capture gate: require at least one new learning ──
+  const memory = loadMemory(hctx.ctx.cwd);
+  const prevCounts = session.compoundMemorySnapshot;
+  if (prevCounts) {
+    const hasNew =
+      memory.patterns.length > prevCounts.patterns ||
+      memory.gotchas.length > prevCounts.gotchas ||
+      memory.decisions.length > prevCounts.decisions;
+    if (!hasNew) {
+      return {
+        text:
+          '⚠️ No new learnings captured.\n' +
+          'Use project_memory(action: "add") to save at least one pattern, gotcha, or decision before calling compoundDone.\n' +
+          'If this task truly had no learnings, add a gotcha or decision explaining why.',
+      };
+    }
   }
+
+  // ── Auto-promotion: patterns with count >= 3 → critical.md ──
+  const promoted: string[] = [];
+  const remaining = memory.patterns.filter((p) => {
+    if (p.count >= 3) {
+      appendCriticalPattern(hctx.ctx.cwd, p.text, p.count);
+      promoted.push(p.text);
+      return false;
+    }
+    return true;
+  });
+  if (promoted.length > 0) {
+    memory.patterns = remaining;
+    saveMemory(hctx.ctx.cwd, memory);
+  }
+  const promotedNote =
+    promoted.length > 0
+      ? `📌 Promoted to Critical: ${promoted.join(', ')}\n\n`
+      : '';
+
+  // Prepare summary + tags (saveSolution deferred to sub-handlers)
+  const summary = hctx.params.content?.trim() || '';
+  const tags = summary ? extractAutoTags(summary) : undefined;
 
   const gitCwd = getGitCwd(hctx.ctx.cwd);
 
@@ -57,17 +197,18 @@ export async function handleCompoundDone(
         completedIndex,
         nextIndex,
         summary,
-        solutionPath,
+        tags,
         gitCwd,
+        promotedNote,
       });
     }
 
     // Last TODO — fall through to finalization
-    return await finalizeWorkflow(hctx, { solutionPath });
+    return await finalizeWorkflow(hctx, { summary, tags, promotedNote });
   }
 
   // No TODOs — finalize directly
-  return await finalizeWorkflow(hctx, { solutionPath });
+  return await finalizeWorkflow(hctx, { summary, tags, promotedNote });
 }
 
 // ── Sub-handlers ─────────────────────────────────────────────────
@@ -76,8 +217,9 @@ interface AdvanceParams {
   completedIndex: number;
   nextIndex: number;
   summary: string;
-  solutionPath: string | null;
+  tags?: string[];
   gitCwd: string;
+  promotedNote: string;
 }
 
 async function advanceToNextTodo(
@@ -105,6 +247,18 @@ async function advanceToNextTodo(
     }
   }
 
+  // Save solution (one-time, inside sub-handler)
+  let solutionPath: string | null = null;
+  if (p.summary) {
+    solutionPath = saveSolution(
+      hctx.ctx.cwd,
+      session.description,
+      p.summary,
+      session.id,
+      p.tags,
+    );
+  }
+
   // Advance session state
   session.todos[p.nextIndex].status = 'active';
   session.activeTodoIndex = p.nextIndex;
@@ -117,9 +271,10 @@ async function advanceToNextTodo(
 
   return {
     text:
+      p.promotedNote +
       `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
       `${todoList}\n\n` +
-      (p.solutionPath ? `**Solution saved:** ${p.solutionPath}\n\n` : '') +
+      (solutionPath ? `**Solution saved:** ${solutionPath}\n\n` : '') +
       (gitNotes.length > 0
         ? `**Git automation:**\n${gitNotes.join('\n')}\n\n`
         : '') +
@@ -135,7 +290,9 @@ async function advanceToNextTodo(
 }
 
 interface FinalizeParams {
-  solutionPath: string | null;
+  summary: string;
+  tags?: string[];
+  promotedNote: string;
 }
 
 async function finalizeWorkflow(
@@ -144,14 +301,33 @@ async function finalizeWorkflow(
 ): Promise<HandlerResult> {
   const { session, pi } = hctx;
 
-  // Lightweight check: model should have completed git cleanup already
+  // Git check with soft fail on second attempt
   const gitCwd = getGitCwd(hctx.ctx.cwd);
   const hasChanges = await hasUncommittedChanges(pi, gitCwd);
+  let gitWarning = '';
+
   if (hasChanges) {
-    session.state = 'compound';
-    return {
-      text: '⚠️ Uncommitted changes detected. Complete the git cleanup checklist before calling compoundDone.',
-    };
+    if (!session.gitSkipAttempted) {
+      session.gitSkipAttempted = true;
+      session.state = 'compound';
+      return {
+        text: '⚠️ Uncommitted changes detected. Complete git cleanup or call compoundDone again to skip.',
+      };
+    }
+    // Second attempt → warn and proceed
+    gitWarning = '⚠️ Skipped git cleanup — uncommitted changes remain.\n\n';
+  }
+
+  // Save solution (one-time, after git check passes or skips)
+  let solutionPath: string | null = null;
+  if (p.summary) {
+    solutionPath = saveSolution(
+      hctx.ctx.cwd,
+      session.description,
+      p.summary,
+      session.id,
+      p.tags,
+    );
   }
 
   const completedTodoCount = session.todos.length;
@@ -171,27 +347,31 @@ async function finalizeWorkflow(
   session.startupPrepLocked = false;
   session.gitBranch = undefined;
   session.gitWorktreePath = undefined;
+  session.gitSkipAttempted = undefined;
+  session.compoundMemorySnapshot = undefined;
   session.state = 'done';
   session.completed = true;
 
   // Remove currentWork
   try {
-    const memory = loadMemory(hctx.ctx.cwd);
-    memory.currentWork = memory.currentWork.filter(
+    const curMemory = loadMemory(hctx.ctx.cwd);
+    curMemory.currentWork = curMemory.currentWork.filter(
       (w) => !w.what.startsWith(`[${session.id}]`),
     );
-    saveMemory(hctx.ctx.cwd, memory);
+    saveMemory(hctx.ctx.cwd, curMemory);
   } catch {
     // Ignore cleanup errors
   }
 
   return {
     text:
+      gitWarning +
+      p.promotedNote +
       '🎉 Workflow Complete!\n\n' +
       `**Task:** ${session.description}\n` +
       `**ID:** ${session.id}\n` +
       todoSummary +
-      (p.solutionPath ? `**Solution saved:** ${p.solutionPath}\n` : '') +
+      (solutionPath ? `**Solution saved:** ${solutionPath}\n` : '') +
       '\nLearnings captured for future reference.',
     compact:
       `${RESET_MARKER} Workflow "${session.description}" completed. ` +
