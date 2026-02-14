@@ -126,6 +126,7 @@ async function runSingleModel(
   const args = [
     '-p',
     prompt,
+    '--no-extensions',
     '--provider',
     provider,
     '--model',
