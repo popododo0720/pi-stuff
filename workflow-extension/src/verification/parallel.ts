@@ -112,6 +112,60 @@ function isInfrastructureError(output: string): boolean {
   );
 }
 
+// ── Fallback keyword scan ────────────────────────────────────────
+
+/** Pass-signal phrases — conservative, require explicit positive language */
+const PASS_SIGNALS = [
+  'no issues',
+  'no critical',
+  'no problems',
+  'looks good',
+  'lgtm',
+  'all correct',
+  'all items implemented',
+  'everything is correct',
+  'no bugs',
+  'implementation is correct',
+  'correctly implemented',
+];
+
+/** Fail-signal phrases — multi-word to avoid false positives */
+const FAIL_SIGNALS = [
+  'critical bug',
+  'critical issue',
+  'critical error',
+  'missing implementation',
+  'not implemented',
+  'will crash',
+  'security vulnerability',
+  'data loss',
+  'race condition',
+  'incorrect implementation',
+  'breaks existing',
+  'undefined behavior',
+];
+
+/**
+ * Fallback keyword scan when model doesn't follow structured format.
+ * Conservative: only overrides to PASS if strong positive signals AND no negative signals.
+ */
+function fallbackKeywordScan(output: string): {
+  passed: boolean;
+  criticalCount: number;
+} {
+  const lower = output.toLowerCase();
+
+  const hasPassSignal = PASS_SIGNALS.some((s) => lower.includes(s));
+  const hasFailSignal = FAIL_SIGNALS.some((s) => lower.includes(s));
+  const failCount = FAIL_SIGNALS.filter((s) => lower.includes(s)).length;
+
+  if (hasPassSignal && !hasFailSignal) {
+    return { passed: true, criticalCount: 0 };
+  }
+
+  return { passed: false, criticalCount: failCount };
+}
+
 // ── Single model execution ───────────────────────────────────────
 
 async function runSingleModel(
@@ -185,8 +239,19 @@ async function runSingleModel(
       } else if (verdict === 'FAIL') {
         passed = !hasCritical;
       } else {
-        // No verdict → fail safe (model didn't follow format)
-        passed = false;
+        // No verdict — try keyword fallback if structured parsing also found nothing
+        if (
+          severity.critical === 0 &&
+          severity.warning === 0 &&
+          severity.info === 0
+        ) {
+          const fallback = fallbackKeywordScan(output);
+          passed = fallback.passed;
+          severity.critical = fallback.criticalCount;
+        } else {
+          // Had some structured findings but no verdict → fail safe
+          passed = false;
+        }
       }
 
       return {
@@ -245,7 +310,8 @@ const STRUCTURED_FORMAT_INSTRUCTION =
   '- Any CRITICAL finding → VERDICT: FAIL\n' +
   '- WARNING/INFO only → VERDICT: PASS\n' +
   '- VERDICT must be the LAST line of your response\n' +
-  '- Analysis text can go BEFORE the ## CRITICAL section\n';
+  '- Analysis text can go BEFORE the ## CRITICAL section\n' +
+  '- State each finding decisively. Do NOT hedge or self-contradict (e.g., "this might be... but actually it\'s fine").\n';
 
 // ── Parallel verification ────────────────────────────────────────
 
