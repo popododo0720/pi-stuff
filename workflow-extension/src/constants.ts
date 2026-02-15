@@ -156,13 +156,10 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '  2. Run type checker if available (e.g. `npx tsc --noEmit`) and fix all errors.\n' +
     '  3. Run tests if available (e.g. `npm test`) and fix all failures.\n' +
     '  4. Update README.md and ARCHITECTURE.md if needed for this TODO.\n' +
-    '  5. **Self-critique (MANDATORY — do NOT skip)**:\n' +
-    '     a. Re-read the Approved Plan for the CURRENT TODO section. Make a numbered checklist of every step.\n' +
-    '     b. For each step, read the actual file and confirm the change exists.\n' +
-    '     c. Check: missing steps, edge cases (null/empty/zero), type safety, error handling.\n' +
-    '     d. If ANY step is missing or incomplete, implement it NOW before continuing.\n' +
-    '     e. Run `grep` or other verification criteria from the plan to confirm.\n' +
-    '  Do NOT call implDone until ALL current TODO steps are verified present.\n' +
+    '  5. **Quick checklist (before implDone)**:\n' +
+    "     a. Skim the plan's current TODO section — are all steps addressed?\n" +
+    '     b. Run verification criteria from the plan (grep, lint, test).\n' +
+    '     c. Do NOT re-analyze or refactor working code. Trust the verification stage to catch real issues.\n' +
     '- When calling implDone, include implementation notes in content:\n' +
     '  workflow_transition(action: "implDone", content: "<notes about decisions, known trade-offs, context for verifiers>")\n' +
     '  This helps verifiers understand your reasoning and avoids false positives.\n\n' +

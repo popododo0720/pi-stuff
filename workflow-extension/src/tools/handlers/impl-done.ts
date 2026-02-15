@@ -29,6 +29,19 @@ export async function handleImplDone(
   });
 
   try {
+    const todoContext =
+      session.activeTodoIndex >= 0 && session.todos.length > 1
+        ? {
+            currentIndex: session.activeTodoIndex,
+            totalCount: session.todos.length,
+            completedTitles: session.todos
+              .filter(
+                (t, i) => t.status === 'done' && i < session.activeTodoIndex,
+              )
+              .map((t) => t.title),
+          }
+        : undefined;
+
     const result = await runParallelVerification(
       'impl',
       session.planContent,
@@ -38,6 +51,7 @@ export async function handleImplDone(
       ctx.cwd,
       signal,
       params.content,
+      todoContext,
     );
 
     // Infrastructure error → stay in verifyImpl (allow skipVerification)

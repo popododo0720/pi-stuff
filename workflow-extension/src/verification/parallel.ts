@@ -258,6 +258,11 @@ export async function runParallelVerification(
   cwd: string,
   signal?: AbortSignal,
   implNotes?: string,
+  todoContext?: {
+    currentIndex: number;
+    totalCount: number;
+    completedTitles: string[];
+  },
 ): Promise<VerificationResult> {
   const verifyConfig = settings.stages.verify;
   const verifyModels = verifyConfig?.models ?? [];
@@ -315,6 +320,20 @@ export async function runParallelVerification(
         '- WARNING: Violation in EXISTING code or requiring structural change beyond current scope\n' +
         '  (e.g. legacy patterns, cross-cutting concerns, existing tight coupling)\n' +
         '  Warnings are recorded and addressed in future planning cycles.\n';
+
+  // Append TODO scope context (focus verifier on current TODO, regression-only for completed ones)
+  if (type === 'impl' && todoContext && todoContext.totalCount > 1) {
+    const completed = todoContext.completedTitles.join(', ').slice(0, 500);
+    prompt +=
+      `\n\n**⚠️ TODO Scope**\n` +
+      `This is TODO #${todoContext.currentIndex + 1} of ${todoContext.totalCount}.\n` +
+      (completed
+        ? `Previously completed & verified TODOs: ${completed}\n`
+        : '') +
+      `- FOCUS verification on TODO #${todoContext.currentIndex + 1} requirements.\n` +
+      '- For previously completed TODOs, ONLY check regressions/side-effects caused by current changes.\n' +
+      '- Do NOT flag issues in unchanged code from completed TODOs as CRITICAL.\n';
+  }
 
   // Append implementation notes
   if (type === 'impl' && implNotes?.trim()) {
