@@ -1,7 +1,7 @@
 // storage/settings.ts — WorkflowSettings load/save
 // Stores verification model config, timeout, and thinking level.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
 import type {
@@ -12,6 +12,7 @@ import type {
   VerifyStageConfig,
   WorkflowSettings,
 } from '../types';
+import { atomicWriteFileSync } from './atomic-write';
 
 const VALID_THINKING = new Set([
   'off',
@@ -157,7 +158,7 @@ export function saveSettings(
     const path = resolveSettingsPath(cwd);
     const dir = resolve(join(cwd, MEMORY_DIR));
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(path, JSON.stringify(settings, null, '\t'), {
+    atomicWriteFileSync(path, JSON.stringify(settings, null, '\t'), {
       encoding: 'utf-8',
       mode: 0o600,
     });

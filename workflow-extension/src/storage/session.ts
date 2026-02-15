@@ -1,16 +1,11 @@
 // storage/session.ts — WorkflowSession disk persistence
 // Saves/loads session state to .pi/workflow-session.json.
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { MEMORY_DIR } from '../constants';
 import type { TodoItem, WorkflowSession, WorkflowState } from '../types';
+import { atomicWriteFileSync } from './atomic-write';
 
 const VALID_STATES: Set<string> = new Set<WorkflowState>([
   'plan',
@@ -52,7 +47,7 @@ export function saveSessionToDisk(
   try {
     const dir = resolve(join(cwd, MEMORY_DIR));
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(path, JSON.stringify(session, null, '\t'), {
+    atomicWriteFileSync(path, JSON.stringify(session, null, '\t'), {
       encoding: 'utf-8',
       mode: 0o600,
     });

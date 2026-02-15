@@ -1,10 +1,11 @@
 // storage/memory.ts — ProjectMemory CRUD operations
 // Handles reading/writing the workflow memory JSON file.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { MEMORY_DIR, MEMORY_FILE } from '../constants';
 import type { PatternEntry, ProjectMemory } from '../types';
+import { atomicWriteFileSync } from './atomic-write';
 
 /**
  * Resolve the absolute path to the memory file.
@@ -78,7 +79,7 @@ export function saveMemory(cwd: string, memory: ProjectMemory): string | null {
     const path = resolveMemoryPath(cwd);
     const dir = resolve(join(cwd, MEMORY_DIR));
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(path, JSON.stringify(memory, null, '\t'), {
+    atomicWriteFileSync(path, JSON.stringify(memory, null, '\t'), {
       encoding: 'utf-8',
       mode: 0o600,
     });

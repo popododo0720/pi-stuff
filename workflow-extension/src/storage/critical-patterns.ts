@@ -2,8 +2,9 @@
 // Always-loaded patterns file for high-value learnings.
 // Patterns are auto-promoted from project memory when count >= 3.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { atomicWriteFileSync } from './atomic-write';
 
 export const CRITICAL_PATTERNS_DIR = 'docs/patterns';
 export const CRITICAL_PATTERNS_FILE = 'critical.md';
@@ -46,7 +47,7 @@ export function saveCriticalPatterns(cwd: string, content: string): void {
   const path = resolveCriticalPath(cwd);
   const dir = resolve(join(cwd, CRITICAL_PATTERNS_DIR));
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(path, content, 'utf-8');
+  atomicWriteFileSync(path, content, 'utf-8');
 }
 
 /**

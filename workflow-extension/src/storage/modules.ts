@@ -7,11 +7,11 @@ import {
   readdirSync,
   readFileSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { CONVENTIONS_DIR, MEMORY_DIR } from '../constants';
 import type { ModuleConventions } from '../types';
+import { atomicWriteFileSync } from './atomic-write';
 
 /**
  * Resolve the absolute path to the conventions directory.
@@ -86,7 +86,7 @@ export function saveModule(
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const filePath = resolve(join(dir, `${name}.json`));
     if (!filePath.startsWith(`${dir}/`)) return 'Invalid module name';
-    writeFileSync(filePath, JSON.stringify(data, null, '\t'), {
+    atomicWriteFileSync(filePath, JSON.stringify(data, null, '\t'), {
       encoding: 'utf-8',
       mode: 0o600,
     });

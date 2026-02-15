@@ -1,3 +1,4 @@
+export { atomicWriteFileSync } from './atomic-write';
 export { loadCustomChecks } from './checks';
 export {
   appendCriticalPattern,
