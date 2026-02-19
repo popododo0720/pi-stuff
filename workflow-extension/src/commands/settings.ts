@@ -137,6 +137,7 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           `🗺️ Repo Map (${rm?.enabled === false ? 'off' : 'on'}, budget: ${rm?.tokenBudget ?? 2048})`,
           `🧬 Git Automation (${g?.enabled === false ? 'off' : 'on'}, commit/todo: ${g?.commitPerTodo === false ? 'off' : 'on'}, push/todo: ${g?.pushPerTodo === true ? 'on' : 'off'})`,
           `🔄 Max Retries (${settings.maxRetries ?? 5})`,
+          `📐 Detail Level (${settings.detailLevel ?? 'standard'})`,
           `🛡️ Pre-flight (${settings.preflight?.enabled === false ? 'off' : 'on'})`,
           '✅ Done',
         ];
@@ -406,6 +407,20 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             } else {
               ctx.ui.notify('Enter a number between 1 and 20.', 'error');
             }
+          }
+        } else if (choice.startsWith('📐')) {
+          // ── Detail Level ─────────────────────────────────────────
+          const pick = await ctx.ui.select('Plan detail level', [
+            'minimal — 간결 (1-2 파일)',
+            'standard — 기본',
+            'detailed — 풀스펙 (대규모 리팩토링)',
+          ]);
+          if (pick) {
+            const level = pick.split(' ')[0] as
+              | 'minimal'
+              | 'standard'
+              | 'detailed';
+            settings.detailLevel = level === 'standard' ? undefined : level;
           }
         } else if (choice.startsWith('🛡️')) {
           // ── Pre-flight toggle ────────────────────────────────────

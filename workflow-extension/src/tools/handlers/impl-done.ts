@@ -160,9 +160,10 @@ export async function handleImplDone(
       };
     }
 
-    // CRITICAL found → stay in verifyImpl
+    // CRITICAL found → return to implement so AI can fix code
+    // (verifyImpl blocks write/edit tools; implement allows them)
     session.retryCount++;
-    session.state = 'verifyImpl';
+    session.state = 'implement';
 
     // Auto-save gotcha on first failure for feedback loop
     if (session.retryCount === 1) {
@@ -188,10 +189,18 @@ export async function handleImplDone(
       result,
       session.id,
     );
+    const replanHint =
+      session.retryCount >= 2
+        ? '\n\n⚠️ Same issue recurring — if the CRITICAL is about plan wording (not a code bug), ' +
+          'call workflow_transition(action: "replan") to revise the plan text, then resubmit.\n' +
+          'Do NOT retry implDone with the same plan. The plan is the sole verification baseline.'
+        : '';
+
     return {
       text:
         `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n\n` +
         formatVerificationSummary(result) +
+        replanHint +
         (implResultPath ? `\n\n📋 Full results: ${implResultPath}` : ''),
     };
   } catch (e) {

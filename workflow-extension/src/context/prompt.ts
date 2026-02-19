@@ -16,12 +16,13 @@ import { loadCriticalPatterns } from '../storage/critical-patterns';
 import { loadMemory, resolveMemoryPath } from '../storage/memory';
 import { listModules, loadMatchingModules } from '../storage/modules';
 import { loadSettings } from '../storage/settings';
-import { findSolutionIndex } from '../storage/solution';
+import { findRelevantSolutions, findSolutionIndex } from '../storage/solution';
 import type {
   ConditionalRule,
   ModuleConventions,
   ProjectMemory,
   WorkflowSession,
+  WorkflowSettings,
 } from '../types';
 import { extractRecentFilePaths, matchesPattern } from './pattern';
 
@@ -280,14 +281,51 @@ export async function buildSystemPromptInjection(
       ? STAGE_GUIDES.compound + buildCompoundChecklist(session)
       : STAGE_GUIDES[session.state] || '';
 
-  // Past solutions — show index in all stages for on-demand reference
+  // Load settings once (used for repoMap, detailLevel, solution search)
+  let settings: WorkflowSettings | null = null;
+  try {
+    settings = loadSettings(ctx.cwd);
+  } catch {
+    /* graceful */
+  }
+
+  // Past solutions — plan stage gets relevant body text, other stages get index only
   let solutionContext = '';
-  const solutionIdx = findSolutionIndex(ctx.cwd);
-  if (solutionIdx) {
-    solutionContext =
-      '\n\n### Past Solutions (searchable)\n' +
-      solutionIdx +
-      '\nRead specific solution files when relevant.';
+  let hasRelevantSolutions = false;
+  if (session.state === 'plan' && session.description) {
+    try {
+      const relevant = findRelevantSolutions(ctx.cwd, session.description, {
+        topK: 3,
+        maxBodyChars: 800,
+        minScore: 2,
+        noFallback: true,
+      });
+      if (relevant) {
+        solutionContext =
+          '\n\n### Relevant Past Solutions\n' +
+          'Apply documented learnings. Avoid repeated mistakes.\n' +
+          relevant;
+        hasRelevantSolutions = true;
+      }
+    } catch {
+      /* graceful */
+    }
+  }
+  if (!hasRelevantSolutions) {
+    const solutionIdx = findSolutionIndex(ctx.cwd);
+    if (solutionIdx) {
+      solutionContext =
+        '\n\n### Past Solutions (searchable)\n' +
+        solutionIdx +
+        '\nRead specific solution files when relevant.';
+    }
+  }
+
+  // Detail level hint for plan stage
+  let detailLevelContext = '';
+  if (session.state === 'plan' && settings) {
+    const level = settings.detailLevel ?? 'standard';
+    detailLevelContext = `\n\n**Current Detail Level: ${level.toUpperCase()}**\n`;
   }
 
   // Include approved plan — full during plan/verify, current TODO section during implement
@@ -371,8 +409,7 @@ export async function buildSystemPromptInjection(
   // Generate repo map (opt-in, defaults to enabled)
   let repoMapContext = '';
   try {
-    const settings = loadSettings(ctx.cwd);
-    if (settings.repoMap?.enabled !== false) {
+    if (settings && settings.repoMap?.enabled !== false) {
       const budget = settings.repoMap?.tokenBudget ?? 2048;
       const map = await generateRepoMap(ctx.cwd, budget);
       if (map) {
@@ -393,6 +430,7 @@ export async function buildSystemPromptInjection(
     todoContext +
     onboardingContext +
     stageGuide +
+    detailLevelContext +
     solutionContext +
     planContext +
     failContext;

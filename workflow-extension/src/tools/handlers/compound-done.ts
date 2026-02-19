@@ -435,6 +435,13 @@ async function advanceToNextTodo(
   session.retryCount = 0;
   session.compoundStep = undefined;
 
+  // Clear startup prep flags only when mandatory prep TODO (index 0) completes
+  if (session.startupPrepRequired && p.completedIndex === 0) {
+    session.startupPrepRequired = false;
+    session.startupPrepNote = '';
+    session.startupPrepLocked = false;
+  }
+
   const doneCount = session.todos.filter((t) => t.status === 'done').length;
   const todoList = formatTodoList(session.todos);
   const compactSummary = p.summary.slice(0, 200);

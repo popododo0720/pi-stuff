@@ -274,16 +274,27 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     'Each TODO will be implemented sequentially, but planned together for better architecture.\n\n' +
     '⚠️ If startup git/worktree preparation is required, keep that mandatory TODO as #1 and plan it first before feature work.\n\n' +
     '### Phase 1: Pre-Analysis (before planning)\n' +
-    'Analyze the request for:\n' +
-    '- Ambiguities or unclear requirements — ask the user to clarify.\n' +
-    '- Hidden intentions — what the user actually needs vs what they said.\n' +
-    '- Hidden dependencies or side effects on existing code.\n' +
-    '- Edge cases and potential failure points.\n' +
-    '- Whether similar work exists in past solutions.\n' +
-    '- Intent type: refactoring (safety first), new feature (patterns first), bugfix (root cause first).\n\n' +
+    '<critical_requirement>\n' +
+    'Before writing the plan, complete this analysis:\n\n' +
+    '**Impact Analysis:**\n' +
+    '- Identify ALL files that will be touched and their dependents\n' +
+    '- Map user flows affected — who uses this? what breaks if wrong?\n' +
+    '- Check for hidden dependencies or side effects\n\n' +
+    '**Stakeholder Perspectives:**\n' +
+    '- Developer: maintainable? testable? debuggable?\n' +
+    '- User: breaks existing behavior? UX regression?\n' +
+    '- Ops: deployment impact? monitoring? rollback plan?\n' +
+    '- Security: new attack surface? auth changes? data exposure?\n\n' +
+    '**Gap Detection:**\n' +
+    '- What is NOT mentioned but probably needed? (error handling, logging, tests)\n' +
+    '- Edge cases the user has not considered\n' +
+    '- Intent type: refactoring (safety first), new feature (patterns first), bugfix (root cause first)\n' +
+    '- Check Relevant Past Solutions below for documented learnings\n' +
+    '</critical_requirement>\n\n' +
     '### Phase 2: Research\n' +
     '- Read relevant source files to understand current patterns.\n' +
-    '- Check existing conventions in project memory.\n\n' +
+    '- Check existing conventions in project memory.\n' +
+    '- **Review "Relevant Past Solutions" section below** — apply documented learnings.\n\n' +
     '### Phase 3: Write the Plan\n' +
     '**If TODOs are set**: Structure the plan with clear sections for each TODO:\n' +
     '```\n' +
@@ -294,6 +305,11 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- Summary\n' +
     '- Steps...\n' +
     '```\n\n' +
+    '### Plan Detail Level\n' +
+    'Match plan depth to task complexity:\n\n' +
+    '**MINIMAL** — 간단한 변경 (1-2 파일): 변경 파일과 요약만.\n' +
+    '**STANDARD** (기본): 파일별 변경사항, 시그니처, cross-file impact, verification criteria.\n' +
+    '**DETAILED** — 대규모 리팩토링: 전후 비교, Phase 분리, 롤백 계획.\n\n' +
     'The plan MUST include:\n' +
     '- **Summary** — what and why, in one paragraph.\n' +
     '- **Step-by-step tasks** — each with exact file path (from project root) and specific change description.\n' +
@@ -339,13 +355,12 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:
-    '## Current Stage: ✅ Implementation Verification — FAILED / HALTED\n\n' +
-    '⚠️ MANDATORY: Fix ALL code issues found by verification. Do NOT bypass verification for code problems.\n' +
-    'For infrastructure errors (rate limit, timeout), call workflow_transition(action: "skipVerification") to proceed.\n\n' +
-    '1. Read the verification feedback above carefully.\n' +
-    '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in the implementation.\n' +
-    '3. Call workflow_transition(action: "replan") to return to planning if the plan itself needs changes.\n' +
-    '4. Or fix the code and call workflow_transition(action: "implDone", content: "<implementation notes>") to re-verify.',
+    '## Current Stage: ✅ Implementation Verification — HALTED\n\n' +
+    'Verification was halted due to infrastructure errors (rate limit, quota, timeout).\n' +
+    'This is NOT a code issue — do NOT modify code.\n\n' +
+    '- Retry: call workflow_transition(action: "implDone", content: "<notes>") when the model is available.\n' +
+    '- Skip: call workflow_transition(action: "skipVerification") to proceed without verification.\n' +
+    '- Replan: call workflow_transition(action: "replan", reason: "...") if the plan needs changes.',
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +

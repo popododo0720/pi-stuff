@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
 import type {
+  DetailLevel,
   DomainVerifyConfig,
   GitAutomationConfig,
   PreflightConfig,
@@ -193,6 +194,12 @@ export function loadSettings(cwd: string): WorkflowSettings {
         ? Math.max(1, Math.min(20, Math.floor(raw.maxRetries)))
         : undefined;
 
+    const VALID_DETAIL = new Set(['minimal', 'standard', 'detailed']);
+    const detailLevel =
+      typeof raw.detailLevel === 'string' && VALID_DETAIL.has(raw.detailLevel)
+        ? (raw.detailLevel as DetailLevel)
+        : undefined;
+
     return {
       verifyTimeout: timeout,
       stages,
@@ -200,6 +207,7 @@ export function loadSettings(cwd: string): WorkflowSettings {
       ...(git ? { git } : {}),
       ...(preflight ? { preflight } : {}),
       ...(maxRetries !== undefined ? { maxRetries } : {}),
+      ...(detailLevel ? { detailLevel } : {}),
     };
   } catch (e) {
     console.error('[workflow] loadSettings failed:', e);

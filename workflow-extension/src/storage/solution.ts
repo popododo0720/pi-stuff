@@ -165,6 +165,7 @@ export function findRelevantSolutions(
     topK?: number;
     maxBodyChars?: number;
     minScore?: number;
+    noFallback?: boolean;
   },
 ): string {
   try {
@@ -188,10 +189,11 @@ export function findRelevantSolutions(
     // Extract keywords (2+ chars for acronym matching: SRP, OCP, DIP)
     const keywords = taskDescription
       .toLowerCase()
-      .split(/\W+/)
+      .split(/[\s\p{P}\p{S}]+/u)
       .filter((w) => w.length >= 2);
 
     if (keywords.length === 0) {
+      if (options?.noFallback) return '';
       return allFiles
         .slice(0, topK)
         .map((s) => {
@@ -237,6 +239,7 @@ export function findRelevantSolutions(
     const relevant = scored.filter((s) => s.score >= minScore).slice(0, topK);
 
     if (relevant.length === 0) {
+      if (options?.noFallback) return '';
       return allFiles
         .slice(0, topK)
         .map((s) => {
