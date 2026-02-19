@@ -1,4 +1,10 @@
-import type { CompoundStepDef, WorkflowSettings, WorkflowState } from './types';
+import type {
+  CompoundStepDef,
+  SolutionCategory,
+  SolutionSeverity,
+  WorkflowSettings,
+  WorkflowState,
+} from './types';
 
 // Path and limit configuration constants
 export const TOOL_NAME = 'workflow_transition';
@@ -7,6 +13,78 @@ export const MEMORY_FILE = 'workflow-memory.json';
 export const SETTINGS_FILE = 'workflow-settings.json';
 export const CONVENTIONS_DIR = 'conventions';
 export const SOLUTIONS_DIR = 'docs/solutions';
+
+export const SOLUTION_CATEGORIES: Record<SolutionCategory, string[]> = {
+  'build-errors': [
+    'build',
+    'compile',
+    'tsc',
+    'lint',
+    'bundle',
+    'typescript',
+    'biome',
+  ],
+  'performance-issues': [
+    'slow',
+    'n+1',
+    'memory',
+    'performance',
+    'timeout',
+    'cache',
+    'leak',
+  ],
+  'runtime-errors': [
+    'crash',
+    'exception',
+    'error',
+    'throw',
+    'undefined',
+    'null',
+    'stack',
+  ],
+  'logic-errors': [
+    'wrong',
+    'incorrect',
+    'bug',
+    'logic',
+    'calculation',
+    'mismatch',
+  ],
+  'security-issues': [
+    'security',
+    'auth',
+    'xss',
+    'injection',
+    'permission',
+    'vulnerability',
+    'secret',
+  ],
+  'workflow-issues': [
+    'workflow',
+    'process',
+    'pipeline',
+    'ci',
+    'deploy',
+    'git',
+    'branch',
+  ],
+  general: [],
+};
+
+export const SEVERITY_KEYWORDS: Record<SolutionSeverity, string[]> = {
+  critical: [
+    'crash',
+    'data loss',
+    'security',
+    'blocks',
+    'production',
+    'broken',
+  ],
+  high: ['fails', 'regression', 'major', 'wrong output'],
+  medium: ['incorrect', 'unexpected', 'slow', 'warning'],
+  low: ['minor', 'cosmetic', 'cleanup', 'improvement', 'refactor'],
+};
+
 export const MAX_MEMORY_ENTRIES = 50;
 export const MAX_MEMORY_VALUE_LENGTH = 1000;
 export const MAX_RULES = 30;
@@ -76,7 +154,10 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     label: 'Reflect & Capture',
     instruction:
       '분석 후 project_memory(add)로 pattern/gotcha/decision 최소 1개 저장.\n' +
-      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.',
+      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.\n\n' +
+      '**Pattern 저장 시 구조화 권장:**\n' +
+      'project_memory(add, category: "patterns", value: "패턴 설명|||❌ 잘못된 예시|||✅ 올바른 예시|||이유")\n' +
+      '구분자 ||| 사용. 예시/이유 생략 가능. count ≥ 3 도달 시 Critical Patterns에 자동 승격됩니다.',
     requiresGit: false,
     requiresLastTodo: false,
   },

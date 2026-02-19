@@ -22,6 +22,9 @@ export interface TodoItem {
 export interface PatternEntry {
   text: string;
   count: number;
+  wrong?: string;
+  correct?: string;
+  why?: string;
 }
 
 export interface CompoundStepDef {
@@ -76,6 +79,17 @@ export interface ProjectMemory {
   gotchas: string[];
   decisions: string[];
 }
+
+export type SolutionCategory =
+  | 'build-errors'
+  | 'performance-issues'
+  | 'runtime-errors'
+  | 'logic-errors'
+  | 'security-issues'
+  | 'workflow-issues'
+  | 'general';
+
+export type SolutionSeverity = 'critical' | 'high' | 'medium' | 'low';
 
 export interface StageConfig {
   model?: string;
