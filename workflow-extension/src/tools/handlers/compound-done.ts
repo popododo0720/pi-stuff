@@ -424,7 +424,7 @@ async function advanceToNextTodo(
       session.description,
       p.summary,
       session.id,
-      p.tags,
+      { tags: p.tags },
     );
   }
 
@@ -478,7 +478,7 @@ async function finalizeWorkflow(
       session.description,
       p.summary,
       session.id,
-      p.tags,
+      { tags: p.tags },
     );
   }
 
