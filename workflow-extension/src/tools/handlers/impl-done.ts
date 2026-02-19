@@ -189,18 +189,22 @@ export async function handleImplDone(
       result,
       session.id,
     );
-    const replanHint =
+    const actionGuide =
       session.retryCount >= 2
-        ? '\n\n⚠️ Same issue recurring — if the CRITICAL is about plan wording (not a code bug), ' +
-          'call workflow_transition(action: "replan") to revise the plan text, then resubmit.\n' +
-          'Do NOT retry implDone with the same plan. The plan is the sole verification baseline.'
-        : '';
+        ? '\n\n🚨 Repeated failure — analyze the CRITICAL and choose:\n' +
+          '1. **Code bug** → fix code, then `implDone` again\n' +
+          '2. **Plan ambiguity/false positive** → `replan` to revise plan wording, then resubmit\n' +
+          '3. **Unclear** → report to user and ask for guidance\n' +
+          'Do NOT retry implDone without changing either code or plan.'
+        : '\n\nAnalyze the CRITICAL findings:\n' +
+          '- **Code bug** → fix the code and call `implDone` again\n' +
+          '- **Plan wording issue** → call `replan` to revise the plan, then resubmit';
 
     return {
       text:
-        `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n\n` +
+        `❌ Critical issues found (attempt ${session.retryCount}).\n\n` +
         formatVerificationSummary(result) +
-        replanHint +
+        actionGuide +
         (implResultPath ? `\n\n📋 Full results: ${implResultPath}` : ''),
     };
   } catch (e) {
