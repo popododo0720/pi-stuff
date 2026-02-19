@@ -190,15 +190,15 @@ export async function handleImplDone(
       session.id,
     );
     const actionGuide =
-      session.retryCount >= 2
-        ? '\n\n🚨 Repeated failure — analyze the CRITICAL and choose:\n' +
-          '1. **Code bug** → fix code, then `implDone` again\n' +
-          '2. **Plan ambiguity/false positive** → `replan` to revise plan wording, then resubmit\n' +
-          '3. **Unclear** → report to user and ask for guidance\n' +
-          'Do NOT retry implDone without changing either code or plan.'
-        : '\n\nAnalyze the CRITICAL findings:\n' +
-          '- **Code bug** → fix the code and call `implDone` again\n' +
-          '- **Plan wording issue** → call `replan` to revise the plan, then resubmit';
+      '\n\nAnalyze each CRITICAL finding and decide:\n' +
+      '- **Code bug** → fix the code, then `implDone` again\n' +
+      '- **Plan ambiguity / false positive** → `replan` to revise the plan wording, then resubmit\n' +
+      '- **Unclear** → report to user and ask for guidance' +
+      (session.retryCount >= 2
+        ? '\n\n🚨 Attempt ' +
+          session.retryCount +
+          ' — if the same CRITICAL keeps recurring, the plan wording is likely the issue, not the code.'
+        : '');
 
     return {
       text:
