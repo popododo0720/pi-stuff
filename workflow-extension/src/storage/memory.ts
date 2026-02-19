@@ -46,7 +46,18 @@ export function loadMemory(cwd: string): ProjectMemory {
                 typeof (p as Record<string, unknown>).text === 'string' &&
                 typeof (p as Record<string, unknown>).count === 'number'
               ) {
-                return p as PatternEntry;
+                const entry = p as Record<string, unknown>;
+                return {
+                  text: entry.text as string,
+                  count: entry.count as number,
+                  ...(typeof entry.wrong === 'string'
+                    ? { wrong: entry.wrong }
+                    : {}),
+                  ...(typeof entry.correct === 'string'
+                    ? { correct: entry.correct }
+                    : {}),
+                  ...(typeof entry.why === 'string' ? { why: entry.why } : {}),
+                };
               }
               return null;
             })
