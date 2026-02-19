@@ -175,20 +175,33 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           const sub = await ctx.ui.select('Verify settings', [
             `Models (${s.verify?.models?.join(', ') || 'none'})`,
             `Thinking (${s.verify?.thinking || 'default'})`,
+            'Domains',
           ]);
           if (sub?.startsWith('Models')) {
             const models = await pickModels(ctx, s.verify?.models ?? []);
             if (models !== undefined) {
               if (models.length === 0) {
-                delete s.verify;
+                // Preserve thinking + domains when clearing models
+                const existing = s.verify;
+                if (existing?.domains || existing?.thinking) {
+                  s.verify = {
+                    models: [],
+                    ...(existing.thinking
+                      ? { thinking: existing.thinking }
+                      : {}),
+                    ...(existing.domains ? { domains: existing.domains } : {}),
+                  };
+                } else {
+                  delete s.verify;
+                }
               } else {
                 s.verify = { ...s.verify, models };
               }
             }
           } else if (sub?.startsWith('Thinking')) {
-            if (!s.verify?.models?.length) {
+            if (!s.verify) {
               ctx.ui.notify(
-                'Set verify models first before configuring thinking level.',
+                'Set verify models or domain models first.',
                 'warn',
               );
             } else {
@@ -197,6 +210,56 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
                 delete s.verify.thinking;
               } else if (thinking) {
                 s.verify.thinking = thinking;
+              }
+            }
+          } else if (sub === 'Domains') {
+            const { ALL_DOMAINS } = await import('../verification/domains');
+            const domainConfig = s.verify?.domains ?? {};
+            const items = ALL_DOMAINS.map((d) => {
+              const dc = domainConfig[d.id];
+              const status = dc?.enabled === false ? '❌' : '✅';
+              const models = dc?.models?.join(', ') || 'inherit';
+              return `${status} ${d.name} (${models})`;
+            });
+            const pick = await ctx.ui.select('Domain settings', [
+              ...items,
+              '← Back',
+            ]);
+            if (pick && pick !== '← Back') {
+              const idx = items.indexOf(pick);
+              if (idx >= 0) {
+                const domain = ALL_DOMAINS[idx];
+                const dc = { ...(domainConfig[domain.id] ?? {}) };
+                const action = await ctx.ui.select(`${domain.name} settings`, [
+                  `Enabled (${dc.enabled !== false ? 'yes' : 'no'})`,
+                  `Models (${dc.models?.join(', ') || 'inherit from verify'})`,
+                  `Thinking (${dc.thinking || 'inherit'})`,
+                ]);
+                if (action?.startsWith('Enabled')) {
+                  dc.enabled = dc.enabled === false ? undefined : false;
+                } else if (action?.startsWith('Models')) {
+                  const models = await pickModels(ctx, dc.models ?? []);
+                  if (models !== undefined)
+                    dc.models = models.length ? models : undefined;
+                } else if (action?.startsWith('Thinking')) {
+                  const t = await pickThinking(ctx, dc.thinking);
+                  if (t === '') dc.thinking = undefined;
+                  else if (t) dc.thinking = t;
+                }
+                if (!s.verify) s.verify = { models: [] };
+                if (!s.verify.domains) s.verify.domains = {};
+                // Clean empty config
+                if (
+                  !dc.models?.length &&
+                  !dc.thinking &&
+                  dc.enabled !== false
+                ) {
+                  delete s.verify.domains[domain.id];
+                } else {
+                  s.verify.domains[domain.id] = dc;
+                }
+                if (Object.keys(s.verify.domains).length === 0)
+                  delete s.verify.domains;
               }
             }
           }

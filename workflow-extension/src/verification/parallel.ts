@@ -18,6 +18,13 @@ import type {
   VerificationResult,
   WorkflowSettings,
 } from '../types';
+import { ALL_DOMAINS } from './domains';
+import {
+  buildCoreImplPrompt,
+  buildCorePlanPrompt,
+  buildDomainPrompt,
+} from './prompt-builder';
+import { getStackHint } from './stack-detect';
 
 /** Max retry attempts when a model returns empty output */
 const MAX_EMPTY_RETRIES = 2;
@@ -288,31 +295,6 @@ async function runSingleModel(
   };
 }
 
-// ── Structured output format instruction ─────────────────────────
-
-const STRUCTURED_FORMAT_INSTRUCTION =
-  '\n\n---\n' +
-  '## ⚠️ MANDATORY Output Format — responses not following this format are DISCARDED\n\n' +
-  'Your response MUST end with these EXACT sections. Responses without them are invalid.\n\n' +
-  '## CRITICAL\n' +
-  '- [finding with file path and specific issue]\n' +
-  '(Write "- None" if no critical issues)\n\n' +
-  '## WARNING\n' +
-  '- [finding]\n' +
-  '(Write "- None" if no warnings)\n\n' +
-  '## INFO\n' +
-  '- [finding]\n' +
-  '(Write "- None" if no info items)\n\n' +
-  'VERDICT: PASS or FAIL\n\n' +
-  'Rules:\n' +
-  '- You MUST include all four sections above (## CRITICAL, ## WARNING, ## INFO, VERDICT)\n' +
-  '- List findings ONLY as bullet points (- ) inside their section\n' +
-  '- Any CRITICAL finding → VERDICT: FAIL\n' +
-  '- WARNING/INFO only → VERDICT: PASS\n' +
-  '- VERDICT must be the LAST line of your response\n' +
-  '- Analysis text can go BEFORE the ## CRITICAL section\n' +
-  '- State each finding decisively. Do NOT hedge or self-contradict (e.g., "this might be... but actually it\'s fine").\n';
-
 // ── Parallel verification ────────────────────────────────────────
 
 export async function runParallelVerification(
@@ -333,93 +315,54 @@ export async function runParallelVerification(
   const verifyConfig = settings.stages.verify;
   const verifyModels = verifyConfig?.models ?? [];
   const verifyThinking = verifyConfig?.thinking ?? 'high';
-
-  if (verifyModels.length === 0) {
-    throw new Error(
-      'No verification models configured. Use /workflow-settings to add models.',
-    );
-  }
-
-  let prompt =
-    type === 'plan'
-      ? 'You are a senior architect reviewing a PLAN before implementation begins.\n\n' +
-        `Task: ${description}\n\n` +
-        `Plan:\n${planContent}\n\n` +
-        'Read relevant source files to understand the current codebase, then evaluate:\n\n' +
-        '1. **Correctness & Completeness** — right problem? all steps listed? all consumers updated?\n' +
-        '2. **Architecture & Design** — follows existing patterns? no duplication? SRP?\n' +
-        '3. **Security & Robustness** — inputs validated? edge cases? side effects?\n' +
-        '4. **Implementability** — unambiguous steps? signatures specified?\n' +
-        '5. **Architecture & SOLID Compliance** (design-level, not code-level)\n' +
-        '   - Does the planned structure follow SRP? (each file/module = single responsibility)\n' +
-        '   - Is the design extensible without modifying existing code? (OCP)\n' +
-        '   - Are dependencies on abstractions rather than concretions? (DIP)\n' +
-        '   - Any unnecessary complexity or over-engineering? (KISS/YAGNI)\n' +
-        '   Classification: CRITICAL if fixable within plan scope, WARNING if needs larger structural change.\n\n' +
-        'Plans describe WHAT to do, not every implementation detail. ' +
-        'Do NOT fail for: missing exact line numbers, minor wording, ' +
-        'or things a competent developer would naturally handle.\n'
-      : 'You are a strict code verifier AND adversarial code breaker.\n\n' +
-        `Task: ${description}\n\n` +
-        `Plan:\n${planContent}\n\n` +
-        'Read the project files and perform THREE phases:\n\n' +
-        '**Phase 1: Implementation Verification**\n' +
-        '- Are all planned items implemented?\n' +
-        '- Does the code work correctly?\n' +
-        'Verify by reading actual source files, NOT git diff.\n\n' +
-        '**Phase 2: Adversarial Testing**\n' +
-        'Try to break this code with concrete inputs/edge cases that would crash, ' +
-        'produce wrong results, or expose vulnerabilities.\n\n' +
-        '**Phase 3: Clean Code & Architecture Review**\n' +
-        'Evaluate each changed/new file for:\n' +
-        '- SRP: Does each function/class have exactly one reason to change? Functions >40 lines are suspect.\n' +
-        '- OCP: Can new behavior be added via extension, not modification? Check for exhaustive switch/if-else chains.\n' +
-        '- LSP: Do subtypes/implementations honor their contracts?\n' +
-        '- ISP: Are interfaces minimal and focused?\n' +
-        '- DIP: Do modules depend on abstractions? Check for direct `new` of dependencies.\n' +
-        '- KISS: Is the solution the simplest that works? Remove unnecessary abstractions.\n' +
-        '- YAGNI: Is every piece of code currently needed? No speculative generality.\n' +
-        '- Clean Code: Intention-revealing names, no magic numbers, no duplication (DRY), small functions.\n\n' +
-        'Classification:\n' +
-        '- CRITICAL: Violation in NEW or CHANGED code, fixable within current PR scope\n' +
-        '  (e.g. new function with 2+ responsibilities, duplicated logic, missing error handling, magic numbers)\n' +
-        '- WARNING: Violation in EXISTING code or requiring structural change beyond current scope\n' +
-        '  (e.g. legacy patterns, cross-cutting concerns, existing tight coupling)\n' +
-        '  Warnings are recorded and addressed in future planning cycles.\n';
-
-  // Append TODO scope context (focus verifier on current TODO, regression-only for completed ones)
-  if (type === 'impl' && todoContext && todoContext.totalCount > 1) {
-    const completed = todoContext.completedTitles.join(', ').slice(0, 500);
-    prompt +=
-      `\n\n**⚠️ TODO Scope**\n` +
-      `This is TODO #${todoContext.currentIndex + 1} of ${todoContext.totalCount}.\n` +
-      (completed
-        ? `Previously completed & verified TODOs: ${completed}\n`
-        : '') +
-      `- FOCUS verification on TODO #${todoContext.currentIndex + 1} requirements.\n` +
-      '- For previously completed TODOs, ONLY check regressions/side-effects caused by current changes.\n' +
-      '- Do NOT flag issues in unchanged code from completed TODOs as CRITICAL.\n';
-  }
-
-  // Append implementation notes
-  if (type === 'impl' && implNotes?.trim()) {
-    prompt += `\n## Implementation Notes (from developer)\n${implNotes.trim()}`;
-  }
-
-  // Append project-specific checks
+  const stackHint = getStackHint(cwd);
   const checks = loadCustomChecks(cwd);
-  if (checks.length > 0) {
-    prompt += `\n\nProject-specific checks:\n${checks.join('\n\n')}`;
+  const customChecks = checks.length > 0 ? checks : undefined;
+
+  if (type === 'plan') {
+    // ── Plan: existing multi-model structure, no domain checks ──
+    if (verifyModels.length === 0) {
+      throw new Error(
+        'No verification models configured. Plan verification requires core models. Use /workflow-settings to add models.',
+      );
+    }
+    const prompt = buildCorePlanPrompt({
+      description,
+      planContent,
+      stackHint,
+      customChecks,
+    });
+    const promises = verifyModels.map((model) =>
+      runSingleModel(
+        model,
+        prompt,
+        pi,
+        settings.verifyTimeout,
+        verifyThinking,
+        signal,
+      ),
+    );
+    const results = await Promise.all(promises);
+    if (results.some((r) => r.infrastructureError)) {
+      return { passed: false, results, halted: true };
+    }
+    return { passed: results.every((r) => r.passed), results };
   }
 
-  // Append structured format instruction (always last)
-  prompt += STRUCTURED_FORMAT_INSTRUCTION;
+  // ── Impl: Core + Domain parallel ──
+  const corePrompt = buildCoreImplPrompt({
+    description,
+    planContent,
+    implNotes,
+    todoContext,
+    stackHint,
+    customChecks,
+  });
 
-  // Launch all models in parallel
-  const promises = verifyModels.map((model) =>
+  const corePromises = verifyModels.map((model) =>
     runSingleModel(
       model,
-      prompt,
+      corePrompt,
       pi,
       settings.verifyTimeout,
       verifyThinking,
@@ -427,16 +370,60 @@ export async function runParallelVerification(
     ),
   );
 
-  const results = await Promise.all(promises);
+  const domainConfig = verifyConfig?.domains ?? {};
+  const domainPromises = ALL_DOMAINS.filter(
+    (d) => domainConfig[d.id]?.enabled !== false,
+  ).flatMap((domain) => {
+    const dc = domainConfig[domain.id];
+    // Per-domain models, or round-robin from core models
+    const models = dc?.models?.length
+      ? dc.models
+      : verifyModels.length > 0
+        ? [verifyModels[ALL_DOMAINS.indexOf(domain) % verifyModels.length]]
+        : [];
+    if (models.length === 0) return [];
+    const thinking = dc?.thinking ?? verifyThinking;
+    const prompt = buildDomainPrompt(domain, {
+      description,
+      planContent,
+      todoContext,
+      stackHint,
+    });
+    return models.map((model) =>
+      runSingleModel(
+        model,
+        prompt,
+        pi,
+        settings.verifyTimeout,
+        thinking,
+        signal,
+      ).then((r): ModelVerificationResult => ({ ...r, domain: domain.name })),
+    );
+  });
 
-  // If ANY model hit infra error → halt (don't enter fix loop)
-  const hasInfraError = results.some((r) => r.infrastructureError);
-  if (hasInfraError) {
-    return { passed: false, results, halted: true };
+  // Must have at least one verification call
+  if (corePromises.length === 0 && domainPromises.length === 0) {
+    throw new Error(
+      'No verification models configured. Use /workflow-settings to add models.',
+    );
   }
 
-  const passed = results.every((r) => r.passed);
-  return { passed, results };
+  const allResults = await Promise.all([...corePromises, ...domainPromises]);
+
+  // Core infra error → halt
+  const coreResults = allResults.filter((r) => !r.domain);
+  if (coreResults.some((r) => r.infrastructureError)) {
+    return { passed: false, results: allResults, halted: true };
+  }
+
+  // Domain infra errors → skip (don't halt)
+  const validResults = allResults.filter((r) => !r.infrastructureError);
+  if (validResults.length === 0) {
+    // All results are infra errors → halt
+    return { passed: false, results: allResults, halted: true };
+  }
+  const passed = validResults.every((r) => r.passed);
+  return { passed, results: allResults };
 }
 
 // ── Output formatting ────────────────────────────────────────────
@@ -514,13 +501,15 @@ export function formatVerificationSummary(results: VerificationResult): string {
     if (r.warningCount > 0) counts.push(`🟡${r.warningCount}`);
     if (r.infoCount > 0) counts.push(`🔵${r.infoCount}`);
     const severity = counts.length > 0 ? ` (${counts.join(' ')})` : '';
+    const label = r.domain ? `${r.model}/${r.domain}` : r.model;
     const output = summarizeVerificationOutput(r.output);
-    parts.push(`[${r.model}] ${status}${severity}\n${output}`);
+    parts.push(`[${label}] ${status}${severity}\n${output}`);
   }
 
   for (const r of infraErrors) {
+    const label = r.domain ? `${r.model}/${r.domain}` : r.model;
     const preview = r.output.slice(0, 200).replace(/\n/g, ' ');
-    parts.push(`[${r.model}] ⛔ HALTED (infrastructure error)\n${preview}`);
+    parts.push(`[${label}] ⛔ HALTED (infrastructure error)\n${preview}`);
   }
 
   return parts.join('\n\n');
@@ -542,12 +531,13 @@ export function saveVerificationResult(
     const filePath = join(dir, `${prefix}${type}-${dateStr}.md`);
     const content = results.results
       .map((r) => {
-        const label = r.infrastructureError
+        const modelLabel = r.domain ? `${r.model}/${r.domain}` : r.model;
+        const statusLabel = r.infrastructureError
           ? '⛔ HALTED'
           : r.passed
             ? '✅ PASS'
             : '❌ FAIL';
-        return `## [${r.model}] ${label}\n\n${r.output}`;
+        return `## [${modelLabel}] ${statusLabel}\n\n${r.output}`;
       })
       .join('\n\n---\n\n');
     writeFileSync(filePath, content, 'utf-8');

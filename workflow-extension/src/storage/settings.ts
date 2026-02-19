@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
 import type {
+  DomainVerifyConfig,
   GitAutomationConfig,
   PreflightConfig,
   RepoMapConfig,
@@ -13,6 +14,7 @@ import type {
   VerifyStageConfig,
   WorkflowSettings,
 } from '../types';
+import { DOMAIN_IDS } from '../verification/domains';
 import { atomicWriteFileSync } from './atomic-write';
 
 const VALID_THINKING = new Set([
@@ -87,7 +89,38 @@ function validateVerifyConfig(raw: unknown): VerifyStageConfig | undefined {
   const config: VerifyStageConfig = { models };
   if (typeof r.thinking === 'string' && VALID_THINKING.has(r.thinking))
     config.thinking = r.thinking as VerifyStageConfig['thinking'];
-  return config.models.length > 0 || config.thinking ? config : undefined;
+
+  // Parse per-domain verification config
+  let domains: Record<string, DomainVerifyConfig> | undefined;
+  if (r.domains && typeof r.domains === 'object') {
+    domains = {};
+    for (const [key, val] of Object.entries(
+      r.domains as Record<string, unknown>,
+    )) {
+      if (!DOMAIN_IDS.includes(key)) continue;
+      if (!val || typeof val !== 'object') continue;
+      const dv = val as Record<string, unknown>;
+      const dc: DomainVerifyConfig = {};
+      if (Array.isArray(dv.models)) {
+        dc.models = dv.models
+          .filter((m): m is string => typeof m === 'string')
+          .map((m) => m.trim())
+          .filter((m) => m !== '');
+        if (dc.models.length === 0) delete dc.models;
+      }
+      if (typeof dv.thinking === 'string' && VALID_THINKING.has(dv.thinking)) {
+        dc.thinking = dv.thinking as DomainVerifyConfig['thinking'];
+      }
+      if (typeof dv.enabled === 'boolean') dc.enabled = dv.enabled;
+      if (Object.keys(dc).length > 0) domains[key] = dc;
+    }
+    if (Object.keys(domains).length === 0) domains = undefined;
+  }
+  if (domains) config.domains = domains;
+
+  return config.models.length > 0 || config.thinking || config.domains
+    ? config
+    : undefined;
 }
 
 function validatePreflightConfig(raw: unknown): PreflightConfig | undefined {

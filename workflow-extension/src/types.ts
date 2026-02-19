@@ -96,9 +96,16 @@ export interface StageConfig {
   thinking?: ThinkingLevel;
 }
 
+export interface DomainVerifyConfig {
+  models?: string[];
+  thinking?: ThinkingLevel;
+  enabled?: boolean;
+}
+
 export interface VerifyStageConfig {
   models: string[];
   thinking?: ThinkingLevel;
+  domains?: Record<string, DomainVerifyConfig>;
 }
 
 export interface StageConfigs {
@@ -146,6 +153,7 @@ export interface ModelVerificationResult {
   warningCount: number;
   infoCount: number;
   infrastructureError?: boolean;
+  domain?: string;
 }
 
 export interface VerificationResult {
