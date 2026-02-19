@@ -1,6 +1,6 @@
 // verification/domains/simplicity.ts — Simplicity domain checklist
 
-import type { VerificationDomain } from './index';
+import type { VerificationDomain } from './types';
 
 export const SIMPLICITY_DOMAIN: VerificationDomain = {
   id: 'simplicity',

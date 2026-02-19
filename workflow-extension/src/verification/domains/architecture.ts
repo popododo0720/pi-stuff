@@ -1,6 +1,6 @@
 // verification/domains/architecture.ts — Architecture domain checklist
 
-import type { VerificationDomain } from './index';
+import type { VerificationDomain } from './types';
 
 export const ARCHITECTURE_DOMAIN: VerificationDomain = {
   id: 'architecture',
