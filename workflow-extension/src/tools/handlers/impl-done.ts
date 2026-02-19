@@ -1,6 +1,7 @@
 // tools/handlers/impl-done.ts — implDone action handler
 // Runs parallel impl verification, transitions based on result.
 
+import { SELF_AUDIT_TEMPLATE } from '../../constants';
 import { loadMemory, saveMemory } from '../../storage/memory';
 import {
   formatVerificationSummary,
@@ -32,24 +33,28 @@ export async function handleImplDone(
 
   // ── Gate 2: self-audit structure check ──
   const contentText = params.content.trim();
-  const hasAuditHeader = /^## Self-Audit/im.test(contentText);
-  // Extract self-audit section (from header to next ## or end)
-  const auditSectionMatch = contentText.match(
-    /^## Self-Audit[^\n]*\n([\s\S]*?)(?=\n##\s|\n---|$)/im,
-  );
-  const auditSection = auditSectionMatch?.[1] ?? '';
+  // Extract self-audit section (from header to next ## or --- or end)
+  const lines = contentText.split('\n');
+  const headerLine = lines.findIndex((l) => /^## Self-Audit/i.test(l));
+  let auditSection = '';
+  if (headerLine >= 0) {
+    let endLine = lines.length;
+    for (let i = headerLine + 1; i < lines.length; i++) {
+      if (/^## /i.test(lines[i]) || /^---/.test(lines[i])) {
+        endLine = i;
+        break;
+      }
+    }
+    auditSection = lines.slice(headerLine + 1, endLine).join('\n');
+  }
   const hasCheckedItem = /^- \[x\]/im.test(auditSection);
-  if (!hasAuditHeader || !hasCheckedItem) {
+  if (headerLine < 0 || !hasCheckedItem) {
     return {
       text:
         '❌ implDone requires a Self-Audit section with at least one checked item.\n\n' +
         'Include this structure in your content parameter:\n```\n' +
-        '## Self-Audit\n' +
-        '- [x] Re-read all changed function signatures and return types\n' +
-        '- [x] Verified parser/format consistency across files\n' +
-        '- [x] Checked edge cases: (list specific ones)\n' +
-        '- [x] Ran verification commands: (list results)\n' +
-        '```\n\n' +
+        SELF_AUDIT_TEMPLATE +
+        '\n```\n\n' +
         'This is a mandatory structural guard. Complete the audit before submitting.',
     };
   }
@@ -69,7 +74,7 @@ export async function handleImplDone(
     };
   }
 
-  // ── Gate 3: pre-flight (lint/tsc/test) ──
+  // ── Gate 4: pre-flight (lint/tsc/test) ──
   const preflightConfig = settings.preflight;
   if (preflightConfig?.enabled !== false) {
     const commands = preflightConfig?.commands?.length
