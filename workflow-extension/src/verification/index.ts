@@ -3,7 +3,9 @@
 export {
   cleanupVerificationResults,
   formatVerificationSummary,
-  runParallelVerification,
   saveVerificationResult,
-  summarizeVerificationOutput,
-} from './parallel';
+} from './formatting';
+
+export { runParallelVerification } from './parallel';
+
+export { summarizeVerificationOutput } from './parsing';
