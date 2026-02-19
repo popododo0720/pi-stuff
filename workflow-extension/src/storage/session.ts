@@ -131,7 +131,12 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
           ? raw.compoundMemorySnapshot
           : undefined,
       compoundStep:
-        typeof raw.compoundStep === 'number' ? raw.compoundStep : undefined,
+        typeof raw.compoundStep === 'number' &&
+        Number.isFinite(raw.compoundStep) &&
+        raw.compoundStep >= 0 &&
+        Number.isInteger(raw.compoundStep)
+          ? Math.min(raw.compoundStep, 8)
+          : undefined,
     };
   } catch (e) {
     console.error('[workflow] loadSession failed:', e);

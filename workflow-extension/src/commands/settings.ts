@@ -136,6 +136,8 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           `⏱️ Verify timeout (${settings.verifyTimeout / 1000}s)`,
           `🗺️ Repo Map (${rm?.enabled === false ? 'off' : 'on'}, budget: ${rm?.tokenBudget ?? 2048})`,
           `🧬 Git Automation (${g?.enabled === false ? 'off' : 'on'}, commit/todo: ${g?.commitPerTodo === false ? 'off' : 'on'}, push/todo: ${g?.pushPerTodo === true ? 'on' : 'off'})`,
+          `🔄 Max Retries (${settings.maxRetries ?? 5})`,
+          `🛡️ Pre-flight (${settings.preflight?.enabled === false ? 'off' : 'on'})`,
           '✅ Done',
         ];
 
@@ -327,6 +329,29 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             const pick = await pickBoolean('Use workflow worktree strategy');
             if (pick)
               settings.git = { ...git, useWorkflowWorktree: pick === 'on' };
+          }
+        } else if (choice.startsWith('🔄')) {
+          // ── Max Retries ──────────────────────────────────────────
+          const input = await ctx.ui.input(
+            'Max verification retries (1–20):',
+            String(settings.maxRetries ?? 5),
+          );
+          if (input) {
+            const val = Number.parseInt(input, 10);
+            if (!Number.isNaN(val) && val >= 1 && val <= 20) {
+              settings.maxRetries = val;
+            } else {
+              ctx.ui.notify('Enter a number between 1 and 20.', 'error');
+            }
+          }
+        } else if (choice.startsWith('🛡️')) {
+          // ── Pre-flight toggle ────────────────────────────────────
+          const pick = await ctx.ui.select('Pre-flight checks', ['on', 'off']);
+          if (pick) {
+            settings.preflight = {
+              ...settings.preflight,
+              enabled: pick === 'on',
+            };
           }
         }
       }

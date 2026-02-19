@@ -109,11 +109,19 @@ export interface GitAutomationConfig {
   useWorkflowWorktree?: boolean;
 }
 
+export interface PreflightConfig {
+  enabled?: boolean;
+  commands?: string[];
+  timeout?: number; // per-command timeout in seconds, default 60
+}
+
 export interface WorkflowSettings {
   verifyTimeout: number;
   stages: StageConfigs;
   repoMap?: RepoMapConfig;
   git?: GitAutomationConfig;
+  preflight?: PreflightConfig;
+  maxRetries?: number; // verify failure threshold, default 5
 }
 
 export interface ModelVerificationResult {

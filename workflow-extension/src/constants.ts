@@ -43,6 +43,12 @@ export const DEFAULT_SETTINGS: WorkflowSettings = {
     useWorkflowBranch: true,
     useWorkflowWorktree: true,
   },
+  preflight: {
+    enabled: true,
+    commands: [],
+    timeout: 60,
+  },
+  maxRetries: 5,
 };
 
 // State maps
@@ -241,18 +247,14 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- If the user requests a direction change, call workflow_transition(action: "replan", reason: "...") to return to planning.\n' +
     '- Track progress: maintain a mental checklist of current TODO items. Do NOT stop until all items are complete.\n' +
     '- If stuck on one item, note the blocker and continue with the next.\n' +
-    '- **MANDATORY before calling implDone**:\n' +
-    '  1. Run linter/formatter and fix all errors (e.g. `npm run lint`).\n' +
-    '  2. Run type checker if available (e.g. `npx tsc --noEmit`) and fix all errors.\n' +
-    '  3. Run tests if available (e.g. `npm test`) and fix all failures.\n' +
-    '  4. Update README.md and ARCHITECTURE.md if needed for this TODO.\n' +
-    '  5. **Quick checklist (before implDone)**:\n' +
+    '- **Pre-flight checks**: lint/type-check/test are run automatically when you call implDone.\n' +
+    '  If they fail, fix the errors and retry. No need to run manually.\n' +
+    '- **MANDATORY**: Include implementation notes in content parameter when calling implDone.\n' +
+    '  workflow_transition(action: "implDone", content: "<decisions, trade-offs, context>")\n' +
+    '- **Quick checklist (before implDone)**:\n' +
     "     a. Skim the plan's current TODO section — are all steps addressed?\n" +
     '     b. Run verification criteria from the plan (grep, lint, test).\n' +
-    '     c. Do NOT re-analyze or refactor working code. Trust the verification stage to catch real issues.\n' +
-    '- When calling implDone, include implementation notes in content:\n' +
-    '  workflow_transition(action: "implDone", content: "<notes about decisions, known trade-offs, context for verifiers>")\n' +
-    '  This helps verifiers understand your reasoning and avoids false positives.\n\n' +
+    '     c. Do NOT re-analyze or refactor working code. Trust the verification stage to catch real issues.\n\n' +
     '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:
@@ -262,7 +264,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '1. Read the verification feedback above carefully.\n' +
     '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in the implementation.\n' +
     '3. Call workflow_transition(action: "replan") to return to planning if the plan itself needs changes.\n' +
-    '4. Or fix the code and call workflow_transition(action: "implDone") to re-verify.',
+    '4. Or fix the code and call workflow_transition(action: "implDone", content: "<implementation notes>") to re-verify.',
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +

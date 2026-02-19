@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
 import type {
   GitAutomationConfig,
+  PreflightConfig,
   RepoMapConfig,
   StageConfig,
   StageConfigs,
@@ -89,6 +90,26 @@ function validateVerifyConfig(raw: unknown): VerifyStageConfig | undefined {
   return config.models.length > 0 || config.thinking ? config : undefined;
 }
 
+function validatePreflightConfig(raw: unknown): PreflightConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const config: PreflightConfig = {};
+  if (typeof r.enabled === 'boolean') config.enabled = r.enabled;
+  if (Array.isArray(r.commands)) {
+    config.commands = r.commands.filter(
+      (c): c is string => typeof c === 'string',
+    );
+  }
+  if (
+    typeof r.timeout === 'number' &&
+    Number.isFinite(r.timeout) &&
+    r.timeout > 0
+  ) {
+    config.timeout = Math.max(10, Math.min(300, Math.floor(r.timeout)));
+  }
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
 /**
  * Resolve the absolute path to the settings file.
  */
@@ -133,12 +154,19 @@ export function loadSettings(cwd: string): WorkflowSettings {
 
     const repoMap = validateRepoMapConfig(raw.repoMap);
     const git = validateGitConfig(raw.git) ?? DEFAULT_SETTINGS.git;
+    const preflight = validatePreflightConfig(raw.preflight);
+    const maxRetries =
+      typeof raw.maxRetries === 'number' && Number.isFinite(raw.maxRetries)
+        ? Math.max(1, Math.min(20, Math.floor(raw.maxRetries)))
+        : undefined;
 
     return {
       verifyTimeout: timeout,
       stages,
       ...(repoMap ? { repoMap } : {}),
       ...(git ? { git } : {}),
+      ...(preflight ? { preflight } : {}),
+      ...(maxRetries !== undefined ? { maxRetries } : {}),
     };
   } catch (e) {
     console.error('[workflow] loadSettings failed:', e);

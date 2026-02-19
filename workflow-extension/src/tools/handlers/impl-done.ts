@@ -8,12 +8,65 @@ import {
   saveVerificationResult,
   summarizeVerificationOutput,
 } from '../../verification';
+import {
+  detectPreflightCommands,
+  formatPreflightFailure,
+  runPreflight,
+} from '../preflight';
 import type { HandlerContext, HandlerResult } from './types';
 
 export async function handleImplDone(
   hctx: HandlerContext,
 ): Promise<HandlerResult> {
   const { session, settings, params, pi, ctx, signal, onUpdate } = hctx;
+
+  // ── Gate 1: content 필수 ──
+  if (!params.content?.trim()) {
+    return {
+      text:
+        '❌ implDone requires content parameter.\n' +
+        'Include implementation notes: decisions made, trade-offs, context for verifiers.\n' +
+        'Example: workflow_transition(action: "implDone", content: "<your notes>")',
+    };
+  }
+
+  // ── Gate 2: retry 에스컬레이션 ──
+  const maxRetries = settings.maxRetries ?? 5;
+  if (session.retryCount >= maxRetries) {
+    return {
+      text:
+        `⚠️ Verification has failed ${session.retryCount} times (limit: ${maxRetries}).\n` +
+        'Further retries blocked to prevent token waste.\n' +
+        'Report the issue to the user and wait for guidance.\n' +
+        'User can adjust maxRetries via /settings or help resolve the issue.',
+    };
+  }
+
+  // ── Gate 3: pre-flight (lint/tsc/test) ──
+  const preflightConfig = settings.preflight;
+  if (preflightConfig?.enabled !== false) {
+    const commands = preflightConfig?.commands?.length
+      ? preflightConfig.commands
+      : detectPreflightCommands(ctx.cwd);
+    if (commands.length > 0) {
+      onUpdate?.({
+        content: [
+          {
+            type: 'text' as const,
+            text: `🔍 Pre-flight: ${commands.join(', ')}`,
+          },
+        ],
+      });
+      const pfResult = await runPreflight(
+        pi,
+        commands,
+        preflightConfig?.timeout ?? 60,
+      );
+      if (!pfResult.passed) {
+        return { text: formatPreflightFailure(pfResult) };
+      }
+    }
+  }
 
   // Transition to verifyImpl and flush so status bar shows verification state
   session.state = 'verifyImpl';
