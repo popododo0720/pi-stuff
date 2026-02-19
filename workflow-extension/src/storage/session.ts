@@ -1,7 +1,13 @@
 // storage/session.ts — WorkflowSession disk persistence
 // Saves/loads session state to .pi/workflow-session.json.
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { MEMORY_DIR } from '../constants';
 import type { TodoItem, WorkflowSession, WorkflowState } from '../types';
@@ -141,5 +147,23 @@ export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
   } catch (e) {
     console.error('[workflow] loadSession failed:', e);
     return null;
+  }
+}
+
+const BACKUP_FILE = 'workflow-session.backup.json';
+
+/**
+ * Backup current session file before replacement.
+ * Keeps at most 1 backup (overwrites previous).
+ * No-op if no session file exists.
+ */
+export function backupSession(cwd: string): void {
+  try {
+    const sessionPath = resolveSessionPath(cwd);
+    if (!existsSync(sessionPath)) return;
+    const backupPath = resolve(join(cwd, MEMORY_DIR, BACKUP_FILE));
+    copyFileSync(sessionPath, backupPath);
+  } catch (e) {
+    console.error('[workflow] session backup failed:', e);
   }
 }
