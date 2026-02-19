@@ -7,6 +7,7 @@ import { SECURITY_DOMAIN } from './security';
 import { SIMPLICITY_DOMAIN } from './simplicity';
 
 import type { VerificationDomain } from './types';
+
 export type { VerificationDomain } from './types';
 
 export const ALL_DOMAINS: VerificationDomain[] = [
