@@ -1,14 +1,16 @@
 // storage/critical-patterns.ts — Critical Patterns (Tier 1 memory)
 // Always-loaded patterns file for high-value learnings.
 // Patterns are auto-promoted from project memory when count >= 3.
+// Format: structured ## N. blocks with optional ❌/✅ examples.
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { PatternEntry } from '../types';
 import { atomicWriteFileSync } from './atomic-write';
 
 export const CRITICAL_PATTERNS_DIR = 'docs/patterns';
 export const CRITICAL_PATTERNS_FILE = 'critical.md';
-export const MAX_CRITICAL_CHARS = 1000;
+export const MAX_CRITICAL_CHARS = 3000;
 
 /**
  * Resolve absolute path to critical patterns file.
@@ -50,27 +52,67 @@ export function saveCriticalPatterns(cwd: string, content: string): void {
   atomicWriteFileSync(path, content, 'utf-8');
 }
 
+/** Count ## N. pattern blocks in content */
+function countPatternBlocks(content: string): number {
+  if (!content.trim()) return 0;
+  return (content.match(/^## \d+\./gm) || []).length;
+}
+
+/** Renumber ## N. headers sequentially from 1 */
+function renumberBlocks(content: string): string {
+  let num = 0;
+  return content.replace(/^## \d+\./gm, () => {
+    num++;
+    return `## ${num}.`;
+  });
+}
+
 /**
- * Append a pattern to critical patterns file.
- * Evicts oldest entries (FIFO) when exceeding MAX_CRITICAL_CHARS.
+ * Sanitize text to prevent fake ## N. block headers in content.
+ * Replaces leading "## " at start of lines with "\\## " to prevent regex injection.
+ */
+function sanitizeBlockContent(text: string): string {
+  return text.replace(/^## /gm, '\\## ');
+}
+
+/**
+ * Append a structured pattern block to critical patterns file.
+ * Takes PatternEntry directly — same shape used in project memory.
+ * Format: ## N. title (발견: X회) + optional ❌ WRONG / ✅ CORRECT / Why sections.
+ * Evicts oldest blocks (FIFO) when exceeding MAX_CRITICAL_CHARS.
  */
 export function appendCriticalPattern(
   cwd: string,
-  pattern: string,
-  count: number,
+  pattern: PatternEntry,
 ): void {
   let content = loadCriticalPatterns(cwd);
-  // Truncate single line to prevent single-entry overflow
-  const newLine = `- ${pattern} (발견: ${count}회)`.slice(
-    0,
-    MAX_CRITICAL_CHARS,
-  );
-  content = content ? `${content}\n${newLine}` : newLine;
-  // FIFO eviction: remove oldest lines until under budget
-  while (content.length > MAX_CRITICAL_CHARS) {
-    const firstLineEnd = content.indexOf('\n');
-    if (firstLineEnd < 0) break;
-    content = content.slice(firstLineEnd + 1);
+  const nextNum = countPatternBlocks(content) + 1;
+
+  let block = `## ${nextNum}. ${sanitizeBlockContent(pattern.text)} (발견: ${pattern.count}회)`;
+  if (pattern.wrong) {
+    block += `\n\n### ❌ WRONG\n${sanitizeBlockContent(pattern.wrong)}`;
   }
+  if (pattern.correct) {
+    block += `\n\n### ✅ CORRECT\n${sanitizeBlockContent(pattern.correct)}`;
+  }
+  if (pattern.why) {
+    block += `\n\n**Why:** ${sanitizeBlockContent(pattern.why)}`;
+  }
+
+  // Per-block overflow guard
+  if (block.length > MAX_CRITICAL_CHARS) {
+    block = block.slice(0, MAX_CRITICAL_CHARS);
+  }
+
+  content = content ? `${content}\n\n${block}` : block;
+
+  // FIFO eviction by block — regex-based to avoid mid-block splits
+  while (content.length > MAX_CRITICAL_CHARS) {
+    const match = content.match(/\n## \d+\./);
+    if (match === null) break;
+    content = content.slice((match.index as number) + 1);
+    content = renumberBlocks(content);
+  }
+
   saveCriticalPatterns(cwd, content);
 }

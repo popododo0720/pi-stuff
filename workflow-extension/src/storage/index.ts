@@ -10,6 +10,8 @@ export { savePlanDocument, toSlug } from './plan';
 export { loadSessionFromDisk, saveSessionToDisk } from './session';
 export { loadSettings, saveSettings } from './settings';
 export {
+  classifyCategory,
+  classifySeverity,
   findRelevantSolutions,
   findSolutionIndex,
   saveSolution,

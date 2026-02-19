@@ -76,8 +76,14 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
                     if (typeof item === 'string') return `  ${i}. ${item}`;
                     if ('pattern' in item)
                       return `  ${i}. [${(item as ConditionalRule).pattern}] ${(item as ConditionalRule).rule}`;
-                    if ('text' in item && 'count' in item)
-                      return `  ${i}. [${(item as PatternEntry).count}x] ${(item as PatternEntry).text}`;
+                    if ('text' in item && 'count' in item) {
+                      const pe = item as PatternEntry;
+                      let display = `  ${i}. [${pe.count}x] ${pe.text}`;
+                      if (pe.wrong) display += `\n     ❌ ${pe.wrong}`;
+                      if (pe.correct) display += `\n     ✅ ${pe.correct}`;
+                      if (pe.why) display += `\n     Why: ${pe.why}`;
+                      return display;
+                    }
                     if ('name' in item)
                       return `  ${i}. ${item.name}: ${item.description}`;
                     if ('what' in item)
@@ -101,25 +107,52 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
               `${params.category} has invalid data. Try clearing it first.`,
             );
           }
-          if (arr.length >= MAX_MEMORY_ENTRIES) {
+          if (
+            arr.length >= MAX_MEMORY_ENTRIES &&
+            params.category !== 'patterns'
+          ) {
             return t(
               `${params.category} reached max entries (${MAX_MEMORY_ENTRIES}).`,
             );
           }
 
           if (params.category === 'patterns') {
-            // Fuzzy dedup: merge if substring match (10+ chars to avoid false matches)
+            // 1️⃣ Parse structured format "text|||wrong|||correct|||why"
+            const parts = value.split('|||').map((s) => s.trim());
+            const patternText = parts[0];
+            if (!patternText) return t('Pattern text cannot be empty.');
+            const wrong = parts[1] || undefined;
+            const correct = parts[2] || undefined;
+            const why = parts[3] || undefined;
+
+            // 2️⃣ Fuzzy dedup on patternText (not raw ||| value)
             const existing =
-              value.length >= 10
+              patternText.length >= 10
                 ? memory.patterns.find(
-                    (p) => p.text.includes(value) || value.includes(p.text),
+                    (p) =>
+                      p.text.includes(patternText) ||
+                      patternText.includes(p.text),
                   )
                 : undefined;
             if (existing) {
               existing.count++;
-              existing.text = value;
+              existing.text = patternText;
+              if (wrong) existing.wrong = wrong;
+              if (correct) existing.correct = correct;
+              if (why) existing.why = why;
             } else {
-              memory.patterns.push({ text: value, count: 1 });
+              if (memory.patterns.length >= MAX_MEMORY_ENTRIES) {
+                return t(
+                  `patterns reached max entries (${MAX_MEMORY_ENTRIES}).`,
+                );
+              }
+              memory.patterns.push({
+                text: patternText,
+                count: 1,
+                wrong,
+                correct,
+                why,
+              });
             }
           } else if (params.category === 'rules') {
             if (memory.rules.length >= MAX_RULES) {

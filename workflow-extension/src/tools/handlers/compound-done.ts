@@ -322,7 +322,7 @@ export async function handleCompoundDone(
     const promoted: string[] = [];
     const remaining = memory.patterns.filter((p) => {
       if (p.count >= 3) {
-        appendCriticalPattern(hctx.ctx.cwd, p.text, p.count);
+        appendCriticalPattern(hctx.ctx.cwd, p);
         promoted.push(p.text);
         return false;
       }
@@ -424,7 +424,7 @@ async function advanceToNextTodo(
       session.description,
       p.summary,
       session.id,
-      p.tags,
+      { tags: p.tags },
     );
   }
 
@@ -478,7 +478,7 @@ async function finalizeWorkflow(
       session.description,
       p.summary,
       session.id,
-      p.tags,
+      { tags: p.tags },
     );
   }
 
