@@ -156,6 +156,10 @@ export interface ModelVerificationResult {
   warningCount: number;
   infoCount: number;
   infrastructureError?: boolean;
+  /** Classifies non-code failures for retry/skip logic */
+  verificationErrorType?: 'infrastructure' | 'format';
+  /** 0 = original run, 1+ = retry attempt number */
+  retryAttempt?: number;
   domain?: string;
 }
 

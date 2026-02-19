@@ -150,6 +150,13 @@ const FAIL_SIGNALS = [
   'incorrect implementation',
   'breaks existing',
   'undefined behavior',
+  'bug found',
+  'issue found',
+  'does not work',
+  'does not match',
+  'vulnerability found',
+  'missing error handling',
+  'missing validation',
 ];
 
 /**
@@ -218,6 +225,7 @@ async function runSingleModel(
           warningCount: 0,
           infoCount: 0,
           infrastructureError: true,
+          verificationErrorType: 'infrastructure',
         };
       }
 
@@ -231,6 +239,7 @@ async function runSingleModel(
           warningCount: 0,
           infoCount: 0,
           infrastructureError: true,
+          verificationErrorType: 'infrastructure',
         };
       }
 
@@ -255,6 +264,22 @@ async function runSingleModel(
           const fallback = fallbackKeywordScan(output);
           passed = fallback.passed;
           severity.critical = fallback.criticalCount;
+
+          // Format protocol error: no verdict, no structured findings,
+          // AND no fail signals detected (criticalCount === 0).
+          // If fail signals exist, it's a real code FAIL, not format.
+          if (!passed && fallback.criticalCount === 0) {
+            return {
+              model,
+              passed: false,
+              output,
+              criticalCount: 0,
+              warningCount: 0,
+              infoCount: 0,
+              infrastructureError: true,
+              verificationErrorType: 'format',
+            };
+          }
         } else {
           // Had some structured findings but no verdict → fail safe
           passed = false;
@@ -279,6 +304,7 @@ async function runSingleModel(
           warningCount: 0,
           infoCount: 0,
           infrastructureError: true,
+          verificationErrorType: 'infrastructure',
         };
       }
     }
@@ -292,6 +318,7 @@ async function runSingleModel(
     warningCount: 0,
     infoCount: 0,
     infrastructureError: true,
+    verificationErrorType: 'infrastructure',
   };
 }
 
@@ -371,18 +398,26 @@ export async function runParallelVerification(
     ),
   );
 
+  // ── Build domain task descriptors (stable index for retry) ──
+  interface DomainTask {
+    domain: (typeof ALL_DOMAINS)[number];
+    model: string;
+    prompt: string;
+    thinking: string;
+  }
+
   const domainConfig = verifyConfig?.domains ?? {};
-  const domainPromises = ALL_DOMAINS.filter(
-    (d) => domainConfig[d.id]?.enabled !== false,
-  ).flatMap((domain) => {
+  const domainTasks: DomainTask[] = [];
+
+  for (const domain of ALL_DOMAINS) {
+    if (domainConfig[domain.id]?.enabled === false) continue;
     const dc = domainConfig[domain.id];
-    // Per-domain models, or round-robin from core models
     const models = dc?.models?.length
       ? dc.models
       : verifyModels.length > 0
         ? [verifyModels[ALL_DOMAINS.indexOf(domain) % verifyModels.length]]
         : [];
-    if (models.length === 0) return [];
+    if (models.length === 0) continue;
     const thinking = dc?.thinking ?? verifyThinking;
     const prompt = buildDomainPrompt(domain, {
       description,
@@ -390,39 +425,80 @@ export async function runParallelVerification(
       todoContext,
       stackHint,
     });
-    return models.map((model) =>
-      runSingleModel(
-        model,
-        prompt,
-        pi,
-        settings.verifyTimeout,
-        thinking,
-        signal,
-      ).then((r): ModelVerificationResult => ({ ...r, domain: domain.name })),
-    );
-  });
+    for (const model of models) {
+      domainTasks.push({ domain, model, prompt, thinking });
+    }
+  }
 
   // Must have at least one verification call
-  if (corePromises.length === 0 && domainPromises.length === 0) {
+  if (corePromises.length === 0 && domainTasks.length === 0) {
     throw new Error(
       'No verification models configured. Use /workflow-settings to add models.',
     );
   }
 
-  const allResults = await Promise.all([...corePromises, ...domainPromises]);
+  // Execute core + domain in parallel
+  const domainPromises = domainTasks.map((task) =>
+    runSingleModel(
+      task.model,
+      task.prompt,
+      pi,
+      settings.verifyTimeout,
+      task.thinking,
+      signal,
+    ).then(
+      (r): ModelVerificationResult => ({ ...r, domain: task.domain.name }),
+    ),
+  );
 
-  // Core infra error → halt
-  const coreResults = allResults.filter((r) => !r.domain);
+  const [coreResults, domainResults] = await Promise.all([
+    Promise.all(corePromises),
+    Promise.all(domainPromises),
+  ]);
+
+  // Core infra/format error → halt
   if (coreResults.some((r) => r.infrastructureError)) {
+    return {
+      passed: false,
+      results: [...coreResults, ...domainResults],
+      halted: true,
+    };
+  }
+
+  // ── Domain partial retry: retry only infra/format failures (parallel) ──
+  const retryIndices = domainResults
+    .map((r, i) => (r.verificationErrorType ? i : -1))
+    .filter((i) => i >= 0);
+
+  if (retryIndices.length > 0) {
+    const retryPromises = retryIndices.map((i) => {
+      const task = domainTasks[i];
+      return runSingleModel(
+        task.model,
+        task.prompt,
+        pi,
+        settings.verifyTimeout,
+        task.thinking,
+        signal,
+      ).then((retried): [number, ModelVerificationResult] => [
+        i,
+        { ...retried, domain: task.domain.name, retryAttempt: 1 },
+      ]);
+    });
+    const retryResults = await Promise.all(retryPromises);
+    for (const [i, result] of retryResults) {
+      domainResults[i] = result;
+    }
+  }
+
+  const allResults = [...coreResults, ...domainResults];
+  const validResults = allResults.filter((r) => !r.infrastructureError);
+
+  // All results are infra/format errors → halt
+  if (validResults.length === 0) {
     return { passed: false, results: allResults, halted: true };
   }
 
-  // Domain infra errors → skip (don't halt)
-  const validResults = allResults.filter((r) => !r.infrastructureError);
-  if (validResults.length === 0) {
-    // All results are infra errors → halt
-    return { passed: false, results: allResults, halted: true };
-  }
   const passed = validResults.every((r) => r.passed);
   return { passed, results: allResults };
 }
@@ -502,15 +578,21 @@ export function formatVerificationSummary(results: VerificationResult): string {
     if (r.warningCount > 0) counts.push(`🟡${r.warningCount}`);
     if (r.infoCount > 0) counts.push(`🔵${r.infoCount}`);
     const severity = counts.length > 0 ? ` (${counts.join(' ')})` : '';
+    const retrySuffix = r.retryAttempt ? ' (retry)' : '';
     const label = r.domain ? `${r.model}/${r.domain}` : r.model;
     const output = summarizeVerificationOutput(r.output);
-    parts.push(`[${label}] ${status}${severity}\n${output}`);
+    parts.push(`[${label}] ${status}${severity}${retrySuffix}\n${output}`);
   }
 
   for (const r of infraErrors) {
     const label = r.domain ? `${r.model}/${r.domain}` : r.model;
     const preview = r.output.slice(0, 200).replace(/\n/g, ' ');
-    parts.push(`[${label}] ⛔ HALTED (infrastructure error)\n${preview}`);
+    const retrySuffix = r.retryAttempt ? ' (retry)' : '';
+    const kind = r.verificationErrorType ?? 'infrastructure';
+    // HALTED = first failure (no retry attempted or not a domain retry target)
+    // SKIPPED = persistent failure after domain retry
+    const statusIcon = r.retryAttempt ? '⛔ SKIPPED' : '⛔ HALTED';
+    parts.push(`[${label}] ${statusIcon} (${kind})${retrySuffix}\n${preview}`);
   }
 
   return parts.join('\n\n');
@@ -533,12 +615,16 @@ export function saveVerificationResult(
     const content = results.results
       .map((r) => {
         const modelLabel = r.domain ? `${r.model}/${r.domain}` : r.model;
-        const statusLabel = r.infrastructureError
-          ? '⛔ HALTED'
-          : r.passed
-            ? '✅ PASS'
-            : '❌ FAIL';
-        return `## [${modelLabel}] ${statusLabel}\n\n${r.output}`;
+        const retrySuffix = r.retryAttempt ? ' (retry)' : '';
+        let statusLabel: string;
+        if (r.infrastructureError) {
+          const kind = r.verificationErrorType ?? 'infrastructure';
+          const icon = r.retryAttempt ? '⛔ SKIPPED' : '⛔ HALTED';
+          statusLabel = `${icon} (${kind})`;
+        } else {
+          statusLabel = r.passed ? '✅ PASS' : '❌ FAIL';
+        }
+        return `## [${modelLabel}] ${statusLabel}${retrySuffix}\n\n${r.output}`;
       })
       .join('\n\n---\n\n');
     writeFileSync(filePath, content, 'utf-8');
