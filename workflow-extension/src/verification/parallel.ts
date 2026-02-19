@@ -24,7 +24,7 @@ import {
   buildCorePlanPrompt,
   buildDomainPrompt,
 } from './prompt-builder';
-import { getStackHint } from './stack-detect';
+import { detectStack, getStackHint } from './stack-detect';
 
 /** Max retry attempts when a model returns empty output */
 const MAX_EMPTY_RETRIES = 2;
@@ -315,7 +315,8 @@ export async function runParallelVerification(
   const verifyConfig = settings.stages.verify;
   const verifyModels = verifyConfig?.models ?? [];
   const verifyThinking = verifyConfig?.thinking ?? 'high';
-  const stackHint = getStackHint(cwd);
+  const stacks = detectStack(cwd);
+  const stackHint = getStackHint(stacks);
   const checks = loadCustomChecks(cwd);
   const customChecks = checks.length > 0 ? checks : undefined;
 
