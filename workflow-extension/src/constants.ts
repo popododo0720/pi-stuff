@@ -216,9 +216,13 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     id: 'gitCleanup',
     label: 'Branch/Worktree Cleanup',
     instruction:
-      'Worktree: git worktree remove <path> --force\n' +
-      'git branch -D <branch>\n' +
-      'git push origin --delete <branch>',
+      '⚠️ Order matters — follow exactly:\n' +
+      '1. Remove worktree: git worktree remove <main-worktree-path> --force\n' +
+      '2. Checkout main in working dir: git checkout main\n' +
+      '3. Delete feature branch: git branch -D <branch>\n' +
+      '4. Delete remote branch: git push origin --delete <branch>\n\n' +
+      'CRITICAL: Step 2 (checkout main) MUST happen BEFORE step 3 (branch delete).\n' +
+      'Skipping this causes detached HEAD.',
     requiresGit: true,
     requiresLastTodo: true,
   },

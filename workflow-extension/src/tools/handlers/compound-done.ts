@@ -156,8 +156,30 @@ async function validateGitPushMain(
 }
 
 async function validateGitCleanup(
-  _hctx: HandlerContext,
+  hctx: HandlerContext,
 ): Promise<string | null> {
+  const gitCwd = getGitCwd(hctx.ctx.cwd);
+  // Ensure HEAD is on main (not detached) after cleanup
+  const branch = await runGit(
+    hctx.pi,
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    gitCwd,
+  );
+  if (!branch.ok) {
+    return `❌ Cannot detect current branch: ${branch.stderr || `exit ${branch.code}`}`;
+  }
+  if (branch.stdout === 'HEAD') {
+    return (
+      '❌ HEAD is detached — you must checkout main before deleting the feature branch.\n' +
+      'Run: git checkout main'
+    );
+  }
+  if (branch.stdout !== 'main') {
+    return (
+      `❌ Working directory is on '${branch.stdout}', expected 'main'.\n` +
+      'Run: git checkout main'
+    );
+  }
   return null;
 }
 
