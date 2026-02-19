@@ -153,11 +153,21 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     id: 'reflect',
     label: 'Reflect & Capture',
     instruction:
-      '분석 후 project_memory(add)로 pattern/gotcha/decision 최소 1개 저장.\n' +
-      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.\n\n' +
-      '**Pattern 저장 시 구조화 권장:**\n' +
-      'project_memory(add, category: "patterns", value: "패턴 설명|||❌ 잘못된 예시|||✅ 올바른 예시|||이유")\n' +
-      '구분자 ||| 사용. 예시/이유 생략 가능. count ≥ 3 도달 시 Critical Patterns에 자동 승격됩니다.',
+      '<critical_requirement>\n' +
+      '워크플로우에서 배운 것을 구조화하여 저장하세요.\n\n' +
+      '**Step 1: project_memory에 최소 1개 저장 (필수)**\n' +
+      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.\n' +
+      'Pattern 구조화: "패턴|||❌ 잘못된 예시|||✅ 올바른 예시|||이유"\n' +
+      '구분자 ||| 사용. 예시/이유 생략 가능. count ≥ 3 도달 시 Critical Patterns에 자동 승격됩니다.\n\n' +
+      '**Step 2: Documentation Review (해당 시)**\n' +
+      '문서 생성/수정했다면: 명확성, 완전성, YAGNI 점검.\n\n' +
+      '**Step 3: Compound Summary (compoundDone content에 작성)**\n' +
+      '- **Problem:** 무엇이 문제였는가\n' +
+      '- **Root Cause:** 왜 발생했는가\n' +
+      '- **Solution:** 어떻게 해결했는가\n' +
+      '- **Prevention:** 재발 방지\n' +
+      '- **Symptoms:** 징후 키워드 (쉼표 구분)\n' +
+      '</critical_requirement>',
     requiresGit: false,
     requiresLastTodo: false,
   },
@@ -217,6 +227,12 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     label: 'Finalize',
     instruction:
       'compoundDone의 content에 워크플로우 요약 작성 필수.\n' +
+      '구조화 권장:\n' +
+      '- **Problem:** 무엇이 문제였는가\n' +
+      '- **Root Cause:** 왜 발생했는가\n' +
+      '- **Solution:** 어떻게 해결했는가\n' +
+      '- **Prevention:** 재발 방지\n' +
+      '- **Symptoms:** 징후 키워드\n\n' +
       'workflow_transition(action: "compoundDone", content: "<summary>")',
     requiresGit: false,
     requiresLastTodo: false,

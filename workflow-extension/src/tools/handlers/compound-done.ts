@@ -9,6 +9,47 @@ import { RESET_MARKER } from '../compact';
 import { autoCommitTodo, autoPush, getGitCwd, runGit } from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
+// ── Solution metadata extraction ────────────────────────────────
+
+/**
+ * Extract structured metadata from compound summary markdown.
+ * Matches **Root Cause:**, **Prevention:**, **Symptoms:** patterns.
+ * Returns partial object — missing fields are omitted.
+ */
+interface SolutionMeta {
+  rootCause?: string;
+  prevention?: string;
+  symptoms?: string[];
+}
+
+function extractSolutionMeta(summary: string): SolutionMeta {
+  const result: SolutionMeta = {};
+  const sectionEnd = /(?:\n\s*\*\*|\n\s*[-*]|\n\n|$)/s;
+  const rootMatch = summary.match(
+    new RegExp(`\\*\\*Root Cause:\\*\\*\\s*(.+?)${sectionEnd.source}`, 's'),
+  );
+  if (rootMatch?.[1]?.trim()) {
+    result.rootCause = rootMatch[1].trim().replace(/\n/g, ' ');
+  }
+  const prevMatch = summary.match(
+    new RegExp(`\\*\\*Prevention:\\*\\*\\s*(.+?)${sectionEnd.source}`, 's'),
+  );
+  if (prevMatch?.[1]?.trim()) {
+    result.prevention = prevMatch[1].trim().replace(/\n/g, ' ');
+  }
+  const sympMatch = summary.match(
+    new RegExp(`\\*\\*Symptoms:\\*\\*\\s*(.+?)${sectionEnd.source}`, 's'),
+  );
+  if (sympMatch?.[1]?.trim()) {
+    result.symptoms = sympMatch[1]
+      .trim()
+      .split(/[,،]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return result;
+}
+
 // ── Validators ─────────────────────────────────────────────────
 
 async function validateReflect(hctx: HandlerContext): Promise<string | null> {
@@ -419,12 +460,13 @@ async function advanceToNextTodo(
 
   let solutionPath: string | null = null;
   if (p.summary) {
+    const meta = extractSolutionMeta(p.summary);
     solutionPath = saveSolution(
       hctx.ctx.cwd,
       session.description,
       p.summary,
       session.id,
-      { tags: p.tags },
+      { tags: p.tags, ...meta },
     );
   }
 
@@ -480,12 +522,13 @@ async function finalizeWorkflow(
 
   let solutionPath: string | null = null;
   if (p.summary) {
+    const meta = extractSolutionMeta(p.summary);
     solutionPath = saveSolution(
       hctx.ctx.cwd,
       session.description,
       p.summary,
       session.id,
-      { tags: p.tags },
+      { tags: p.tags, ...meta },
     );
   }
 

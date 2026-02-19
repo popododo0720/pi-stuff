@@ -121,7 +121,7 @@ export function saveSolution(
     if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
 
     const filePath = join(dirPath, `${dateStr}-${slug}.md`);
-    const safeTitle = description.replace(/"/g, '\\"');
+    const safeTitle = description.replace(/\n/g, ' ').replace(/"/g, '\\"');
 
     const frontmatter =
       '---\n' +
@@ -143,7 +143,48 @@ export function saveSolution(
         : '') +
       '---\n\n';
 
-    writeFileSync(filePath, frontmatter + content, 'utf-8');
+    // Cross-reference: find related solutions
+    let crossRef = '';
+    try {
+      const solDir = resolve(join(cwd, SOLUTIONS_DIR));
+      const allFiles = collectSolutionFiles(solDir);
+      const titleWords = description
+        .toLowerCase()
+        .split(/[\s\p{P}\p{S}]+/u)
+        .filter((w) => w.length >= 2);
+      if (titleWords.length > 0 && allFiles.length > 0) {
+        const toFullPath = (f: { file: string; dir: string }) =>
+          f.dir ? join(solDir, f.dir, f.file) : join(solDir, f.file);
+        const scored = allFiles
+          .filter((f) => toFullPath(f) !== filePath)
+          .map((f) => {
+            const content = safeRead(toFullPath(f));
+            const title = extractTitleFromContent(
+              content,
+              f.file.replace('.md', ''),
+            );
+            const hits = titleWords.filter((w) =>
+              title.toLowerCase().includes(w),
+            ).length;
+            // Relative path from current solution's category dir
+            const linkPath = f.dir ? `../${f.dir}/${f.file}` : `../${f.file}`;
+            return { linkPath, title, hits };
+          })
+          .filter((s) => s.hits > 0)
+          .sort((a, b) => b.hits - a.hits)
+          .slice(0, 3);
+        if (scored.length > 0) {
+          crossRef =
+            '\n\n## See also\n' +
+            scored.map((s) => `- [${s.title}](${s.linkPath})`).join('\n') +
+            '\n';
+        }
+      }
+    } catch {
+      /* cross-ref is best-effort */
+    }
+
+    writeFileSync(filePath, frontmatter + content + crossRef, 'utf-8');
     return filePath;
   } catch (e) {
     console.error('[workflow] saveSolution failed:', e);
@@ -197,7 +238,11 @@ export function findRelevantSolutions(
       return allFiles
         .slice(0, topK)
         .map((s) => {
-          const title = extractTitle(fp(s));
+          const content = safeRead(fp(s));
+          const title = extractTitleFromContent(
+            content,
+            s.file.replace('.md', ''),
+          );
           return `- ${s.file.slice(0, 10)}: ${title}`;
         })
         .join('\n');
@@ -212,11 +257,13 @@ export function findRelevantSolutions(
     };
 
     // Score each solution (tag 3x > title 2x > body 1x + severity bonus)
+    // Read each file once — extract title/tags/severity/symptoms from content
     const scored = allFiles.map((s) => {
       const fullPath = fp(s);
       const content = safeRead(fullPath);
-      const title = extractTitle(fullPath);
-      const tags = extractTags(fullPath);
+      const filename = s.file.replace('.md', '');
+      const title = extractTitleFromContent(content, filename);
+      const tags = extractTagsFromContent(content);
       const titleLower = title.toLowerCase();
       const bodyLower = content.toLowerCase();
 
@@ -229,7 +276,24 @@ export function findRelevantSolutions(
 
       const sevScore =
         keywordScore > 0 ? (sevWeight[extractSeverity(content)] ?? 0) : 0;
-      const score = keywordScore + sevScore;
+
+      // Category bonus: +3 if keywords match the solution's category
+      const catBonus =
+        s.dir &&
+        keywords.some((k) =>
+          (SOLUTION_CATEGORIES[s.dir as SolutionCategory] ?? []).includes(k),
+        )
+          ? 3
+          : 0;
+
+      // Symptom bonus: x2 per matching symptom keyword
+      const symptoms = extractSymptoms(content);
+      const sympBonus =
+        symptoms.filter((sym) =>
+          keywords.some((k) => sym.toLowerCase().includes(k)),
+        ).length * 2;
+
+      const score = keywordScore + sevScore + catBonus + sympBonus;
 
       const body = extractBody(content);
       return { file: s.file, dir: s.dir, title, body, score };
@@ -243,7 +307,11 @@ export function findRelevantSolutions(
       return allFiles
         .slice(0, topK)
         .map((s) => {
-          const title = extractTitle(fp(s));
+          const content = safeRead(fp(s));
+          const title = extractTitleFromContent(
+            content,
+            s.file.replace('.md', ''),
+          );
           return `- ${s.file.slice(0, 10)}: ${title}`;
         })
         .join('\n');
@@ -265,9 +333,8 @@ export function findRelevantSolutions(
 
 // ── Frontmatter extraction helpers ───────────────────────────────
 
-/** Extract tags from frontmatter — handles inline array format */
-function extractTags(fullPath: string): string[] {
-  const content = safeRead(fullPath);
+/** Extract tags from content — handles inline array format */
+function extractTagsFromContent(content: string): string[] {
   const match = content.match(/^tags:\s*\[([^\]]*)\]/m);
   if (!match) return [];
   return match[1]
@@ -276,11 +343,10 @@ function extractTags(fullPath: string): string[] {
     .filter(Boolean);
 }
 
-/** Extract title from frontmatter */
-function extractTitle(fullPath: string): string {
-  const content = safeRead(fullPath);
+/** Extract title from content, with fallback to filename */
+function extractTitleFromContent(content: string, fallback?: string): string {
   const match = content.match(/^title:\s*"(.+)"/m);
-  return match ? match[1] : fullPath.replace(/^.*\//, '').replace('.md', '');
+  return match ? match[1] : (fallback ?? 'Untitled');
 }
 
 /** Extract severity from frontmatter — handles quoted and unquoted */
@@ -294,6 +360,21 @@ function extractBody(content: string): string {
   const endOfFrontmatter = content.indexOf('---', 4);
   if (endOfFrontmatter < 0) return content;
   return content.slice(endOfFrontmatter + 3).trim();
+}
+
+/** Extract symptoms from YAML frontmatter array (frontmatter only) */
+export function extractSymptoms(content: string): string[] {
+  // Only parse if content starts with frontmatter delimiter
+  if (!content.startsWith('---')) return [];
+  const fmEnd = content.indexOf('---', 4);
+  if (fmEnd < 0) return [];
+  const frontmatter = content.slice(0, fmEnd);
+  const matches = frontmatter.match(/^symptoms:\s*\n((?:\s+-\s*.+\n?)*)/m);
+  if (!matches?.[1]) return [];
+  return matches[1]
+    .split('\n')
+    .map((l) => l.replace(/^\s*-\s*"?/, '').replace(/"?\s*$/, ''))
+    .filter((s) => s.length > 0);
 }
 
 /** Safe file read */
@@ -322,7 +403,8 @@ export function findSolutionIndex(cwd: string): string {
     return allFiles
       .map(({ file, dir }) => {
         const fullPath = dir ? join(dirPath, dir, file) : join(dirPath, file);
-        const title = extractTitle(fullPath);
+        const content = safeRead(fullPath);
+        const title = extractTitleFromContent(content, file.replace('.md', ''));
         const relPath = dir
           ? join(SOLUTIONS_DIR, dir, file)
           : join(SOLUTIONS_DIR, file);

@@ -33,10 +33,13 @@ export async function handleImplDone(
   // ── Gate 2: retry 에스컬레이션 ──
   const maxRetries = settings.maxRetries ?? 5;
   if (session.retryCount >= maxRetries) {
+    // Reset retryCount so the user can retry after reviewing
+    session.retryCount = 0;
+    hctx.flush();
     return {
       text:
-        `⚠️ Verification has failed ${session.retryCount} times (limit: ${maxRetries}).\n` +
-        'Further retries blocked to prevent token waste.\n' +
+        `⚠️ Verification has failed ${maxRetries} times (limit: ${maxRetries}).\n` +
+        'retryCount has been reset — you can retry after addressing the issues.\n' +
         'Report the issue to the user and wait for guidance.\n' +
         'User can adjust maxRetries via /settings or help resolve the issue.',
     };
