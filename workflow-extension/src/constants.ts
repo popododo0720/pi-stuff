@@ -1,4 +1,4 @@
-import type { WorkflowSettings, WorkflowState } from './types';
+import type { CompoundStepDef, WorkflowSettings, WorkflowState } from './types';
 
 // Path and limit configuration constants
 export const TOOL_NAME = 'workflow_transition';
@@ -63,6 +63,96 @@ export const STATE_LABELS: Record<WorkflowState, string> = {
   compound: 'Compound',
   done: 'Done',
 };
+
+export const COMPOUND_STEPS: CompoundStepDef[] = [
+  {
+    id: 'reflect',
+    label: 'Reflect & Capture',
+    instruction:
+      '분석 후 project_memory(add)로 pattern/gotcha/decision 최소 1개 저장.\n' +
+      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.',
+    requiresGit: false,
+    requiresLastTodo: false,
+  },
+  {
+    id: 'cleanup',
+    label: 'Memory Cleanup',
+    instruction:
+      '오래된 메모리 항목 정리: project_memory(action: "remove").\n' +
+      '정리할 것 없으면 바로 compoundDone 호출.',
+    requiresGit: false,
+    requiresLastTodo: false,
+  },
+  {
+    id: 'gitCommit',
+    label: 'Git Commit',
+    instruction:
+      'git add -A && git status 확인.\n' +
+      '변경사항 있으면: git commit -m "chore(workflow): final - <description>"',
+    requiresGit: true,
+    requiresLastTodo: true,
+  },
+  {
+    id: 'gitPushBranch',
+    label: 'Git Push Branch',
+    instruction: 'git push origin <branch>',
+    requiresGit: true,
+    requiresLastTodo: true,
+  },
+  {
+    id: 'gitMerge',
+    label: 'Merge to Main',
+    instruction:
+      'Branch mode: git checkout main && git merge <branch> --no-ff\n' +
+      'Worktree mode: git -C <main-repo> merge <branch> --no-ff',
+    requiresGit: true,
+    requiresLastTodo: true,
+  },
+  {
+    id: 'gitPushMain',
+    label: 'Push Main',
+    instruction: 'git push origin main',
+    requiresGit: true,
+    requiresLastTodo: true,
+  },
+  {
+    id: 'gitCleanup',
+    label: 'Branch/Worktree Cleanup',
+    instruction:
+      'Worktree: git worktree remove <path> --force\n' +
+      'git branch -D <branch>\n' +
+      'git push origin --delete <branch>',
+    requiresGit: true,
+    requiresLastTodo: true,
+  },
+  {
+    id: 'finalize',
+    label: 'Finalize',
+    instruction:
+      'compoundDone의 content에 워크플로우 요약 작성 필수.\n' +
+      'workflow_transition(action: "compoundDone", content: "<summary>")',
+    requiresGit: false,
+    requiresLastTodo: false,
+  },
+];
+
+export function shouldSkipStep(
+  step: CompoundStepDef,
+  session: {
+    gitBranch?: string;
+    todos: Array<{ status: string }>;
+    activeTodoIndex: number;
+  },
+): boolean {
+  if (step.requiresGit && !session.gitBranch) return true;
+  if (
+    step.requiresLastTodo &&
+    session.todos.length > 0 &&
+    session.activeTodoIndex < session.todos.length - 1
+  )
+    return true;
+  return false;
+}
 
 export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
   approvePlan: ['plan', 'verifyPlan'],
@@ -176,31 +266,7 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +
-    'The implementation is complete. Complete ALL steps in order. Do NOT skip any step.\n\n' +
-    '### Mandatory Checklist\n' +
-    '1. **Analyze** — what worked well, what went wrong, reusable insight.\n' +
-    '2. **Save patterns** — recurring code patterns → project_memory(action: "add", category: "patterns", value: "...")\n' +
-    '3. **Save gotchas** — mistakes found and fixed → project_memory(action: "add", category: "gotchas", value: "...")\n' +
-    '4. **Save decisions** — architecture choices with rationale → project_memory(action: "add", category: "decisions", value: "...")\n' +
-    '5. **Save conventions** — project preferences discovered → project_memory(category: "conventions")\n' +
-    '6. **Memory cleanup** — remove outdated entries: project_memory(action: "remove", category: "...", index: N)\n' +
-    "   ⚠️ **compoundDone will be REJECTED** if you haven't saved at least one new pattern, gotcha, or decision via project_memory.\n" +
-    '7. **Git cleanup (MANDATORY — do NOT call compoundDone until ALL sub-steps verified)**:\n' +
-    '   Execute each sub-step, verify success, then proceed to the next:\n' +
-    '   a. `git add -A && git status` — check for remaining changes\n' +
-    '   b. If changes exist: `git commit -m "chore(workflow): final - <description>"`\n' +
-    '   c. `git push origin <branch>` — push workflow branch\n' +
-    '   d. Switch to main: `git checkout main` (branch mode) or `git -C <repo-path> merge ...` (worktree mode)\n' +
-    '   e. `git merge <branch> --no-ff -m "merge: <description>"` — merge into main\n' +
-    '   f. `git push origin main` — push main\n' +
-    '   g. If worktree: `git worktree remove <path> --force`\n' +
-    '   h. `git branch -D <branch>` — delete local branch\n' +
-    '   i. `git push origin --delete <branch>` — delete remote branch\n' +
-    '   **If any step fails, stop and report. Do NOT proceed to compoundDone.**\n' +
-    '   If git cleanup fails (merge conflict, permission, etc), call compoundDone again to skip and finalize.\n' +
-    '   Refer to the Git Cleanup Info section for branch name and worktree path.\n' +
-    '8. Call workflow_transition(action: "compoundDone", content: "<compound summary>").\n\n' +
-    'The summary will be saved to docs/solutions/ for future reference.',
+    'Follow the checklist below. Complete the current step, then call workflow_transition(action: "compoundDone") to advance.\n',
 
   done: '',
 };

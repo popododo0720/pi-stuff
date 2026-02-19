@@ -24,6 +24,14 @@ export interface PatternEntry {
   count: number;
 }
 
+export interface CompoundStepDef {
+  id: string;
+  label: string;
+  instruction: string;
+  requiresGit: boolean;
+  requiresLastTodo: boolean;
+}
+
 export interface WorkflowSession {
   id: string;
   state: WorkflowState;
@@ -44,7 +52,7 @@ export interface WorkflowSession {
     gotchas: number;
     decisions: number;
   };
-  gitSkipAttempted?: boolean;
+  compoundStep?: number;
 }
 
 export interface ConditionalRule {

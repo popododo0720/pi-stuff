@@ -159,6 +159,7 @@ export default function (pi: ExtensionAPI) {
       session.startupPrepLocked = false;
       session.gitBranch = undefined;
       session.gitWorktreePath = undefined;
+      session.compoundStep = undefined;
       cleanupVerificationResults(ctx.cwd);
       sm.set(session);
       updateStatusBar(ctx, session);

@@ -1,19 +1,151 @@
 // tools/handlers/compound-done.ts — compoundDone action handler
-// Handles TODO progression, git automation, and workflow finalization.
+// Step-by-step compound checklist: validate current step → advance → finalize.
 
+import { COMPOUND_STEPS, shouldSkipStep } from '../../constants';
 import { appendCriticalPattern } from '../../storage/critical-patterns';
 import { loadMemory, saveMemory } from '../../storage/memory';
 import { saveSolution } from '../../storage/solution';
 import { RESET_MARKER } from '../compact';
-import {
-  autoCommitTodo,
-  autoPush,
-  getGitCwd,
-  hasUncommittedChanges,
-} from '../git-automation';
+import { autoCommitTodo, autoPush, getGitCwd, runGit } from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
-/** Format TODO list with status icons. */
+// ── Validators ─────────────────────────────────────────────────
+
+async function validateReflect(hctx: HandlerContext): Promise<string | null> {
+  const memory = loadMemory(hctx.ctx.cwd);
+  const prev = hctx.session.compoundMemorySnapshot;
+  if (!prev) return null; // no snapshot → skip check
+  const hasNew =
+    memory.patterns.length > prev.patterns ||
+    memory.gotchas.length > prev.gotchas ||
+    memory.decisions.length > prev.decisions;
+  if (!hasNew) {
+    return (
+      '⚠️ No new learnings captured.\n' +
+      'Use project_memory(action: "add") to save at least one pattern, gotcha, or decision before calling compoundDone.\n' +
+      'If this task truly had no learnings, add a gotcha or decision explaining why.'
+    );
+  }
+  return null;
+}
+
+async function validateCleanup(_hctx: HandlerContext): Promise<string | null> {
+  return null;
+}
+
+async function validateGitCommit(hctx: HandlerContext): Promise<string | null> {
+  const gitCwd = getGitCwd(hctx.ctx.cwd);
+  const status = await runGit(hctx.pi, ['status', '--porcelain'], gitCwd);
+  if (!status.ok) {
+    return `❌ git status failed: ${status.stderr || `exit ${status.code}`}`;
+  }
+  if (status.stdout.length > 0) {
+    return (
+      `❌ Uncommitted changes remain:\n${status.stdout}\n` +
+      'Commit or discard, then call compoundDone.'
+    );
+  }
+  return null;
+}
+
+async function validateGitPushBranch(
+  hctx: HandlerContext,
+): Promise<string | null> {
+  const { session } = hctx;
+  if (!session.gitBranch) return null;
+  const gitCwd = getGitCwd(hctx.ctx.cwd);
+  const log = await runGit(
+    hctx.pi,
+    ['log', `origin/${session.gitBranch}..HEAD`, '--oneline'],
+    gitCwd,
+  );
+  if (!log.ok) {
+    return (
+      `❌ git log failed: ${log.stderr || `exit ${log.code}`}\n` +
+      `Run: git push origin ${session.gitBranch}`
+    );
+  }
+  if (log.stdout.length > 0) {
+    return (
+      `❌ Unpushed commits on branch:\n${log.stdout}\n` +
+      `Run: git push origin ${session.gitBranch}`
+    );
+  }
+  return null;
+}
+
+async function validateGitMerge(hctx: HandlerContext): Promise<string | null> {
+  const { session } = hctx;
+  if (!session.gitBranch) return null;
+  const gitCwd = getGitCwd(hctx.ctx.cwd);
+  const merged = await runGit(hctx.pi, ['branch', '--merged', 'main'], gitCwd);
+  if (!merged.ok) {
+    return `❌ git branch --merged failed: ${merged.stderr || `exit ${merged.code}`}`;
+  }
+  // Check each line for exact match (strip leading * and whitespace)
+  const branches = merged.stdout
+    .split('\n')
+    .map((line) => line.replace(/^\*?\s*/, '').trim())
+    .filter(Boolean);
+  if (!branches.includes(session.gitBranch)) {
+    return (
+      `❌ Branch '${session.gitBranch}' not merged into main.\n` +
+      `Run: git checkout main && git merge ${session.gitBranch} --no-ff`
+    );
+  }
+  return null;
+}
+
+async function validateGitPushMain(
+  hctx: HandlerContext,
+): Promise<string | null> {
+  const gitCwd = getGitCwd(hctx.ctx.cwd);
+  const log = await runGit(
+    hctx.pi,
+    ['log', 'origin/main..main', '--oneline'],
+    gitCwd,
+  );
+  if (!log.ok) {
+    return `❌ git log failed: ${log.stderr || `exit ${log.code}`}\nRun: git push origin main`;
+  }
+  if (log.stdout.length > 0) {
+    return `❌ Main not pushed:\n${log.stdout}\nRun: git push origin main`;
+  }
+  return null;
+}
+
+async function validateGitCleanup(
+  _hctx: HandlerContext,
+): Promise<string | null> {
+  return null;
+}
+
+async function validateFinalize(hctx: HandlerContext): Promise<string | null> {
+  if (!hctx.params.content?.trim()) {
+    return (
+      '❌ Finalize requires summary.\n' +
+      'Call: workflow_transition(action: "compoundDone", content: "<workflow summary>")'
+    );
+  }
+  return null;
+}
+
+const VALIDATORS: Record<
+  string,
+  (hctx: HandlerContext) => Promise<string | null>
+> = {
+  reflect: validateReflect,
+  cleanup: validateCleanup,
+  gitCommit: validateGitCommit,
+  gitPushBranch: validateGitPushBranch,
+  gitMerge: validateGitMerge,
+  gitPushMain: validateGitPushMain,
+  gitCleanup: validateGitCleanup,
+  finalize: validateFinalize,
+};
+
+// ── Helpers ────────────────────────────────────────────────────
+
 function formatTodoList(
   todos: Array<{ title: string; status: string }>,
 ): string {
@@ -26,7 +158,6 @@ function formatTodoList(
     .join('\n');
 }
 
-/** Extract top keywords from summary text for auto-tagging. */
 function extractAutoTags(summary: string): string[] {
   const STOPWORDS = new Set([
     'the',
@@ -135,55 +266,100 @@ function extractAutoTags(summary: string): string[] {
     .map(([w]) => w);
 }
 
+/** Advance step index past any skippable steps. */
+function advanceToNextValidStep(
+  startStep: number,
+  session: {
+    gitBranch?: string;
+    todos: Array<{ status: string }>;
+    activeTodoIndex: number;
+  },
+): number {
+  let step = startStep;
+  while (
+    step < COMPOUND_STEPS.length &&
+    shouldSkipStep(COMPOUND_STEPS[step], session)
+  ) {
+    step++;
+  }
+  return step;
+}
+
+// ── Main Handler ───────────────────────────────────────────────
+
 export async function handleCompoundDone(
   hctx: HandlerContext,
 ): Promise<HandlerResult> {
   const { session } = hctx;
 
-  // ── Capture gate: require at least one new learning ──
-  const memory = loadMemory(hctx.ctx.cwd);
-  const prevCounts = session.compoundMemorySnapshot;
-  if (prevCounts) {
-    const hasNew =
-      memory.patterns.length > prevCounts.patterns ||
-      memory.gotchas.length > prevCounts.gotchas ||
-      memory.decisions.length > prevCounts.decisions;
-    if (!hasNew) {
+  // 1. Find current valid step (skip inapplicable steps)
+  let step = advanceToNextValidStep(session.compoundStep ?? 0, session);
+
+  // 2. All steps complete → finalize
+  if (step >= COMPOUND_STEPS.length) {
+    return await completeCompound(hctx);
+  }
+
+  // 3. Validate current step
+  const stepDef = COMPOUND_STEPS[step];
+  const validator = VALIDATORS[stepDef.id];
+  if (validator) {
+    const error = await validator(hctx);
+    if (error) {
+      session.compoundStep = step;
       return {
         text:
-          '⚠️ No new learnings captured.\n' +
-          'Use project_memory(action: "add") to save at least one pattern, gotcha, or decision before calling compoundDone.\n' +
-          'If this task truly had no learnings, add a gotcha or decision explaining why.',
+          `🧠 Step ${step + 1}/${COMPOUND_STEPS.length}: **${stepDef.label}**\n\n` +
+          error,
       };
     }
   }
 
-  // ── Auto-promotion: patterns with count >= 3 → critical.md ──
-  const promoted: string[] = [];
-  const remaining = memory.patterns.filter((p) => {
-    if (p.count >= 3) {
-      appendCriticalPattern(hctx.ctx.cwd, p.text, p.count);
-      promoted.push(p.text);
-      return false;
+  // 4. Step-specific post-processing
+  if (stepDef.id === 'reflect') {
+    // Auto-promotion: patterns with count >= 3 → critical.md
+    const memory = loadMemory(hctx.ctx.cwd);
+    const promoted: string[] = [];
+    const remaining = memory.patterns.filter((p) => {
+      if (p.count >= 3) {
+        appendCriticalPattern(hctx.ctx.cwd, p.text, p.count);
+        promoted.push(p.text);
+        return false;
+      }
+      return true;
+    });
+    if (promoted.length > 0) {
+      memory.patterns = remaining;
+      saveMemory(hctx.ctx.cwd, memory);
     }
-    return true;
-  });
-  if (promoted.length > 0) {
-    memory.patterns = remaining;
-    saveMemory(hctx.ctx.cwd, memory);
   }
-  const promotedNote =
-    promoted.length > 0
-      ? `📌 Promoted to Critical: ${promoted.join(', ')}\n\n`
-      : '';
 
-  // Prepare summary + tags (saveSolution deferred to sub-handlers)
+  // 5. Advance to next valid step
+  step = advanceToNextValidStep(step + 1, session);
+  session.compoundStep = step;
+
+  // 6. All steps complete after advance
+  if (step >= COMPOUND_STEPS.length) {
+    return await completeCompound(hctx);
+  }
+
+  // 7. Show next step instruction
+  const nextDef = COMPOUND_STEPS[step];
+  return {
+    text:
+      `✅ Step passed. Next → Step ${step + 1}/${COMPOUND_STEPS.length}: **${nextDef.label}**\n\n` +
+      nextDef.instruction,
+  };
+}
+
+// ── Complete Compound (TODO advance / finalize) ────────────────
+
+async function completeCompound(hctx: HandlerContext): Promise<HandlerResult> {
+  const { session } = hctx;
   const summary = hctx.params.content?.trim() || '';
   const tags = summary ? extractAutoTags(summary) : undefined;
-
   const gitCwd = getGitCwd(hctx.ctx.cwd);
 
-  // ── Advance to next TODO ─────────────────────────────────────
   if (
     session.activeTodoIndex >= 0 &&
     session.activeTodoIndex < session.todos.length
@@ -199,19 +375,14 @@ export async function handleCompoundDone(
         summary,
         tags,
         gitCwd,
-        promotedNote,
       });
     }
-
-    // Last TODO — fall through to finalization
-    return await finalizeWorkflow(hctx, { summary, tags, promotedNote });
+    return await finalizeWorkflow(hctx, { summary, tags });
   }
-
-  // No TODOs — finalize directly
-  return await finalizeWorkflow(hctx, { summary, tags, promotedNote });
+  return await finalizeWorkflow(hctx, { summary, tags });
 }
 
-// ── Sub-handlers ─────────────────────────────────────────────────
+// ── advanceToNextTodo (preserved from original) ────────────────
 
 interface AdvanceParams {
   completedIndex: number;
@@ -219,7 +390,6 @@ interface AdvanceParams {
   summary: string;
   tags?: string[];
   gitCwd: string;
-  promotedNote: string;
 }
 
 async function advanceToNextTodo(
@@ -247,7 +417,6 @@ async function advanceToNextTodo(
     }
   }
 
-  // Save solution (one-time, inside sub-handler)
   let solutionPath: string | null = null;
   if (p.summary) {
     solutionPath = saveSolution(
@@ -264,6 +433,7 @@ async function advanceToNextTodo(
   session.activeTodoIndex = p.nextIndex;
   session.state = 'implement';
   session.retryCount = 0;
+  session.compoundStep = undefined;
 
   const doneCount = session.todos.filter((t) => t.status === 'done').length;
   const todoList = formatTodoList(session.todos);
@@ -271,7 +441,6 @@ async function advanceToNextTodo(
 
   return {
     text:
-      p.promotedNote +
       `📋 TODO [${doneCount}/${session.todos.length}] — Moving to next item\n\n` +
       `${todoList}\n\n` +
       (solutionPath ? `**Solution saved:** ${solutionPath}\n\n` : '') +
@@ -289,36 +458,19 @@ async function advanceToNextTodo(
   };
 }
 
+// ── finalizeWorkflow ───────────────────────────────────────────
+
 interface FinalizeParams {
   summary: string;
   tags?: string[];
-  promotedNote: string;
 }
 
 async function finalizeWorkflow(
   hctx: HandlerContext,
   p: FinalizeParams,
 ): Promise<HandlerResult> {
-  const { session, pi } = hctx;
+  const { session } = hctx;
 
-  // Git check with soft fail on second attempt
-  const gitCwd = getGitCwd(hctx.ctx.cwd);
-  const hasChanges = await hasUncommittedChanges(pi, gitCwd);
-  let gitWarning = '';
-
-  if (hasChanges) {
-    if (!session.gitSkipAttempted) {
-      session.gitSkipAttempted = true;
-      session.state = 'compound';
-      return {
-        text: '⚠️ Uncommitted changes detected. Complete git cleanup or call compoundDone again to skip.',
-      };
-    }
-    // Second attempt → warn and proceed
-    gitWarning = '⚠️ Skipped git cleanup — uncommitted changes remain.\n\n';
-  }
-
-  // Save solution (one-time, after git check passes or skips)
   let solutionPath: string | null = null;
   if (p.summary) {
     solutionPath = saveSolution(
@@ -347,8 +499,8 @@ async function finalizeWorkflow(
   session.startupPrepLocked = false;
   session.gitBranch = undefined;
   session.gitWorktreePath = undefined;
-  session.gitSkipAttempted = undefined;
   session.compoundMemorySnapshot = undefined;
+  session.compoundStep = undefined;
   session.state = 'done';
   session.completed = true;
 
@@ -365,8 +517,6 @@ async function finalizeWorkflow(
 
   return {
     text:
-      gitWarning +
-      p.promotedNote +
       '🎉 Workflow Complete!\n\n' +
       `**Task:** ${session.description}\n` +
       `**ID:** ${session.id}\n` +

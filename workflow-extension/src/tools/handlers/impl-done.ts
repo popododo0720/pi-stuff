@@ -91,6 +91,7 @@ export async function handleImplDone(
       };
       session.state = 'compound';
       session.retryCount = 0;
+      session.compoundStep = 0;
       const summary = formatVerificationSummary(result);
       const hasWarnings = validResults.some((r) => r.warningCount > 0);
       const reportNote = hasWarnings
@@ -152,6 +153,7 @@ export async function handleImplDone(
       };
       session.state = 'compound';
       session.retryCount = 0;
+      session.compoundStep = 0;
       return {
         text: '⚠️ No verification models configured. Skipping verification.',
         stageConfig: settings.stages.compound,

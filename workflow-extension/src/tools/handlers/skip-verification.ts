@@ -28,6 +28,7 @@ export async function handleSkipVerification(
     };
     session.state = 'compound';
     session.retryCount = 0;
+    session.compoundStep = 0;
     return {
       text: '⚠️ Implementation verification skipped. Proceeding to compound.\nNote: No automated quality gate was applied.',
       stageConfig: settings.stages.compound,

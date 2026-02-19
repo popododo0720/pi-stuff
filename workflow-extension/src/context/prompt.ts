@@ -4,10 +4,12 @@
 import { existsSync } from 'node:fs';
 import type { ExtensionContext } from '@mariozechner/pi-coding-agent';
 import {
+  COMPOUND_STEPS,
   DEFAULT_CONVENTIONS,
   LEARNING_GUIDE,
   ONBOARDING_GUIDE,
   STAGE_GUIDES,
+  shouldSkipStep,
 } from '../constants';
 import { generateRepoMap } from '../repomap/index';
 import { loadCriticalPatterns } from '../storage/critical-patterns';
@@ -171,6 +173,47 @@ function extractCurrentTodoPlan(
 }
 
 /**
+ * Build dynamic compound checklist showing current progress.
+ */
+function buildCompoundChecklist(session: WorkflowSession): string {
+  const currentStep = session.compoundStep ?? 0;
+  const lines: string[] = [];
+
+  for (let i = 0; i < COMPOUND_STEPS.length; i++) {
+    const step = COMPOUND_STEPS[i];
+    const skipped = shouldSkipStep(step, session);
+
+    if (skipped) {
+      lines.push(`⏭️ ${i + 1}. ${step.label} (skipped)`);
+    } else if (i < currentStep) {
+      lines.push(`✅ ${i + 1}. ${step.label}`);
+    } else if (i === currentStep) {
+      lines.push(`🔨 ${i + 1}. **${step.label}**\n   ${step.instruction}`);
+    } else {
+      lines.push(`⬜ ${i + 1}. ${step.label}`);
+    }
+  }
+
+  let result = `\n### Compound Checklist\n${lines.join('\n')}\n`;
+
+  // Git info for git steps
+  if (session.gitBranch) {
+    result += '\n### Git Info\n';
+    result += `- **Branch:** \`${session.gitBranch}\`\n`;
+    result += `- **Task:** ${session.description}\n`;
+    if (session.gitWorktreePath) {
+      result += `- **Worktree:** \`${session.gitWorktreePath}\`\n`;
+      result +=
+        '- **Mode:** worktree — use `git -C <main-repo-path>` for merge commands\n';
+    } else {
+      result += '- **Mode:** branch — use `git checkout main` then merge\n';
+    }
+  }
+
+  return result;
+}
+
+/**
  * Build the full system prompt injection for the current workflow state.
  * Includes: workflow stage guide, plan content, failure context, memory.
  */
@@ -231,8 +274,11 @@ export async function buildSystemPromptInjection(
       ? `\n\n${ONBOARDING_GUIDE}`
       : '';
 
-  // Stage-specific guide
-  const stageGuide = STAGE_GUIDES[session.state] || '';
+  // Stage-specific guide (compound gets dynamic checklist)
+  const stageGuide =
+    session.state === 'compound'
+      ? STAGE_GUIDES.compound + buildCompoundChecklist(session)
+      : STAGE_GUIDES[session.state] || '';
 
   // Past solutions — show index in all stages for on-demand reference
   let solutionContext = '';
@@ -337,19 +383,6 @@ export async function buildSystemPromptInjection(
     // Graceful degradation — skip repo map
   }
 
-  // Git context for compound cleanup
-  let gitCleanupContext = '';
-  if (session.state === 'compound' && session.gitBranch) {
-    gitCleanupContext =
-      '\n\n### Git Cleanup Info\n' +
-      `- **Workflow branch:** \`${session.gitBranch}\`\n` +
-      `- **Task:** ${session.description}\n` +
-      (session.gitWorktreePath
-        ? `- **Worktree path:** \`${session.gitWorktreePath}\`\n` +
-          '- **Mode:** worktree — use `git -C <main-repo-path>` for merge commands\n'
-        : '- **Mode:** branch — use `git checkout main` then merge\n');
-  }
-
   // Assemble workflow context block
   const workflowContext =
     '\n\n## Active Workflow\n\n' +
@@ -358,7 +391,6 @@ export async function buildSystemPromptInjection(
     repoMapContext +
     startupPrepContext +
     todoContext +
-    gitCleanupContext +
     onboardingContext +
     stageGuide +
     solutionContext +
