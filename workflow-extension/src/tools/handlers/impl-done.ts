@@ -33,10 +33,13 @@ export async function handleImplDone(
   // ── Gate 2: retry 에스컬레이션 ──
   const maxRetries = settings.maxRetries ?? 5;
   if (session.retryCount >= maxRetries) {
+    // Reset retryCount so the user can retry after reviewing
+    session.retryCount = 0;
+    hctx.flush();
     return {
       text:
-        `⚠️ Verification has failed ${session.retryCount} times (limit: ${maxRetries}).\n` +
-        'Further retries blocked to prevent token waste.\n' +
+        `⚠️ Verification has failed ${maxRetries} times (limit: ${maxRetries}).\n` +
+        'retryCount has been reset — you can retry after addressing the issues.\n' +
         'Report the issue to the user and wait for guidance.\n' +
         'User can adjust maxRetries via /settings or help resolve the issue.',
     };
@@ -160,9 +163,10 @@ export async function handleImplDone(
       };
     }
 
-    // CRITICAL found → stay in verifyImpl
+    // CRITICAL found → return to implement so AI can fix code
+    // (verifyImpl blocks write/edit tools; implement allows them)
     session.retryCount++;
-    session.state = 'verifyImpl';
+    session.state = 'implement';
 
     // Auto-save gotcha on first failure for feedback loop
     if (session.retryCount === 1) {
@@ -188,10 +192,22 @@ export async function handleImplDone(
       result,
       session.id,
     );
+    const actionGuide =
+      '\n\nAnalyze each CRITICAL finding and decide:\n' +
+      '- **Code bug** → fix the code, then `implDone` again\n' +
+      '- **Plan ambiguity / false positive** → `replan` to revise the plan wording, then resubmit\n' +
+      '- **Unclear** → report to user and ask for guidance' +
+      (session.retryCount >= 2
+        ? '\n\n🚨 Attempt ' +
+          session.retryCount +
+          ' — if the same CRITICAL keeps recurring, the plan wording is likely the issue, not the code.'
+        : '');
+
     return {
       text:
-        `❌ Critical issues found (attempt ${session.retryCount}). Fix 🔴 CRITICAL items to proceed.\n\n` +
+        `❌ Critical issues found (attempt ${session.retryCount}).\n\n` +
         formatVerificationSummary(result) +
+        actionGuide +
         (implResultPath ? `\n\n📋 Full results: ${implResultPath}` : ''),
     };
   } catch (e) {

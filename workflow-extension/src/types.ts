@@ -96,9 +96,16 @@ export interface StageConfig {
   thinking?: ThinkingLevel;
 }
 
+export interface DomainVerifyConfig {
+  models?: string[];
+  thinking?: ThinkingLevel;
+  enabled?: boolean;
+}
+
 export interface VerifyStageConfig {
   models: string[];
   thinking?: ThinkingLevel;
+  domains?: Record<string, DomainVerifyConfig>;
 }
 
 export interface StageConfigs {
@@ -129,6 +136,8 @@ export interface PreflightConfig {
   timeout?: number; // per-command timeout in seconds, default 60
 }
 
+export type DetailLevel = 'minimal' | 'standard' | 'detailed';
+
 export interface WorkflowSettings {
   verifyTimeout: number;
   stages: StageConfigs;
@@ -136,6 +145,7 @@ export interface WorkflowSettings {
   git?: GitAutomationConfig;
   preflight?: PreflightConfig;
   maxRetries?: number; // verify failure threshold, default 5
+  detailLevel?: DetailLevel;
 }
 
 export interface ModelVerificationResult {
@@ -146,6 +156,7 @@ export interface ModelVerificationResult {
   warningCount: number;
   infoCount: number;
   infrastructureError?: boolean;
+  domain?: string;
 }
 
 export interface VerificationResult {

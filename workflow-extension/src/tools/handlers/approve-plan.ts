@@ -99,9 +99,9 @@ export async function handleApprovePlan(
       };
     }
 
-    // Failed → stay in verifyPlan
+    // Failed → return to plan so AI can revise the plan text
     session.retryCount++;
-    session.state = 'verifyPlan';
+    session.state = 'plan';
     session.verifyPlanResult = formatVerificationSummary(result);
     const resultPath = saveVerificationResult(
       ctx.cwd,
@@ -109,11 +109,20 @@ export async function handleApprovePlan(
       result,
       session.id,
     );
+
+    const replanHint =
+      session.retryCount >= 2
+        ? '\n\n⚠️ Same issues recurring — revise the specific plan wording that verifiers flagged. ' +
+          'Do NOT resubmit the same plan text.'
+        : '';
+
     return {
       text:
-        `❌ Plan verification failed (attempt ${session.retryCount}). Please revise.\n\n` +
+        `❌ Plan verification failed (attempt ${session.retryCount}). Revise the plan and resubmit with approvePlan.\n\n` +
         formatVerificationSummary(result) +
+        replanHint +
         (resultPath ? `\n\n📋 Full results: ${resultPath}` : ''),
+      stageConfig: settings.stages.plan,
     };
   } catch (e) {
     const isNoModels =

@@ -153,11 +153,21 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     id: 'reflect',
     label: 'Reflect & Capture',
     instruction:
-      '분석 후 project_memory(add)로 pattern/gotcha/decision 최소 1개 저장.\n' +
-      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.\n\n' +
-      '**Pattern 저장 시 구조화 권장:**\n' +
-      'project_memory(add, category: "patterns", value: "패턴 설명|||❌ 잘못된 예시|||✅ 올바른 예시|||이유")\n' +
-      '구분자 ||| 사용. 예시/이유 생략 가능. count ≥ 3 도달 시 Critical Patterns에 자동 승격됩니다.',
+      '<critical_requirement>\n' +
+      '워크플로우에서 배운 것을 구조화하여 저장하세요.\n\n' +
+      '**Step 1: project_memory에 최소 1개 저장 (필수)**\n' +
+      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.\n' +
+      'Pattern 구조화: "패턴|||❌ 잘못된 예시|||✅ 올바른 예시|||이유"\n' +
+      '구분자 ||| 사용. 예시/이유 생략 가능. count ≥ 3 도달 시 Critical Patterns에 자동 승격됩니다.\n\n' +
+      '**Step 2: Documentation Review (해당 시)**\n' +
+      '문서 생성/수정했다면: 명확성, 완전성, YAGNI 점검.\n\n' +
+      '**Step 3: Compound Summary (compoundDone content에 작성)**\n' +
+      '- **Problem:** 무엇이 문제였는가\n' +
+      '- **Root Cause:** 왜 발생했는가\n' +
+      '- **Solution:** 어떻게 해결했는가\n' +
+      '- **Prevention:** 재발 방지\n' +
+      '- **Symptoms:** 징후 키워드 (쉼표 구분)\n' +
+      '</critical_requirement>',
     requiresGit: false,
     requiresLastTodo: false,
   },
@@ -217,6 +227,12 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     label: 'Finalize',
     instruction:
       'compoundDone의 content에 워크플로우 요약 작성 필수.\n' +
+      '구조화 권장:\n' +
+      '- **Problem:** 무엇이 문제였는가\n' +
+      '- **Root Cause:** 왜 발생했는가\n' +
+      '- **Solution:** 어떻게 해결했는가\n' +
+      '- **Prevention:** 재발 방지\n' +
+      '- **Symptoms:** 징후 키워드\n\n' +
       'workflow_transition(action: "compoundDone", content: "<summary>")',
     requiresGit: false,
     requiresLastTodo: false,
@@ -274,16 +290,27 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     'Each TODO will be implemented sequentially, but planned together for better architecture.\n\n' +
     '⚠️ If startup git/worktree preparation is required, keep that mandatory TODO as #1 and plan it first before feature work.\n\n' +
     '### Phase 1: Pre-Analysis (before planning)\n' +
-    'Analyze the request for:\n' +
-    '- Ambiguities or unclear requirements — ask the user to clarify.\n' +
-    '- Hidden intentions — what the user actually needs vs what they said.\n' +
-    '- Hidden dependencies or side effects on existing code.\n' +
-    '- Edge cases and potential failure points.\n' +
-    '- Whether similar work exists in past solutions.\n' +
-    '- Intent type: refactoring (safety first), new feature (patterns first), bugfix (root cause first).\n\n' +
+    '<critical_requirement>\n' +
+    'Before writing the plan, complete this analysis:\n\n' +
+    '**Impact Analysis:**\n' +
+    '- Identify ALL files that will be touched and their dependents\n' +
+    '- Map user flows affected — who uses this? what breaks if wrong?\n' +
+    '- Check for hidden dependencies or side effects\n\n' +
+    '**Stakeholder Perspectives:**\n' +
+    '- Developer: maintainable? testable? debuggable?\n' +
+    '- User: breaks existing behavior? UX regression?\n' +
+    '- Ops: deployment impact? monitoring? rollback plan?\n' +
+    '- Security: new attack surface? auth changes? data exposure?\n\n' +
+    '**Gap Detection:**\n' +
+    '- What is NOT mentioned but probably needed? (error handling, logging, tests)\n' +
+    '- Edge cases the user has not considered\n' +
+    '- Intent type: refactoring (safety first), new feature (patterns first), bugfix (root cause first)\n' +
+    '- Check Relevant Past Solutions below for documented learnings\n' +
+    '</critical_requirement>\n\n' +
     '### Phase 2: Research\n' +
     '- Read relevant source files to understand current patterns.\n' +
-    '- Check existing conventions in project memory.\n\n' +
+    '- Check existing conventions in project memory.\n' +
+    '- **Review "Relevant Past Solutions" section below** — apply documented learnings.\n\n' +
     '### Phase 3: Write the Plan\n' +
     '**If TODOs are set**: Structure the plan with clear sections for each TODO:\n' +
     '```\n' +
@@ -294,6 +321,11 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- Summary\n' +
     '- Steps...\n' +
     '```\n\n' +
+    '### Plan Detail Level\n' +
+    'Match plan depth to task complexity:\n\n' +
+    '**MINIMAL** — 간단한 변경 (1-2 파일): 변경 파일과 요약만.\n' +
+    '**STANDARD** (기본): 파일별 변경사항, 시그니처, cross-file impact, verification criteria.\n' +
+    '**DETAILED** — 대규모 리팩토링: 전후 비교, Phase 분리, 롤백 계획.\n\n' +
     'The plan MUST include:\n' +
     '- **Summary** — what and why, in one paragraph.\n' +
     '- **Step-by-step tasks** — each with exact file path (from project root) and specific change description.\n' +
@@ -339,13 +371,12 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '⚠️ NEVER bypass verification. If verification fails, fix the issues and resubmit. Do NOT attempt manual overrides.',
 
   verifyImpl:
-    '## Current Stage: ✅ Implementation Verification — FAILED / HALTED\n\n' +
-    '⚠️ MANDATORY: Fix ALL code issues found by verification. Do NOT bypass verification for code problems.\n' +
-    'For infrastructure errors (rate limit, timeout), call workflow_transition(action: "skipVerification") to proceed.\n\n' +
-    '1. Read the verification feedback above carefully.\n' +
-    '2. Fix every 🔴 CRITICAL and 🟡 WARNING issue in the implementation.\n' +
-    '3. Call workflow_transition(action: "replan") to return to planning if the plan itself needs changes.\n' +
-    '4. Or fix the code and call workflow_transition(action: "implDone", content: "<implementation notes>") to re-verify.',
+    '## Current Stage: ✅ Implementation Verification — HALTED\n\n' +
+    'Verification was halted due to infrastructure errors (rate limit, quota, timeout).\n' +
+    'This is NOT a code issue — do NOT modify code.\n\n' +
+    '- Retry: call workflow_transition(action: "implDone", content: "<notes>") when the model is available.\n' +
+    '- Skip: call workflow_transition(action: "skipVerification") to proceed without verification.\n' +
+    '- Replan: call workflow_transition(action: "replan", reason: "...") if the plan needs changes.',
 
   compound:
     '## Current Stage: 🧠 Compound\n\n' +
