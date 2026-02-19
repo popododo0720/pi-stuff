@@ -6,11 +6,8 @@ import { PERFORMANCE_DOMAIN } from './performance';
 import { SECURITY_DOMAIN } from './security';
 import { SIMPLICITY_DOMAIN } from './simplicity';
 
-export interface VerificationDomain {
-  id: string;
-  name: string;
-  implPrompt: string;
-}
+import type { VerificationDomain } from './types';
+export type { VerificationDomain } from './types';
 
 export const ALL_DOMAINS: VerificationDomain[] = [
   SECURITY_DOMAIN,

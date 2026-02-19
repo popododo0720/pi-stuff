@@ -1,6 +1,7 @@
 // tools/handlers/impl-done.ts — implDone action handler
 // Runs parallel impl verification, transitions based on result.
 
+import { SELF_AUDIT_TEMPLATE } from '../../constants';
 import { loadMemory, saveMemory } from '../../storage/memory';
 import {
   formatVerificationSummary,
@@ -30,7 +31,35 @@ export async function handleImplDone(
     };
   }
 
-  // ── Gate 2: retry 에스컬레이션 ──
+  // ── Gate 2: self-audit structure check ──
+  const contentText = params.content.trim();
+  // Extract self-audit section (from header to next ## or --- or end)
+  const lines = contentText.split('\n');
+  const headerLine = lines.findIndex((l) => /^## Self-Audit/i.test(l));
+  let auditSection = '';
+  if (headerLine >= 0) {
+    let endLine = lines.length;
+    for (let i = headerLine + 1; i < lines.length; i++) {
+      if (/^## /i.test(lines[i]) || /^---/.test(lines[i])) {
+        endLine = i;
+        break;
+      }
+    }
+    auditSection = lines.slice(headerLine + 1, endLine).join('\n');
+  }
+  const hasCheckedItem = /^- \[x\]/im.test(auditSection);
+  if (headerLine < 0 || !hasCheckedItem) {
+    return {
+      text:
+        '❌ implDone requires a Self-Audit section with at least one checked item.\n\n' +
+        'Include this structure in your content parameter:\n```\n' +
+        SELF_AUDIT_TEMPLATE +
+        '\n```\n\n' +
+        'This is a mandatory structural guard. Complete the audit before submitting.',
+    };
+  }
+
+  // ── Gate 3: retry 에스컬레이션 ──
   const maxRetries = settings.maxRetries ?? 5;
   if (session.retryCount >= maxRetries) {
     // Reset retryCount so the user can retry after reviewing
@@ -45,7 +74,7 @@ export async function handleImplDone(
     };
   }
 
-  // ── Gate 3: pre-flight (lint/tsc/test) ──
+  // ── Gate 4: pre-flight (lint/tsc/test) ──
   const preflightConfig = settings.preflight;
   if (preflightConfig?.enabled !== false) {
     const commands = preflightConfig?.commands?.length
@@ -121,11 +150,15 @@ export async function handleImplDone(
       );
       const haltedModels = result.results
         .filter((r) => r.infrastructureError)
-        .map((r) => r.model)
+        .map((r) => {
+          const label = r.domain ? `${r.model}/${r.domain}` : r.model;
+          const kind = r.verificationErrorType ?? 'infrastructure';
+          return `${label} (${kind})`;
+        })
         .join(', ');
       return {
         text:
-          '⛔ Verification halted — model infrastructure error (rate limit / quota / timeout).\n\n' +
+          '⛔ Verification halted — infrastructure/format error (rate limit / quota / timeout / unstructured output).\n\n' +
           `Affected: ${haltedModels}\n\n` +
           formatVerificationSummary(result) +
           '\n\nRetry `implDone` when the model is available again.\n' +
@@ -150,12 +183,20 @@ export async function handleImplDone(
       session.compoundStep = 0;
       const summary = formatVerificationSummary(result);
       const hasWarnings = validResults.some((r) => r.warningCount > 0);
+      const skippedDomains = result.results.filter(
+        (r) => r.infrastructureError && r.retryAttempt,
+      );
+      const skippedNote =
+        skippedDomains.length > 0
+          ? `\n\n⚠️ **${skippedDomains.length} domain(s) skipped** (persistent infra/format error after retry). Results based on ${validResults.length} successful verifiers.`
+          : '';
       const reportNote = hasWarnings
         ? '\n\n📋 **Verification Report** (advisory — not blocking):\n'
         : '\n\n';
       return {
         text:
           '✅ Implementation verified! Moving to compound stage.\n' +
+          skippedNote +
           reportNote +
           summary +
           '\n\nAnalyze what you learned and call workflow_transition(action: "compoundDone", content: "<summary>").',
@@ -165,7 +206,13 @@ export async function handleImplDone(
 
     // CRITICAL found → return to implement so AI can fix code
     // (verifyImpl blocks write/edit tools; implement allows them)
-    session.retryCount++;
+    // Only count code CRITICAL failures toward retry budget (not infra/format/non-critical)
+    const hasCodeFailure = validResults.some(
+      (r) => !r.passed && !r.verificationErrorType && r.criticalCount > 0,
+    );
+    if (hasCodeFailure) {
+      session.retryCount++;
+    }
     session.state = 'implement';
 
     // Auto-save gotcha on first failure for feedback loop
@@ -205,7 +252,7 @@ export async function handleImplDone(
 
     return {
       text:
-        `❌ Critical issues found (attempt ${session.retryCount}).\n\n` +
+        `❌ Critical issues found (code verification failure ${session.retryCount}/${maxRetries}).\n\n` +
         formatVerificationSummary(result) +
         actionGuide +
         (implResultPath ? `\n\n📋 Full results: ${implResultPath}` : ''),

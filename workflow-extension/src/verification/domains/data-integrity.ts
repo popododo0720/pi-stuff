@@ -1,6 +1,6 @@
 // verification/domains/data-integrity.ts — Data integrity domain checklist
 
-import type { VerificationDomain } from './index';
+import type { VerificationDomain } from './types';
 
 export const DATA_INTEGRITY_DOMAIN: VerificationDomain = {
   id: 'data-integrity',

@@ -277,6 +277,14 @@ export const ONBOARDING_GUIDE =
   '4. Once setup is done, proceed to planning.\n\n' +
   'Keep it short. If the user says "skip", proceed immediately.\n';
 
+// Shared self-audit template used in both gate rejection and stage guide
+export const SELF_AUDIT_TEMPLATE =
+  '## Self-Audit\n' +
+  '- [x] Re-read all changed function signatures and return types\n' +
+  '- [x] Verified parser/format consistency across files\n' +
+  '- [x] Checked edge cases: (list specific ones)\n' +
+  '- [x] Ran verification commands: (list results)';
+
 export const STAGE_GUIDES: Record<WorkflowState, string> = {
   plan:
     '## Current Stage: 📝 Planning\n\n' +
@@ -362,8 +370,11 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- If stuck on one item, note the blocker and continue with the next.\n' +
     '- **Pre-flight checks**: lint/type-check/test are run automatically when you call implDone.\n' +
     '  If they fail, fix the errors and retry. No need to run manually.\n' +
-    '- **MANDATORY**: Include implementation notes in content parameter when calling implDone.\n' +
-    '  workflow_transition(action: "implDone", content: "<decisions, trade-offs, context>")\n' +
+    '- **MANDATORY**: Include a Self-Audit section in content parameter when calling implDone.\n' +
+    '  Your content MUST include:\n  ```\n  ' +
+    SELF_AUDIT_TEMPLATE.replace(/\n/g, '\n  ') +
+    '\n  ```\n' +
+    '  Without this section, implDone will be rejected.\n' +
     '- **Quick checklist (before implDone)**:\n' +
     "     a. Skim the plan's current TODO section — are all steps addressed?\n" +
     '     b. Run verification criteria from the plan (grep, lint, test).\n' +

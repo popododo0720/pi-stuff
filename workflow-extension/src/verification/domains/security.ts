@@ -1,6 +1,6 @@
 // verification/domains/security.ts — Security domain checklist
 
-import type { VerificationDomain } from './index';
+import type { VerificationDomain } from './types';
 
 export const SECURITY_DOMAIN: VerificationDomain = {
   id: 'security',

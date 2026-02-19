@@ -1,6 +1,6 @@
 // verification/domains/performance.ts — Performance domain checklist
 
-import type { VerificationDomain } from './index';
+import type { VerificationDomain } from './types';
 
 export const PERFORMANCE_DOMAIN: VerificationDomain = {
   id: 'performance',
