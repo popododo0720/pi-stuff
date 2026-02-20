@@ -193,8 +193,15 @@ export class SessionWatcher implements vscode.Disposable {
         ? (newWorkflows.get(newActiveId) ?? null)
         : null;
 
-      // Fire active session change
-      const changed = JSON.stringify(this.state) !== JSON.stringify(newState);
+      // Fire active session change (lightweight comparison to avoid serializing large fields)
+      const changed = this.state?.id !== newState?.id
+        || this.state?.state !== newState?.state
+        || this.state?.description !== newState?.description
+        || this.state?.retryCount !== newState?.retryCount
+        || this.state?.completed !== newState?.completed
+        || this.state?.activeTodoIndex !== newState?.activeTodoIndex
+        || this.state?.planContent?.length !== newState?.planContent?.length
+        || this.state?.verifyPlanResult?.length !== newState?.verifyPlanResult?.length;
       this.state = newState;
       if (changed) this._onDidChange.fire(this.state);
 

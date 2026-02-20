@@ -22,6 +22,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private rpcClient: PiRpcClient | null = null;
   private eventDisposables: Array<() => void> = [];
 
+  private readonly _onDidResolve = new vscode.EventEmitter<void>();
+  readonly onDidResolve = this._onDidResolve.event;
+
   constructor(private readonly extensionUri: vscode.Uri) {}
 
   // ── WebviewViewProvider ──────────────────────────────────────
@@ -47,6 +50,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     webviewView.onDidDispose(() => {
       this.view = undefined;
     });
+
+    // Fire after setup so extension can auto-start pi
+    this._onDidResolve.fire();
+
+    // Re-fire on visibility changes for reconnection
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible && !this.rpcClient?.isRunning()) {
+        this._onDidResolve.fire();
+      }
+    });
   }
 
   // ── Public API ───────────────────────────────────────────────
@@ -71,6 +84,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   dispose(): void {
     this.unbindRpcEvents();
+    this._onDidResolve.dispose();
   }
 
   // ── RPC → Webview ────────────────────────────────────────────

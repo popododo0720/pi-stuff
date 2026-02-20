@@ -44,7 +44,6 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // ── Phase 2: Cleanup helper ──────────────────────────────────
-  // Note: does NOT reset stoppingIntentionally — caller controls that flag
   function cleanupChat(): void {
     chatViewProvider.setRpcClient(null);
     currentBridge?.dispose();
@@ -52,63 +51,60 @@ export function activate(context: vscode.ExtensionContext): void {
     currentBridge = null;
   }
 
-  // ── Phase 2: Chat commands (registered regardless of workspace) ──
+  // ── Phase 2: Start pi process (extracted for auto-start) ─────
+  function startPi(): void {
+    if (currentClient?.isRunning()) return;
+    // Workspace trust gate: do not auto-spawn processes in untrusted workspaces
+    if (!vscode.workspace.isTrusted) return;
+
+    const config = vscode.workspace.getConfiguration('pi-workflow');
+    const piPath = config.get<string>('piPath') || 'pi';
+    const defaultProvider = config.get<string>('defaultProvider') || undefined;
+    const defaultModel = config.get<string>('defaultModel') || undefined;
+    const extraArgs = config.get<string[]>('extraArgs') || [];
+
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!cwd) return;
+
+    const client = new PiRpcClient({
+      cwd,
+      piPath,
+      provider: defaultProvider,
+      model: defaultModel,
+      extraArgs,
+    });
+
+    client.on('error', (err: Error) => {
+      if (currentClient !== client) return;
+      vscode.window.showErrorMessage(`Pi error: ${err.message}`);
+      cleanupChat();
+      stoppingIntentionally = false;
+    });
+    client.on('exit', (code: number | null) => {
+      if (currentClient !== client) return;
+      if (!stoppingIntentionally) {
+        vscode.window.showInformationMessage(`Pi exited (code ${code ?? 'unknown'}).`);
+      }
+      cleanupChat();
+      stoppingIntentionally = false;
+    });
+    client.on('stderr', (text: string) => {
+      outputChannel.appendLine(`[pi stderr] ${text}`);
+    });
+
+    client.start();
+
+    const bridge = new ExtensionUIBridge(client);
+    bridge.bind();
+    chatViewProvider.setRpcClient(client);
+
+    currentClient = client;
+    currentBridge = bridge;
+  }
+
+  // ── Phase 2: Chat commands ───────────────────────────────────
   context.subscriptions.push(
-    vscode.commands.registerCommand('pi.startChat', () => {
-      if (currentClient?.isRunning()) {
-        vscode.window.showInformationMessage('Pi chat already running.');
-        return;
-      }
-
-      const config = vscode.workspace.getConfiguration('pi-workflow');
-      const piPath = config.get<string>('piPath') || 'pi';
-      const defaultProvider = config.get<string>('defaultProvider') || undefined;
-      const defaultModel = config.get<string>('defaultModel') || undefined;
-      const extraArgs = config.get<string[]>('extraArgs') || [];
-
-      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!cwd) {
-        vscode.window.showErrorMessage('Open a folder first to start Pi chat.');
-        return;
-      }
-
-      const client = new PiRpcClient({
-        cwd,
-        piPath,
-        provider: defaultProvider,
-        model: defaultModel,
-        extraArgs,
-      });
-
-      // Register listeners BEFORE start — guard against stale handler
-      client.on('error', (err: Error) => {
-        if (currentClient !== client) return; // stale handler
-        vscode.window.showErrorMessage(`Pi error: ${err.message}`);
-        cleanupChat();
-        stoppingIntentionally = false;
-      });
-      client.on('exit', (code: number | null) => {
-        if (currentClient !== client) return; // stale handler
-        if (!stoppingIntentionally) {
-          vscode.window.showInformationMessage(`Pi exited (code ${code ?? 'unknown'}).`);
-        }
-        cleanupChat();
-        stoppingIntentionally = false;
-      });
-      client.on('stderr', (text: string) => {
-        outputChannel.appendLine(`[pi stderr] ${text}`);
-      });
-
-      client.start();
-
-      const bridge = new ExtensionUIBridge(client);
-      bridge.bind();
-
-      chatViewProvider.setRpcClient(client);
-
-      currentClient = client;
-      currentBridge = bridge;
-    }),
+    vscode.commands.registerCommand('pi.startChat', () => startPi()),
 
     vscode.commands.registerCommand('pi.stopChat', () => {
       if (currentClient) {
@@ -154,6 +150,56 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider('pi.files', filesTree),
   );
   context.subscriptions.push(workflowTree, todoTree, filesTree);
+
+  // ── Auto-reveal chat when Pi sidebar opens ────────────────────
+  statusTreeView.onDidChangeVisibility((e) => {
+    if (e.visible) {
+      vscode.commands.executeCommand('pi.chat.focus');
+    }
+  });
+
+  // ── Auto-start pi + workflow resume on chat resolve ────────────
+  context.subscriptions.push(
+    chatViewProvider.onDidResolve(() => {
+      startPi();
+
+      // Auto-resume: getState() as readiness probe, then send /workflow
+      if (currentClient) {
+        const client = currentClient;
+        const session = sessionWatcher.getState();
+        if (session && session.state !== 'done' && !session.completed) {
+          client
+            .getState()
+            .then(() => {
+              if (currentClient === client) {
+                client.prompt('/workflow').catch(() => {});
+              }
+            })
+            .catch(() => {}); // pi not ready yet, skip
+        }
+      }
+    }),
+  );
+
+  // ── First-launch: move chat to secondary sidebar ──────────────
+  const hasMovedChat = context.globalState.get<boolean>('pi.chatMovedToAux', false);
+  if (!hasMovedChat) {
+    setTimeout(async () => {
+      try {
+        await vscode.commands.executeCommand('pi.chat.focus');
+        await new Promise((r) => setTimeout(r, 500));
+        await vscode.commands.executeCommand(
+          'workbench.action.moveViewToSecondarySideBar',
+        );
+        await context.globalState.update('pi.chatMovedToAux', true);
+      } catch {
+        vscode.window.showInformationMessage(
+          'Tip: Right-click "Pi Chat" tab → "Move to Secondary Side Bar"',
+        );
+        await context.globalState.update('pi.chatMovedToAux', true);
+      }
+    }, 2000);
+  }
 
   // ── Webview Panels ───────────────────────────────────────────
   const planPanel = new PlanPanel();
