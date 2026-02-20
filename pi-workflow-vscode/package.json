@@ -89,8 +89,16 @@
       },
       {
         "command": "pi.newSession",
-        "title": "Pi: New Session",
-        "icon": "$(refresh)"
+        "title": "Pi: New Session"
+      },
+      {
+        "command": "pi.newWorkflow",
+        "title": "Pi: New Workflow",
+        "icon": "$(add)"
+      },
+      {
+        "command": "pi.selectTodo",
+        "title": "Pi: Select TODO"
       },
       {
         "command": "pi.selectWorkflow",
@@ -100,7 +108,7 @@
     "menus": {
       "view/title": [
         {
-          "command": "pi.newSession",
+          "command": "pi.newWorkflow",
           "when": "view == pi.chat",
           "group": "navigation"
         }

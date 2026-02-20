@@ -133,6 +133,30 @@ export function activate(context: vscode.ExtensionContext): void {
           });
       }
     }),
+
+    vscode.commands.registerCommand('pi.newWorkflow', async () => {
+      if (!currentClient?.isRunning()) {
+        startPi();
+        await new Promise((r) => setTimeout(r, 1500));
+        if (!currentClient?.isRunning()) {
+          vscode.window.showErrorMessage('Pi is not running.');
+          return;
+        }
+      }
+      const description = await vscode.window.showInputBox({
+        prompt: 'Describe the task for the new workflow',
+        placeHolder: 'e.g. Add user authentication module',
+      });
+      if (description?.trim()) {
+        if (!currentClient?.isRunning()) {
+          vscode.window.showErrorMessage('Pi is no longer running.');
+          return;
+        }
+        currentClient.prompt(`/workflow ${description.trim()}`).catch((err) =>
+          vscode.window.showErrorMessage(`Failed to start workflow: ${err}`),
+        );
+      }
+    }),
   );
 
   // ── Phase 1: Requires workspace folder ───────────────────────
