@@ -32,7 +32,7 @@ export class ExtensionUIBridge {
   // ── Request routing ──────────────────────────────────────────
 
   private async handleRequest(req: ExtensionUIRequest): Promise<void> {
-    // Fire-and-forget methods — no response needed
+    // Fire-and-forget methods — no response needed, no id required
     switch (req.method) {
       case 'notify':
         this.handleNotify(req);
@@ -44,6 +44,9 @@ export class ExtensionUIBridge {
         // Ignored — fire-and-forget
         return;
     }
+
+    // Dialog methods require a valid id for response correlation
+    if (!req.id || typeof req.id !== 'string') return;
 
     // Dialog methods — always send a response
     let result: Partial<ExtensionUIResponse>;
