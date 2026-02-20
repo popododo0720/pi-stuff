@@ -145,8 +145,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const todoTree = new TodoTreeProvider();
   const filesTree = new ChangedFilesTreeProvider(workspaceRoot);
 
+  const statusTreeView = vscode.window.createTreeView('pi.status', {
+    treeDataProvider: workflowTree,
+  });
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('pi.status', workflowTree),
+    statusTreeView,
     vscode.window.registerTreeDataProvider('pi.todos', todoTree),
     vscode.window.registerTreeDataProvider('pi.files', filesTree),
   );
@@ -171,6 +174,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Watcher → UI Binding (subscribe BEFORE start) ────────────
   const watcherDisposable = sessionWatcher.onDidChange(syncUI);
   context.subscriptions.push(watcherDisposable);
+
+  // ── Workflow list → tree binding ──────────────────────────────
+  const listDisposable = sessionWatcher.onDidChangeList((list) => {
+    workflowTree.updateList(list);
+  });
+  context.subscriptions.push(listDisposable);
 
   // ── Start watcher (async load begins) ────────────────────────
   sessionWatcher.start();
@@ -209,6 +218,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
+    vscode.commands.registerCommand('pi.selectWorkflow', async (id: string) => {
+      await sessionWatcher.setActiveId(id);
+    }),
   );
 }
 

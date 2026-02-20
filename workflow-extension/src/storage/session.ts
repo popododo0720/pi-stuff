@@ -27,7 +27,13 @@ const VALID_TODO_STATUSES: Set<string> = new Set(['pending', 'active', 'done']);
 
 // ── Path helpers ───────────────────────────────────────────────
 
+/** Safe ID pattern — prevents path traversal. */
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
 function resolveWorkflowPath(cwd: string, id: string): string {
+  if (!SAFE_ID_RE.test(id)) {
+    throw new Error(`Invalid workflow ID: ${id}`);
+  }
   return resolve(join(cwd, WORKFLOWS_DIR, `${id}.json`));
 }
 
@@ -47,7 +53,9 @@ export function getActiveWorkflowId(cwd: string): string | null {
   try {
     const path = resolveActivePath(cwd);
     if (!existsSync(path)) return null;
-    return readFileSync(path, 'utf-8').trim() || null;
+    const id = readFileSync(path, 'utf-8').trim();
+    if (!id || !SAFE_ID_RE.test(id)) return null;
+    return id;
   } catch {
     return null;
   }

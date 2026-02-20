@@ -82,6 +82,10 @@
         "command": "pi.newSession",
         "title": "Pi: New Session",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "pi.selectWorkflow",
+        "title": "Pi: Select Workflow"
       }
     ],
     "menus": {

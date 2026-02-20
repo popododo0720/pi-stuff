@@ -64,9 +64,9 @@ export function registerWorkflowCommand(
           if (!selected) return;
 
           if (selected !== '➕ Start new workflow') {
-            // Resume selected workflow
-            const selectedIdx = options.indexOf(selected);
-            const wf = activeWorkflows[selectedIdx];
+            // Resume selected workflow — extract ID from selection string
+            const wf = activeWorkflows.find((w) => selected.includes(w.id));
+            if (!wf) return;
             const loaded = loadWorkflowById(ctx.cwd, wf.id);
             if (loaded) {
               setActiveWorkflowId(ctx.cwd, loaded.id);
