@@ -29,7 +29,7 @@ export class WorkflowTreeProvider
 
     // Status
     const statusItem = new vscode.TreeItem(
-      `Status: ${STATE_EMOJI[s.state]} ${STATE_LABELS[s.state]}`,
+      `${STATE_EMOJI[s.state]} ${STATE_LABELS[s.state]}`,
       vscode.TreeItemCollapsibleState.None,
     );
     statusItem.iconPath = new vscode.ThemeIcon('symbol-event');
@@ -37,7 +37,7 @@ export class WorkflowTreeProvider
 
     // Description
     const descItem = new vscode.TreeItem(
-      `Task: ${s.description}`,
+      `📋 ${s.description}`,
       vscode.TreeItemCollapsibleState.None,
     );
     descItem.iconPath = new vscode.ThemeIcon('note');

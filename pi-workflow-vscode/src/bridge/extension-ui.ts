@@ -45,8 +45,10 @@ export class ExtensionUIBridge {
         return;
     }
 
-    // Dialog methods require a valid id for response correlation
-    if (!req.id || typeof req.id !== 'string') return;
+    // Dialog methods require an id for response correlation.
+    // Coerce non-string ids to string to prevent silent hang on malformed input.
+    const reqId = typeof req.id === 'string' ? req.id : String(req.id ?? '');
+    req = { ...req, id: reqId };
 
     // Dialog methods — always send a response
     let result: Partial<ExtensionUIResponse>;

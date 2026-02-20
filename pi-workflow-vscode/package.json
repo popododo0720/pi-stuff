@@ -37,6 +37,11 @@
         {
           "id": "pi.files",
           "name": "Changed Files"
+        },
+        {
+          "id": "pi.chat",
+          "type": "webview",
+          "name": "Pi Chat"
         }
       ]
     },
@@ -64,8 +69,60 @@
         "command": "pi.refresh",
         "title": "Pi: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "pi.startChat",
+        "title": "Pi: Start Chat"
+      },
+      {
+        "command": "pi.stopChat",
+        "title": "Pi: Stop Chat"
+      },
+      {
+        "command": "pi.newSession",
+        "title": "Pi: New Session",
+        "icon": "$(refresh)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "pi.newSession",
+          "when": "view == pi.chat",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Pi Workflow",
+      "properties": {
+        "pi-workflow.piPath": {
+          "type": "string",
+          "default": "pi",
+          "scope": "machine",
+          "description": "Path to the pi binary"
+        },
+        "pi-workflow.defaultProvider": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Default LLM provider (e.g. anthropic, openai)"
+        },
+        "pi-workflow.defaultModel": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Default model ID"
+        },
+        "pi-workflow.extraArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "scope": "machine",
+          "description": "Extra arguments passed to pi"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",
