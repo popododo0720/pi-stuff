@@ -7,7 +7,16 @@ export {
 export { loadMemory, resolveMemoryPath, saveMemory } from './memory';
 export { listModules, loadMatchingModules } from './modules';
 export { savePlanDocument, toSlug } from './plan';
-export { loadSessionFromDisk, saveSessionToDisk } from './session';
+export {
+  deleteWorkflow,
+  getActiveWorkflowId,
+  listWorkflows,
+  loadSessionFromDisk,
+  loadWorkflowById,
+  migrateSessionIfNeeded,
+  saveSessionToDisk,
+  setActiveWorkflowId,
+} from './session';
 export { loadSettings, saveSettings } from './settings';
 export {
   classifyCategory,

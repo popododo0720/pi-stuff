@@ -37,6 +37,7 @@ export interface CompoundStepDef {
 
 export interface WorkflowSession {
   id: string;
+  name?: string;
   state: WorkflowState;
   description: string;
   planContent: string;

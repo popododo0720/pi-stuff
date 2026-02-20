@@ -1,7 +1,7 @@
 // session-manager.ts — Encapsulated workflow session state
 // Replaces the global `let session` / `let currentCwd` closure pattern in index.ts.
 
-import { saveSessionToDisk } from './storage/session';
+import { migrateSessionIfNeeded, saveSessionToDisk } from './storage/session';
 import type { WorkflowSession } from './types';
 
 /**
@@ -35,5 +35,6 @@ export class SessionManager {
 
   setCwd(cwd: string): void {
     this.cwd = cwd;
+    migrateSessionIfNeeded(cwd);
   }
 }

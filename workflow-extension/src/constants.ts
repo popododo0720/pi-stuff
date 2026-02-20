@@ -9,6 +9,8 @@ import type {
 // Path and limit configuration constants
 export const TOOL_NAME = 'workflow_transition';
 export const MEMORY_DIR = '.pi';
+export const WORKFLOWS_DIR = '.pi/workflows';
+export const ACTIVE_WORKFLOW_FILE = 'active';
 export const MEMORY_FILE = 'workflow-memory.json';
 export const SETTINGS_FILE = 'workflow-settings.json';
 export const CONVENTIONS_DIR = 'conventions';
