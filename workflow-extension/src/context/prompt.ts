@@ -13,7 +13,11 @@ import {
 } from '../constants';
 import { generateRepoMap } from '../repomap/index';
 import { loadCriticalPatterns } from '../storage/critical-patterns';
-import { loadMemory, resolveMemoryPath } from '../storage/memory';
+import {
+  loadMemory,
+  loadWorkflowMemory,
+  resolveMemoryPath,
+} from '../storage/memory';
 import { listModules, loadMatchingModules } from '../storage/modules';
 import { loadSettings } from '../storage/settings';
 import { findRelevantSolutions, findSolutionIndex } from '../storage/solution';
@@ -21,6 +25,7 @@ import type {
   ConditionalRule,
   ModuleConventions,
   ProjectMemory,
+  WorkflowMemory,
   WorkflowSession,
   WorkflowSettings,
 } from '../types';
@@ -39,6 +44,7 @@ export function memoryToContext(
     name: string;
     data: ModuleConventions;
   }> = [],
+  workflowMemory?: WorkflowMemory,
 ): string {
   const parts: string[] = [];
 
@@ -95,14 +101,15 @@ export function memoryToContext(
     }
   }
 
-  // Compound learnings — show availability (model searches on demand via project_memory get)
+  // Compound learnings — per-workflow when available, otherwise global
+  const compound = workflowMemory ?? memory;
   const compoundCounts: string[] = [];
-  if (memory.patterns.length > 0)
-    compoundCounts.push(`patterns: ${memory.patterns.length}`);
-  if (memory.gotchas.length > 0)
-    compoundCounts.push(`gotchas: ${memory.gotchas.length}`);
-  if (memory.decisions.length > 0)
-    compoundCounts.push(`decisions: ${memory.decisions.length}`);
+  if (compound.patterns.length > 0)
+    compoundCounts.push(`patterns: ${compound.patterns.length}`);
+  if (compound.gotchas.length > 0)
+    compoundCounts.push(`gotchas: ${compound.gotchas.length}`);
+  if (compound.decisions.length > 0)
+    compoundCounts.push(`decisions: ${compound.decisions.length}`);
   if (compoundCounts.length > 0) {
     parts.push(
       '### Compound Learnings (searchable)\n' +
@@ -233,7 +240,15 @@ export async function buildSystemPromptInjection(
       const memory = loadMemory(ctx.cwd);
       const recentFiles = extractRecentFilePaths(ctx);
       const matchedModules = loadMatchingModules(ctx.cwd, recentFiles);
-      memoryContext = memoryToContext(memory, recentFiles, matchedModules);
+      const wfMem = session?.id
+        ? loadWorkflowMemory(ctx.cwd, session.id)
+        : undefined;
+      memoryContext = memoryToContext(
+        memory,
+        recentFiles,
+        matchedModules,
+        wfMem,
+      );
       needsOnboarding =
         memory.conventions.length === 0 &&
         memory.rules.length === 0 &&

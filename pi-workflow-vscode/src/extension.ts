@@ -268,6 +268,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── UI Sync Helper ────────────────────────────────────────────
   function syncUI(session: WorkflowSession | null): void {
+    chatHistoryStore.setWorkflowId(session?.id ?? null);
     statusBar.update(session);
     workflowTree.update(session);
     todoTree.update(session);
@@ -339,6 +340,50 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
     vscode.commands.registerCommand('pi.selectWorkflow', async (id: string) => {
       await sessionWatcher.setActiveId(id);
+
+      // Switch chat history to new workflow
+      chatHistoryStore.setWorkflowId(id);
+
+      // Reset pi context if running
+      if (currentClient?.isRunning()) {
+        try {
+          await currentClient.newSession();
+          // Clear webview and reload this workflow's chat history
+          chatViewProvider.postToWebview({ type: 'clear' });
+          const history = chatHistoryStore.getAll();
+          if (history.length > 0) {
+            chatViewProvider.postToWebview({ type: 'loadHistory', messages: history });
+          }
+          // Resume workflow in new pi session (fire-and-forget)
+          currentClient.prompt('/workflow').catch(() => {});
+        } catch { /* pi may not be running */ }
+      }
+    }),
+
+    vscode.commands.registerCommand('pi.deleteWorkflow', async (node?: { kind: string; item?: { id: string } }) => {
+      const workflowId = node?.kind === 'workflow' ? node.item?.id : undefined;
+      if (!workflowId) return;
+
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete workflow "${workflowId}"? This cannot be undone.`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirm !== 'Delete') return;
+
+      const { gitBranch } = await sessionWatcher.deleteWorkflow(workflowId);
+
+      if (gitBranch) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            execFileCb('git', ['branch', '-D', gitBranch],
+              { cwd: workspaceRoot!, timeout: 5000 },
+              (err) => err ? reject(err) : resolve());
+          });
+        } catch { /* branch may not exist or currently checked out */ }
+      }
+
+      vscode.window.showInformationMessage(`Workflow "${workflowId}" deleted.`);
     }),
 
     vscode.commands.registerCommand('pi.selectTodo', (todoIndex: number) => {

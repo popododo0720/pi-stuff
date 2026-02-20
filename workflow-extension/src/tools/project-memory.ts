@@ -1,5 +1,6 @@
 // tools/project-memory.ts — project_memory tool
 // CRUD operations for global project conventions, rules, workflows, notes.
+// Compound learnings (patterns, gotchas, decisions) are per-workflow when a workflow is active.
 
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
@@ -10,8 +11,21 @@ import {
   MAX_RULE_PATTERN_LENGTH,
   MAX_RULES,
 } from '../constants';
-import { loadMemory, saveMemory } from '../storage/memory';
-import type { ConditionalRule, PatternEntry } from '../types';
+import {
+  loadMemory,
+  loadWorkflowMemory,
+  saveMemory,
+  saveWorkflowMemory,
+} from '../storage/memory';
+import type {
+  ConditionalRule,
+  PatternEntry,
+  WorkflowMemory,
+  WorkflowSession,
+} from '../types';
+
+/** Categories stored per-workflow rather than globally. */
+const COMPOUND_CATEGORIES = new Set(['patterns', 'gotchas', 'decisions']);
 
 // Helper to build text response
 function t(text: string) {
@@ -21,8 +35,12 @@ function t(text: string) {
 /**
  * Register the project_memory tool.
  * Manages global conventions, conditional rules, workflows, current work, and notes.
+ * Compound learnings (patterns, gotchas, decisions) use per-workflow storage when active.
  */
-export function registerProjectMemoryTool(pi: ExtensionAPI) {
+export function registerProjectMemoryTool(
+  pi: ExtensionAPI,
+  getSession: () => WorkflowSession | null,
+) {
   pi.registerTool({
     name: 'project_memory',
     label: 'Project Memory',
@@ -58,6 +76,67 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const session = getSession();
+      const isCompound = COMPOUND_CATEGORIES.has(params.category);
+      const workflowId = session?.id;
+
+      // ── Compound categories: per-workflow storage ────────────
+      if (isCompound && workflowId) {
+        const wfMem = loadWorkflowMemory(ctx.cwd, workflowId);
+        const cat = params.category as keyof WorkflowMemory;
+
+        switch (params.action) {
+          case 'get': {
+            const data = wfMem[cat];
+            if (!Array.isArray(data)) {
+              return t(`${params.category}: (invalid data — use clear to reset)`);
+            }
+            return t(formatArray(params.category, data));
+          }
+
+          case 'add': {
+            if (!params.value) return t('value is required.');
+            const value = params.value.slice(0, MAX_MEMORY_VALUE_LENGTH);
+
+            if (cat === 'patterns') {
+              const result = addPattern(wfMem.patterns, value);
+              if (result) return t(result);
+            } else {
+              const arr = wfMem[cat] as string[];
+              if (arr.length >= MAX_MEMORY_ENTRIES) {
+                return t(`${params.category} reached max entries (${MAX_MEMORY_ENTRIES}).`);
+              }
+              arr.push(value);
+            }
+
+            const err = saveWorkflowMemory(ctx.cwd, workflowId, wfMem);
+            if (err) return t(`Save failed: ${err}`);
+            return t(`Added to ${params.category}.`);
+          }
+
+          case 'remove': {
+            if (params.index === undefined) return t('index is required.');
+            const arr = wfMem[cat] as unknown[];
+            if (params.index < 0 || params.index >= arr.length) {
+              return t(`Index out of range (0~${arr.length - 1}).`);
+            }
+            arr.splice(params.index, 1);
+            const err = saveWorkflowMemory(ctx.cwd, workflowId, wfMem);
+            if (err) return t(`Save failed: ${err}`);
+            return t(`Removed ${params.category}[${params.index}].`);
+          }
+
+          case 'clear': {
+            wfMem[cat] = [] as unknown as WorkflowMemory[typeof cat];
+            const err = saveWorkflowMemory(ctx.cwd, workflowId, wfMem);
+            if (err) return t(`Save failed: ${err}`);
+            return t(`Cleared all ${params.category}.`);
+          }
+        }
+        return t('Unknown action.');
+      }
+
+      // ── Global categories: conventions, rules, workflows, etc.
       const memory = loadMemory(ctx.cwd);
 
       switch (params.action) {
@@ -67,31 +146,7 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
           if (!Array.isArray(data)) {
             return t(`${params.category}: (invalid data — use clear to reset)`);
           }
-          const text =
-            data.length === 0
-              ? `${params.category}: (empty)`
-              : `${params.category}:\n` +
-                data
-                  .map((item, i) => {
-                    if (typeof item === 'string') return `  ${i}. ${item}`;
-                    if ('pattern' in item)
-                      return `  ${i}. [${(item as ConditionalRule).pattern}] ${(item as ConditionalRule).rule}`;
-                    if ('text' in item && 'count' in item) {
-                      const pe = item as PatternEntry;
-                      let display = `  ${i}. [${pe.count}x] ${pe.text}`;
-                      if (pe.wrong) display += `\n     ❌ ${pe.wrong}`;
-                      if (pe.correct) display += `\n     ✅ ${pe.correct}`;
-                      if (pe.why) display += `\n     Why: ${pe.why}`;
-                      return display;
-                    }
-                    if ('name' in item)
-                      return `  ${i}. ${item.name}: ${item.description}`;
-                    if ('what' in item)
-                      return `  ${i}. ${item.what} — ${item.why}`;
-                    return `  ${i}. ${JSON.stringify(item)}`;
-                  })
-                  .join('\n');
-          return t(text);
+          return t(formatArray(params.category, data));
         }
 
         // ── Add: append new item to category ────────────────────
@@ -117,43 +172,8 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
           }
 
           if (params.category === 'patterns') {
-            // 1️⃣ Parse structured format "text|||wrong|||correct|||why"
-            const parts = value.split('|||').map((s) => s.trim());
-            const patternText = parts[0];
-            if (!patternText) return t('Pattern text cannot be empty.');
-            const wrong = parts[1] || undefined;
-            const correct = parts[2] || undefined;
-            const why = parts[3] || undefined;
-
-            // 2️⃣ Fuzzy dedup on patternText (not raw ||| value)
-            const existing =
-              patternText.length >= 10
-                ? memory.patterns.find(
-                    (p) =>
-                      p.text.includes(patternText) ||
-                      patternText.includes(p.text),
-                  )
-                : undefined;
-            if (existing) {
-              existing.count++;
-              existing.text = patternText;
-              if (wrong) existing.wrong = wrong;
-              if (correct) existing.correct = correct;
-              if (why) existing.why = why;
-            } else {
-              if (memory.patterns.length >= MAX_MEMORY_ENTRIES) {
-                return t(
-                  `patterns reached max entries (${MAX_MEMORY_ENTRIES}).`,
-                );
-              }
-              memory.patterns.push({
-                text: patternText,
-                count: 1,
-                wrong,
-                correct,
-                why,
-              });
-            }
+            const result = addPattern(memory.patterns, value);
+            if (result) return t(result);
           } else if (params.category === 'rules') {
             if (memory.rules.length >= MAX_RULES) {
               return t(`rules reached max entries (${MAX_RULES}).`);
@@ -229,4 +249,69 @@ export function registerProjectMemoryTool(pi: ExtensionAPI) {
       return t('Unknown action.');
     },
   });
+}
+
+// ── Shared helpers ───────────────────────────────────────────────
+
+/** Format any memory array for display. */
+function formatArray(category: string, data: unknown[]): string {
+  if (data.length === 0) return `${category}: (empty)`;
+  return (
+    `${category}:\n` +
+    data
+      .map((item, i) => {
+        if (typeof item === 'string') return `  ${i}. ${item}`;
+        if (typeof item === 'object' && item !== null) {
+          if ('pattern' in item)
+            return `  ${i}. [${(item as ConditionalRule).pattern}] ${(item as ConditionalRule).rule}`;
+          if ('text' in item && 'count' in item) {
+            const pe = item as PatternEntry;
+            let display = `  ${i}. [${pe.count}x] ${pe.text}`;
+            if (pe.wrong) display += `\n     ❌ ${pe.wrong}`;
+            if (pe.correct) display += `\n     ✅ ${pe.correct}`;
+            if (pe.why) display += `\n     Why: ${pe.why}`;
+            return display;
+          }
+          if ('name' in item)
+            return `  ${i}. ${(item as { name: string; description: string }).name}: ${(item as { name: string; description: string }).description}`;
+          if ('what' in item)
+            return `  ${i}. ${(item as { what: string; why: string }).what} — ${(item as { what: string; why: string }).why}`;
+        }
+        return `  ${i}. ${JSON.stringify(item)}`;
+      })
+      .join('\n')
+  );
+}
+
+/**
+ * Add a pattern to an array with fuzzy dedup.
+ * Returns error string if max entries reached, null on success.
+ */
+function addPattern(patterns: PatternEntry[], value: string): string | null {
+  const parts = value.split('|||').map((s) => s.trim());
+  const patternText = parts[0];
+  if (!patternText) return 'Pattern text cannot be empty.';
+  const wrong = parts[1] || undefined;
+  const correct = parts[2] || undefined;
+  const why = parts[3] || undefined;
+
+  const existing =
+    patternText.length >= 10
+      ? patterns.find(
+          (p) => p.text.includes(patternText) || patternText.includes(p.text),
+        )
+      : undefined;
+  if (existing) {
+    existing.count++;
+    existing.text = patternText;
+    if (wrong) existing.wrong = wrong;
+    if (correct) existing.correct = correct;
+    if (why) existing.why = why;
+  } else {
+    if (patterns.length >= MAX_MEMORY_ENTRIES) {
+      return `patterns reached max entries (${MAX_MEMORY_ENTRIES}).`;
+    }
+    patterns.push({ text: patternText, count: 1, wrong, correct, why });
+  }
+  return null;
 }

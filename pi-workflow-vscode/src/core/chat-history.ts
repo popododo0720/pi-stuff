@@ -1,4 +1,5 @@
 // core/chat-history.ts — Persists chat messages across VSCode sessions via workspaceState.
+// Per-workflow storage: each workflow gets its own history key.
 
 import * as vscode from 'vscode';
 import type { ChatHistoryItem } from '../types/rpc';
@@ -8,10 +9,21 @@ const MAX_MESSAGES = 500;
 const MAX_CONTENT_LENGTH = 10_000;
 
 export class ChatHistoryStore {
+  private workflowId: string | null = null;
+
   constructor(private readonly state: vscode.Memento) {}
 
+  /** Set active workflow ID. Changes storage key for per-workflow history. */
+  setWorkflowId(id: string | null): void {
+    this.workflowId = id;
+  }
+
+  private get storageKey(): string {
+    return this.workflowId ? `${STORAGE_KEY}.${this.workflowId}` : STORAGE_KEY;
+  }
+
   getAll(): ChatHistoryItem[] {
-    return this.state.get<ChatHistoryItem[]>(STORAGE_KEY, []);
+    return this.state.get<ChatHistoryItem[]>(this.storageKey, []);
   }
 
   append(item: ChatHistoryItem): void {
@@ -27,7 +39,7 @@ export class ChatHistoryStore {
     if (history.length > MAX_MESSAGES) {
       history.splice(0, history.length - MAX_MESSAGES);
     }
-    void this.state.update(STORAGE_KEY, history);
+    void this.state.update(this.storageKey, history);
   }
 
   addSessionSeparator(): void {
@@ -39,6 +51,6 @@ export class ChatHistoryStore {
   }
 
   clear(): void {
-    void this.state.update(STORAGE_KEY, []);
+    void this.state.update(this.storageKey, []);
   }
 }
