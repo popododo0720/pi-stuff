@@ -31,8 +31,20 @@ export class ChangedFilesTreeProvider
   private files: ChangedFile[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private loadVersion = 0;
+  private baseBranch: string | null = null;
+  private commitRange: { start: string; end: string } | null = null;
 
   constructor(private readonly workspaceRoot: string) {}
+
+  /** Set the base branch for overall diff. Does NOT auto-refresh. */
+  setBaseBranch(branch: string | null): void {
+    this.baseBranch = branch;
+  }
+
+  /** Set commit range for per-TODO diff. Does NOT auto-refresh. */
+  setCommitRange(start: string | null, end: string | null): void {
+    this.commitRange = start && end ? { start, end } : null;
+  }
 
   refresh(): void {
     if (this.debounceTimer !== undefined) {
@@ -72,17 +84,23 @@ export class ChangedFilesTreeProvider
 
   private loadFiles(): void {
     const thisVersion = ++this.loadVersion;
+    if (this.commitRange) {
+      this.loadCommitRangeDiff(thisVersion);
+    } else if (this.baseBranch) {
+      this.loadBranchDiff(thisVersion);
+    } else {
+      this.loadGitStatus(thisVersion);
+    }
+  }
 
+  private loadGitStatus(version: number): void {
     execFile(
       'git',
       ['status', '--porcelain'],
       { cwd: this.workspaceRoot, timeout: GIT_TIMEOUT_MS },
       (err, stdout) => {
-        // Stale result guard
-        if (thisVersion !== this.loadVersion) return;
-
+        if (version !== this.loadVersion) return;
         if (err) {
-          // Non-git folder, empty repo, or command failure — silent fail
           this.files = [];
           this._onDidChangeTreeData.fire();
           return;
@@ -91,6 +109,87 @@ export class ChangedFilesTreeProvider
         this._onDidChangeTreeData.fire();
       },
     );
+  }
+
+  private loadCommitRangeDiff(version: number): void {
+    const range = this.commitRange!;
+    execFile(
+      'git',
+      ['diff', '--name-status', range.start + '..' + range.end],
+      { cwd: this.workspaceRoot, timeout: GIT_TIMEOUT_MS },
+      (err, diffOut) => {
+        if (version !== this.loadVersion) return;
+        if (err) {
+          this.files = [];
+          this._onDidChangeTreeData.fire();
+          return;
+        }
+        this.files = this.parseDiffNameStatus(diffOut);
+        this._onDidChangeTreeData.fire();
+      },
+    );
+  }
+
+  private loadBranchDiff(version: number): void {
+    execFile(
+      'git',
+      ['merge-base', this.baseBranch!, 'HEAD'],
+      { cwd: this.workspaceRoot, timeout: GIT_TIMEOUT_MS },
+      (err, mergeBase) => {
+        if (version !== this.loadVersion) return;
+        if (err) {
+          this.loadGitStatus(version);
+          return;
+        }
+        const base = mergeBase.trim();
+        if (!base) {
+          this.loadGitStatus(version);
+          return;
+        }
+        execFile(
+          'git',
+          ['diff', '--name-status', base + '..HEAD'],
+          { cwd: this.workspaceRoot, timeout: GIT_TIMEOUT_MS },
+          (err2, diffOut) => {
+            if (version !== this.loadVersion) return;
+            if (err2) {
+              this.loadGitStatus(version);
+              return;
+            }
+            execFile(
+              'git',
+              ['status', '--porcelain'],
+              { cwd: this.workspaceRoot, timeout: GIT_TIMEOUT_MS },
+              (err3, statusOut) => {
+                if (version !== this.loadVersion) return;
+                const committed = this.parseDiffNameStatus(diffOut);
+                const uncommitted = err3
+                  ? []
+                  : this.parseGitStatus(statusOut);
+                const merged = new Map<string, ChangedFile>();
+                for (const f of committed) merged.set(f.path, f);
+                for (const f of uncommitted) merged.set(f.path, f);
+                this.files = Array.from(merged.values());
+                this._onDidChangeTreeData.fire();
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  private parseDiffNameStatus(output: string): ChangedFile[] {
+    return output
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((line) => {
+        const parts = line.split('\t');
+        const status = parts[0]?.[0] ?? 'M';
+        const path = parts.length > 2 ? parts[2]! : parts[1] ?? '';
+        return { status, path };
+      })
+      .filter((f) => f.path);
   }
 
   /**

@@ -2,6 +2,7 @@
 // Phase 1: Read-only UI companion for pi workflow sessions.
 // Phase 2: RPC-based chat integration with pi coding agent.
 
+import { execFile as execFileCb } from 'node:child_process';
 import * as vscode from 'vscode';
 import { showDiff } from './commands/show-diff';
 import { SessionWatcher } from './core/session-watcher';
@@ -16,6 +17,30 @@ import { ChatHistoryStore } from './core/chat-history';
 import { ChatViewProvider } from './views/chat-panel';
 import { PlanPanel } from './views/plan-panel';
 import { VerifyPanel } from './views/verify-panel';
+
+// ── Main branch detection (async + cached) ─────────────────────
+let cachedMainBranch: string | null = null;
+
+async function detectMainBranch(cwd: string): Promise<string> {
+  if (cachedMainBranch) return cachedMainBranch;
+  const candidates = ['main', 'master', 'develop'];
+  for (const name of candidates) {
+    const exists = await new Promise<boolean>((resolve) => {
+      execFileCb(
+        'git',
+        ['rev-parse', '--verify', name],
+        { cwd, timeout: 3000 },
+        (err) => resolve(!err),
+      );
+    });
+    if (exists) {
+      cachedMainBranch = name;
+      return name;
+    }
+  }
+  cachedMainBranch = 'main';
+  return 'main';
+}
 
 // ── Phase 2 state ──────────────────────────────────────────────
 let currentClient: PiRpcClient | null = null;
@@ -246,10 +271,23 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar.update(session);
     workflowTree.update(session);
     todoTree.update(session);
-    filesTree.refresh();
     planPanel.update(session);
     verifyPanel.update(session);
     updateContextKey(session);
+
+    // Branch-based diff when workflow has a git branch (including done state)
+    const gitBranch = session?.gitBranch ?? null;
+    if (gitBranch) {
+      detectMainBranch(workspaceRoot!).then((base) => {
+        filesTree.setBaseBranch(base);
+        filesTree.setCommitRange(null, null);
+        filesTree.refresh();
+      });
+    } else {
+      filesTree.setBaseBranch(null);
+      filesTree.setCommitRange(null, null);
+      filesTree.refresh();
+    }
   }
 
   // ── Watcher → UI Binding (subscribe BEFORE start) ────────────
@@ -301,6 +339,47 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
     vscode.commands.registerCommand('pi.selectWorkflow', async (id: string) => {
       await sessionWatcher.setActiveId(id);
+    }),
+
+    vscode.commands.registerCommand('pi.selectTodo', (todoIndex: number) => {
+      const session = sessionWatcher.getState();
+      if (!session) return;
+
+      if (todoIndex < 0 || !session.todos[todoIndex]) {
+        // -1 or out of range → reset to branch-level diff
+        filesTree.setCommitRange(null, null);
+        filesTree.refresh();
+        return;
+      }
+
+      const todo = session.todos[todoIndex];
+
+      // Validate commit refs (SHA hex or HEAD only)
+      const isValidRef = (ref: unknown): ref is string =>
+        typeof ref === 'string' && (ref === 'HEAD' || /^[0-9a-f]{7,40}$/i.test(ref));
+
+      // Done TODO: startCommit..endCommit (both required)
+      // Active TODO: startCommit..HEAD (endCommit not yet available)
+      // Pending TODO: no diff
+      if (todo.status === 'done' && isValidRef(todo.startCommit) && isValidRef(todo.endCommit)) {
+        filesTree.setCommitRange(todo.startCommit, todo.endCommit);
+        filesTree.refresh();
+      } else if (todo.status === 'active' && isValidRef(todo.startCommit)) {
+        filesTree.setCommitRange(todo.startCommit, 'HEAD');
+        filesTree.refresh();
+      } else {
+        // Pending or missing refs → reset to branch-level diff
+        filesTree.setCommitRange(null, null);
+        filesTree.refresh();
+      }
+
+      // Show verification result for this TODO
+      if (typeof todo.verifyResult === 'string' && todo.verifyResult) {
+        verifyPanel.showText(
+          `Verification: TODO #${todoIndex + 1}`,
+          todo.verifyResult,
+        );
+      }
     }),
   );
 }

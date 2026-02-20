@@ -440,6 +440,24 @@ async function completeCompound(hctx: HandlerContext): Promise<HandlerResult> {
         gitCwd,
       });
     }
+    // Last TODO — commit + capture endCommit before finalize
+    if (
+      hctx.settings.git?.enabled !== false &&
+      hctx.settings.git?.commitPerTodo !== false
+    ) {
+      const commit = await autoCommitTodo(
+        hctx.pi,
+        session,
+        completedIndex,
+        gitCwd,
+      );
+      if (commit.commitHash && session.todos[completedIndex]) {
+        session.todos[completedIndex].endCommit = commit.commitHash;
+      }
+      if (commit.ok && hctx.settings.git?.pushPerTodo && session.gitBranch) {
+        await autoPush(hctx.pi, session.gitBranch, gitCwd);
+      }
+    }
     return await finalizeWorkflow(hctx, { summary, tags });
   }
   return await finalizeWorkflow(hctx, { summary, tags });
@@ -473,6 +491,10 @@ async function advanceToNextTodo(
       p.gitCwd,
     );
     gitNotes.push(commit.ok ? `📦 ${commit.message}` : `⚠️ ${commit.message}`);
+    // Save endCommit for the completed TODO
+    if (commit.commitHash && session.todos[p.completedIndex]) {
+      session.todos[p.completedIndex].endCommit = commit.commitHash;
+    }
 
     if (commit.ok && settings.git?.pushPerTodo) {
       const push = await autoPush(pi, session.gitBranch, p.gitCwd);
@@ -498,6 +520,11 @@ async function advanceToNextTodo(
   session.state = 'implement';
   session.retryCount = 0;
   session.compoundStep = undefined;
+  // Capture startCommit for next TODO
+  const nextHead = await runGit(hctx.pi, ['rev-parse', 'HEAD'], p.gitCwd);
+  if (nextHead.ok) {
+    session.todos[p.nextIndex].startCommit = nextHead.stdout;
+  }
 
   // Clear startup prep flags only when mandatory prep TODO (index 0) completes
   if (session.startupPrepRequired && p.completedIndex === 0) {
@@ -560,8 +587,7 @@ async function finalizeWorkflow(
       ? `**TODOs completed:** ${completedTodoCount}/${completedTodoCount}\n`
       : '';
 
-  // Session cleanup
-  session.todos = [];
+  // Session cleanup — preserve todos/gitBranch for done-state review
   session.activeTodoIndex = -1;
   session.planContent = '';
   session.verifyPlanResult = '';
@@ -569,7 +595,6 @@ async function finalizeWorkflow(
   session.startupPrepRequired = false;
   session.startupPrepNote = '';
   session.startupPrepLocked = false;
-  session.gitBranch = undefined;
   session.gitWorktreePath = undefined;
   session.compoundMemorySnapshot = undefined;
   session.compoundStep = undefined;
