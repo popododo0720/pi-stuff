@@ -2,11 +2,14 @@
 // Phase 1: Read-only UI companion for pi workflow sessions.
 
 import * as vscode from 'vscode';
+import { showDiff } from './commands/show-diff';
 import { SessionWatcher } from './core/session-watcher';
 import { ChangedFilesTreeProvider } from './providers/files-tree';
 import { WorkflowStatusBar } from './providers/status-bar';
 import { TodoTreeProvider } from './providers/todo-tree';
 import { WorkflowTreeProvider } from './providers/workflow-tree';
+import { PlanPanel } from './views/plan-panel';
+import { VerifyPanel } from './views/verify-panel';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -37,12 +40,21 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(workflowTree, todoTree, filesTree);
 
+  // ── Webview Panels ───────────────────────────────────────────
+  const planPanel = new PlanPanel();
+  const verifyPanel = new VerifyPanel();
+  context.subscriptions.push(planPanel, verifyPanel);
+
   // ── Watcher → UI Binding ─────────────────────────────────────
   const watcherDisposable = sessionWatcher.onDidChange((session) => {
     statusBar.update(session);
     workflowTree.update(session);
     todoTree.update(session);
     filesTree.refresh();
+
+    // Auto-update or clear open panels
+    planPanel.update(session);
+    verifyPanel.update(session);
   });
   context.subscriptions.push(watcherDisposable);
 
@@ -58,16 +70,10 @@ export function activate(context: vscode.ExtensionContext): void {
       sessionWatcher.reload();
       filesTree.refresh();
     }),
-  );
-
-  // Placeholder commands for TODO #3 (plan/verification/diff panels)
-  context.subscriptions.push(
     vscode.commands.registerCommand('pi.openPlan', () => {
       const session = sessionWatcher.getState();
       if (session?.planContent) {
-        vscode.window.showInformationMessage(
-          'Plan viewer will be available in TODO #3.',
-        );
+        planPanel.show(session);
       } else {
         vscode.window.showInformationMessage('No plan available yet.');
       }
@@ -75,25 +81,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('pi.openVerification', () => {
       const session = sessionWatcher.getState();
       if (session?.verifyPlanResult) {
-        vscode.window.showInformationMessage(
-          'Verification viewer will be available in TODO #3.',
-        );
+        verifyPanel.show(session);
       } else {
         vscode.window.showInformationMessage(
           'No verification results yet.',
         );
       }
     }),
-    vscode.commands.registerCommand('pi.showDiff', () => {
-      vscode.window.showInformationMessage(
-        'Diff viewer will be available in TODO #3.',
-      );
-    }),
+    vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
   );
-
-  // ── Initial load trigger ─────────────────────────────────────
-  // SessionWatcher.start() already does initial load, which will
-  // fire onDidChange and update all UI components.
 }
 
 export function deactivate(): void {
