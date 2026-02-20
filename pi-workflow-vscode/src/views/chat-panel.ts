@@ -56,6 +56,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     this.rpcClient = client;
     if (client) {
       this.bindRpcEvents();
+    } else {
+      // When transitioning to null (pi exited/stopped), reset webview state
+      this.postToWebview({ type: 'agentEnd' });
+      this.postToWebview({ type: 'stateUpdate', isStreaming: false });
     }
   }
 
@@ -85,7 +89,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     });
 
     on('message_update', (data: MessageUpdateEvent) => {
-      const evt = data.assistantMessageEvent;
+      const evt = data?.assistantMessageEvent;
+      if (!evt || typeof evt.type !== 'string') return;
       switch (evt.type) {
         case 'text_delta':
           if (typeof evt.delta === 'string') {
@@ -177,6 +182,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   // ── Webview → RPC ────────────────────────────────────────────
 
   private handleWebviewMessage(msg: WebviewToExt): void {
+    // Top-level validation: reject malformed messages
+    if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+
     if (!this.rpcClient?.isRunning()) {
       // Post idle state so webview knows pi is not connected
       this.postToWebview({ type: 'stateUpdate', isStreaming: false });
@@ -193,6 +201,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
     switch (msg.type) {
       case 'sendMessage':
+        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
         client.prompt(msg.text).catch((err) =>
           this.postToWebview({ type: 'error', message: String(err) }),
         );
@@ -388,16 +397,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       let isStreaming = false;
       let userScrolledUp = false;
 
-      // ── Auto-scroll ──
+      // ── Auto-scroll (batched via rAF to avoid forced reflow per delta) ──
+      let scrollPending = false;
       messagesEl.addEventListener('scroll', () => {
         const diff = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
         userScrolledUp = diff > 50;
       });
 
       function autoScroll() {
-        if (!userScrolledUp) {
-          messagesEl.scrollTop = messagesEl.scrollHeight;
-        }
+        if (userScrolledUp || scrollPending) return;
+        scrollPending = true;
+        requestAnimationFrame(() => {
+          scrollPending = false;
+          if (!userScrolledUp) {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+        });
       }
 
       // ── Message creation helpers (all use textContent/createTextNode) ──
@@ -430,6 +445,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         isStreaming = true;
         sendBtn.classList.add('hidden');
         abortBtn.classList.remove('hidden');
+        inputEl.disabled = true;
 
         const div = document.createElement('div');
         div.className = 'msg msg-assistant';
@@ -518,6 +534,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         isStreaming = false;
         sendBtn.classList.remove('hidden');
         abortBtn.classList.add('hidden');
+        inputEl.disabled = false;
         if (currentAssistantPre) {
           currentAssistantPre.classList.remove('cursor-blink');
         }
@@ -530,6 +547,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       function updateToolbar(data) {
         if (data.model) {
           modelInfoEl.textContent = data.model + (data.thinkingLevel ? ' (' + data.thinkingLevel + ')' : '');
+        } else {
+          modelInfoEl.textContent = 'Not connected';
+        }
+        // Sync send/abort buttons and input with streaming state
+        if (data.isStreaming) {
+          isStreaming = true;
+          sendBtn.classList.add('hidden');
+          abortBtn.classList.remove('hidden');
+          inputEl.disabled = true;
+        } else {
+          isStreaming = false;
+          sendBtn.classList.remove('hidden');
+          abortBtn.classList.add('hidden');
+          inputEl.disabled = false;
         }
       }
 
@@ -537,6 +568,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
       window.addEventListener('message', (event) => {
         const msg = event.data;
+        if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
         switch (msg.type) {
           case 'agentStart': startStreaming(); break;
           case 'agentEnd': endStreaming(); break;
@@ -562,6 +594,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       // ── Input ──
 
       function sendMessage() {
+        if (isStreaming) return;
         const text = inputEl.value.trim();
         if (!text) return;
         vscode.postMessage({ type: 'sendMessage', text: text });
@@ -600,11 +633,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
 function extractText(result: {
   content: Array<{ type: string; text?: string }>;
-}): string {
+} | null | undefined): string {
+  if (!result?.content || !Array.isArray(result.content)) return '';
   return result.content
     .filter(
       (c): c is { type: 'text'; text: string } =>
-        c.type === 'text' && typeof c.text === 'string',
+        c != null && typeof c === 'object' && c.type === 'text' && typeof c.text === 'string',
     )
     .map((c) => c.text)
     .join('\n');
