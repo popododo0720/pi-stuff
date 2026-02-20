@@ -8,10 +8,19 @@ import { ChangedFilesTreeProvider } from './providers/files-tree';
 import { WorkflowStatusBar } from './providers/status-bar';
 import { TodoTreeProvider } from './providers/todo-tree';
 import { WorkflowTreeProvider } from './providers/workflow-tree';
+import type { WorkflowSession } from './types/workflow';
 import { PlanPanel } from './views/plan-panel';
 import { VerifyPanel } from './views/verify-panel';
 
+function updateContextKey(session: WorkflowSession | null): void {
+  const active = !!session && !session.completed && session.state !== 'done';
+  vscode.commands.executeCommand('setContext', 'pi.hasActiveWorkflow', active);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  // Set initial context before any guards — prevents stale state across window transitions
+  vscode.commands.executeCommand('setContext', 'pi.hasActiveWorkflow', false);
+
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) return;
 
@@ -19,9 +28,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = vscode.window.createOutputChannel('Pi Workflow');
   context.subscriptions.push(outputChannel);
 
-  // ── Session Watcher ──────────────────────────────────────────
+  // ── Session Watcher (created but not started yet) ────────────
   const sessionWatcher = new SessionWatcher(workspaceRoot, outputChannel);
-  sessionWatcher.start();
   context.subscriptions.push(sessionWatcher);
 
   // ── Status Bar ───────────────────────────────────────────────
@@ -45,18 +53,26 @@ export function activate(context: vscode.ExtensionContext): void {
   const verifyPanel = new VerifyPanel();
   context.subscriptions.push(planPanel, verifyPanel);
 
-  // ── Watcher → UI Binding ─────────────────────────────────────
-  const watcherDisposable = sessionWatcher.onDidChange((session) => {
+  // ── UI Sync Helper ────────────────────────────────────────────
+  function syncUI(session: WorkflowSession | null): void {
     statusBar.update(session);
     workflowTree.update(session);
     todoTree.update(session);
     filesTree.refresh();
-
-    // Auto-update or clear open panels
     planPanel.update(session);
     verifyPanel.update(session);
-  });
+    updateContextKey(session);
+  }
+
+  // ── Watcher → UI Binding (subscribe BEFORE start) ────────────
+  const watcherDisposable = sessionWatcher.onDidChange(syncUI);
   context.subscriptions.push(watcherDisposable);
+
+  // ── Start watcher (async load begins) ────────────────────────
+  sessionWatcher.start();
+
+  // ── Initial sync (covers the gap before async load completes) ─
+  syncUI(sessionWatcher.getState());
 
   // Also refresh files on file save (git status may change independently)
   const saveDisposable = vscode.workspace.onDidSaveTextDocument(() => {

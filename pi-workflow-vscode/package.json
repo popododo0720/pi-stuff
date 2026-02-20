@@ -40,6 +40,13 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "pi.status",
+        "contents": "No active workflow detected.\n\nStart a workflow with pi:\n[Open Terminal](command:workbench.action.terminal.new)\n\nThen run: /workflow Your task",
+        "when": "!pi.hasActiveWorkflow"
+      }
+    ],
     "commands": [
       {
         "command": "pi.openPlan",
