@@ -33,15 +33,20 @@ export class TodoTreeProvider
     const doneCount = todos.filter((t) => t.status === 'done').length;
     const items: vscode.TreeItem[] = [];
 
-    // Progress header
+    // Progress header — click to show all changes
     const header = new vscode.TreeItem(
       `Progress: ${doneCount}/${todos.length}`,
       vscode.TreeItemCollapsibleState.None,
     );
     header.iconPath = new vscode.ThemeIcon('tasklist');
+    header.command = {
+      command: 'pi.selectTodo',
+      title: 'Show All Changes',
+      arguments: [-1],
+    };
     items.push(header);
 
-    // Each TODO
+    // Each TODO — click to show per-TODO diff + verification
     for (let i = 0; i < todos.length; i++) {
       const todo = todos[i];
       const label = `${i + 1}. ${todo.title}`;
@@ -59,6 +64,12 @@ export class TodoTreeProvider
       if (todo.status === 'active') {
         item.description = '(current)';
       }
+
+      item.command = {
+        command: 'pi.selectTodo',
+        title: 'Show TODO Changes',
+        arguments: [i],
+      };
 
       items.push(item);
     }

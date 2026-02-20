@@ -3,6 +3,7 @@
 
 import * as vscode from 'vscode';
 import type { PiRpcClient } from '../core/rpc-client';
+import type { ChatHistoryStore } from '../core/chat-history';
 import type {
   AgentState,
   AutoRetryStartEvent,
@@ -22,7 +23,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private rpcClient: PiRpcClient | null = null;
   private eventDisposables: Array<() => void> = [];
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  private readonly _onDidResolve = new vscode.EventEmitter<void>();
+  readonly onDidResolve = this._onDidResolve.event;
+
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly historyStore: ChatHistoryStore,
+  ) {}
 
   // ── WebviewViewProvider ──────────────────────────────────────
 
@@ -46,6 +53,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
     webviewView.onDidDispose(() => {
       this.view = undefined;
+    });
+
+    // Fire after setup so extension can auto-start pi
+    this._onDidResolve.fire();
+
+    // Re-fire on visibility changes for reconnection
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible && !this.rpcClient?.isRunning()) {
+        this._onDidResolve.fire();
+      }
     });
   }
 
@@ -71,6 +88,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   dispose(): void {
     this.unbindRpcEvents();
+    this._onDidResolve.dispose();
   }
 
   // ── RPC → Webview ────────────────────────────────────────────
@@ -99,6 +117,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           break;
         case 'text_end':
           this.postToWebview({ type: 'textEnd', fullText: evt.content ?? '' });
+          this.historyStore.append({
+            role: 'assistant',
+            content: evt.content ?? '',
+            timestamp: Date.now(),
+          });
           break;
         case 'thinking_start':
           this.postToWebview({ type: 'thinkingStart' });
@@ -113,6 +136,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           break;
         case 'error':
           this.postToWebview({ type: 'error', message: evt.reason ?? 'Unknown error' });
+          this.historyStore.append({
+            role: 'error',
+            content: evt.reason ?? 'Unknown error',
+            timestamp: Date.now(),
+          });
           break;
         // done → ignored (normal completion, agent_end handles it)
         // start, text_start, toolcall_start/delta/end → ignored
@@ -185,47 +213,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     // Top-level validation: reject malformed messages
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
 
-    if (!this.rpcClient?.isRunning()) {
-      // Post idle state so webview knows pi is not connected
-      this.postToWebview({ type: 'stateUpdate', isStreaming: false });
-      if (msg.type !== 'ready') {
-        this.postToWebview({
-          type: 'error',
-          message: 'Pi is not running. Use "Pi: Start Chat" first.',
-        });
+    // Handle 'ready' before rpcClient guard — history must load even if pi isn't running yet
+    if (msg.type === 'ready') {
+      const history = this.historyStore.getAll();
+      if (history.length > 0) {
+        this.postToWebview({ type: 'loadHistory', messages: history });
       }
-      return;
-    }
-
-    const client = this.rpcClient;
-
-    switch (msg.type) {
-      case 'sendMessage':
-        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
-        client.prompt(msg.text).catch((err) =>
-          this.postToWebview({ type: 'error', message: String(err) }),
-        );
-        break;
-      case 'abort':
-        client.abort().catch((err) =>
-          this.postToWebview({ type: 'error', message: String(err) }),
-        );
-        break;
-      case 'newSession':
-        client
-          .newSession()
-          .then((resp) => {
-            const d = resp.data as { cancelled?: boolean } | undefined;
-            if (!d?.cancelled) {
-              this.postToWebview({ type: 'clear' });
-            }
-          })
-          .catch((err) =>
-            this.postToWebview({ type: 'error', message: String(err) }),
-          );
-        break;
-      case 'ready':
-        client
+      // If pi is running, also fetch current state
+      if (this.rpcClient?.isRunning()) {
+        this.rpcClient
           .getState()
           .then((resp) => {
             const d = resp.data as AgentState | undefined;
@@ -242,7 +238,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
               message: 'Failed to get state: ' + String(err),
             }),
           );
+      } else {
+        this.postToWebview({ type: 'stateUpdate', isStreaming: false });
+      }
+      return;
+    }
+
+    if (!this.rpcClient?.isRunning()) {
+      this.postToWebview({ type: 'stateUpdate', isStreaming: false });
+      this.postToWebview({
+        type: 'error',
+        message: 'Pi is not running. Use "Pi: Start Chat" first.',
+      });
+      return;
+    }
+
+    const client = this.rpcClient;
+
+    switch (msg.type) {
+      case 'sendMessage':
+        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
+        this.historyStore.append({ role: 'user', content: msg.text, timestamp: Date.now() });
+        client.prompt(msg.text).catch((err) =>
+          this.postToWebview({ type: 'error', message: String(err) }),
+        );
         break;
+      case 'abort':
+        client.abort().catch((err) =>
+          this.postToWebview({ type: 'error', message: String(err) }),
+        );
+        break;
+      // 'newSession' removed — palette command uses currentClient.newSession() directly
     }
   }
 
@@ -258,126 +284,186 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <style nonce="${nonce}">
+    :root {
+      --color-token-bg-primary: var(--vscode-editor-background);
+      --color-token-bg-secondary: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      --color-token-foreground: var(--vscode-editor-foreground);
+      --color-token-border: var(--vscode-panel-border);
+      --color-token-input-background: var(--vscode-input-background);
+      --color-token-input-border: var(--vscode-input-border, transparent);
+      --color-token-input-foreground: var(--vscode-input-foreground);
+      --color-token-text-secondary: var(--vscode-descriptionForeground);
+      --color-token-terminal-background: var(--vscode-textCodeBlock-background);
+      --color-token-button-background: var(--vscode-button-background);
+      --color-token-button-foreground: var(--vscode-button-foreground);
+      --color-token-error: var(--vscode-errorForeground, #f48771);
+      --color-token-success: var(--vscode-testing-iconPassed, #73c991);
+      --color-token-warning: var(--vscode-editorWarning-foreground, #cca700);
+      --radius-xl: 12px;
+      --radius-lg: 8px;
+      --font-mono: var(--vscode-editor-font-family);
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-editor-background);
+      color: var(--color-token-foreground);
+      background: var(--color-token-bg-primary);
       display: flex; flex-direction: column; height: 100vh;
     }
     #toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--vscode-panel-border);
+      display: flex; align-items: center;
+      height: 36px; padding: 0 12px;
       font-size: 12px;
-      color: var(--vscode-descriptionForeground);
+      color: var(--color-token-text-secondary);
     }
-    #toolbar button {
-      background: none; border: none; color: var(--vscode-foreground);
-      cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 3px;
-    }
-    #toolbar button:hover { background: var(--vscode-toolbar-hoverBackground); }
     #messages {
-      flex: 1; overflow-y: auto; padding: 10px;
-      display: flex; flex-direction: column; gap: 8px;
+      flex: 1; overflow-y: auto; padding: 8px 0;
+      display: flex; flex-direction: column; gap: 0;
     }
-    .msg { padding: 8px 12px; border-radius: 8px; max-width: 90%; word-wrap: break-word; }
+    .msg {
+      border-radius: 0; max-width: 100%; padding: 12px 16px;
+      align-self: stretch; word-wrap: break-word;
+      user-select: text; -webkit-user-select: text;
+    }
     .msg-user {
-      align-self: flex-end;
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
+      border-left: 3px solid var(--color-token-button-background);
+      font-weight: 500;
     }
     .msg-assistant {
-      align-self: flex-start;
-      background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-      border: 1px solid var(--vscode-panel-border);
+      /* flat — no background, no border */
     }
     .msg-assistant pre {
-      white-space: pre-wrap; font-family: var(--vscode-editor-font-family);
-      font-size: 13px; margin: 0;
+      white-space: pre-wrap; font-family: var(--font-mono);
+      font-size: 13px; line-height: 1.5; margin: 0;
     }
     .msg-error {
-      align-self: center;
-      background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
-      color: var(--vscode-errorForeground, #f48771);
+      align-self: stretch;
+      border-left: 3px solid var(--color-token-error);
+      background: color-mix(in srgb, var(--color-token-error) 10%, transparent);
+      color: var(--color-token-error);
       font-size: 12px;
     }
     .msg-system {
-      align-self: center;
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px; font-style: italic;
+      text-align: center; opacity: 0.6; font-size: 12px;
+      border-top: 1px solid var(--color-token-border);
+      border-bottom: 1px solid var(--color-token-border);
+      padding: 6px 16px;
     }
     .thinking-block {
-      font-size: 12px; opacity: 0.6; margin: 4px 0;
+      background: var(--color-token-terminal-background);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--color-token-border);
+      padding: 8px 12px; margin: 8px 0;
+      font-size: 12px; opacity: 0.7;
     }
     .thinking-block summary { cursor: pointer; }
     .thinking-block pre {
-      white-space: pre-wrap; font-family: var(--vscode-editor-font-family);
+      white-space: pre-wrap; font-family: var(--font-mono);
       font-size: 12px; margin: 4px 0 0 0;
     }
     .tool-card {
-      margin: 4px 0; font-size: 12px;
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 4px; overflow: hidden;
+      background: var(--color-token-terminal-background);
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--color-token-border);
+      margin: 8px 0; font-size: 12px; overflow: hidden;
     }
     .tool-card summary {
-      cursor: pointer; padding: 4px 8px;
-      background: var(--vscode-textCodeBlock-background);
+      cursor: pointer; padding: 8px 12px;
+      font-family: var(--font-mono); font-size: 13px;
     }
     .tool-card pre {
-      white-space: pre-wrap; font-family: var(--vscode-editor-font-family);
-      font-size: 12px; padding: 6px 8px; margin: 0;
-      max-height: 200px; overflow-y: auto;
+      white-space: pre-wrap; font-family: var(--font-mono);
+      font-size: 12px; margin: 0;
     }
-    .tool-error { border-color: var(--vscode-errorForeground, #f48771); }
+    .tool-result pre,
+    .tool-card .tool-result {
+      padding: 8px 12px; max-height: 200px; overflow-y: auto;
+    }
+    .tool-error { border-color: var(--color-token-error); }
     .cursor-blink::after {
       content: '▊'; animation: blink 0.8s step-end infinite;
     }
     @keyframes blink { 50% { opacity: 0; } }
     #input-area {
-      border-top: 1px solid var(--vscode-panel-border);
-      padding: 8px 10px;
-      display: flex; gap: 6px; align-items: flex-end;
+      margin: 8px 12px 12px; padding: 0;
+    }
+    #input-card {
+      background: var(--color-token-input-background);
+      border: 1px solid var(--color-token-input-border);
+      border-radius: var(--radius-xl);
+      padding: 8px 12px;
+      display: flex; align-items: flex-end; gap: 6px;
     }
     #input {
       flex: 1; resize: none;
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, transparent);
-      border-radius: 4px; padding: 6px 8px;
+      background: transparent; color: var(--color-token-input-foreground);
+      border: none; outline: none;
       font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
+      font-size: 13px; line-height: 1.4;
     }
-    #input:focus { outline: 1px solid var(--vscode-focusBorder); }
-    #input-buttons { display: flex; flex-direction: column; gap: 4px; }
-    #input-buttons button {
-      padding: 4px 12px; border: none; border-radius: 4px; cursor: pointer;
-      font-size: 12px;
-    }
+    #input:focus { outline: none; }
+    #input-buttons { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
     #send-btn {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
+      background: var(--color-token-button-background);
+      color: var(--color-token-button-foreground);
+      border: none; border-radius: var(--radius-lg);
+      padding: 6px 14px; cursor: pointer;
+      font-size: 13px; font-weight: 500;
     }
-    #send-btn:hover { background: var(--vscode-button-hoverBackground); }
+    #send-btn:hover { opacity: 0.9; }
     #abort-btn {
-      background: var(--vscode-errorForeground, #f48771);
-      color: #fff;
+      border: 1px solid var(--color-token-error);
+      color: var(--color-token-error);
+      background: transparent;
+      border-radius: var(--radius-lg);
+      padding: 6px 14px; cursor: pointer;
+      font-size: 13px; font-weight: 500;
     }
     .hidden { display: none !important; }
+
+    /* Verification progress list */
+    .verify-progress {
+      margin: 8px 0; padding: 12px;
+      background: var(--color-token-terminal-background);
+      border: 1px solid var(--color-token-border);
+      border-radius: var(--radius-xl);
+      font-size: 13px;
+    }
+    .verify-header { font-weight: 600; margin-bottom: 8px; }
+    .verify-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 3px 0; font-family: var(--font-mono); font-size: 12px;
+    }
+    .verify-icon {
+      width: 16px; height: 16px; text-align: center;
+      flex-shrink: 0; line-height: 16px;
+    }
+    .verify-icon.running {
+      border: 2px solid var(--color-token-text-secondary);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      font-size: 0;
+    }
+    .verify-icon.passed { color: var(--color-token-success); font-weight: bold; }
+    .verify-icon.failed { color: var(--color-token-error); font-weight: bold; }
+    .verify-icon.skipped { color: var(--color-token-text-secondary); }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div id="toolbar">
     <span id="model-info">Not connected</span>
-    <button id="new-session-btn" title="New Session">⟳</button>
   </div>
   <div id="messages"></div>
   <div id="input-area">
-    <textarea id="input" rows="3" placeholder="메시지 입력... (Shift+Enter 줄바꿈)"></textarea>
-    <div id="input-buttons">
-      <button id="send-btn">Send</button>
-      <button id="abort-btn" class="hidden">Abort</button>
+    <div id="input-card">
+      <textarea id="input" rows="3" placeholder="메시지 입력... (Shift+Enter 줄바꿈)"></textarea>
+      <div id="input-buttons">
+        <button id="send-btn">Send</button>
+        <button id="abort-btn" class="hidden">Stop</button>
+      </div>
     </div>
   </div>
 
@@ -388,7 +474,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       const inputEl = document.getElementById('input');
       const sendBtn = document.getElementById('send-btn');
       const abortBtn = document.getElementById('abort-btn');
-      const newSessionBtn = document.getElementById('new-session-btn');
       const modelInfoEl = document.getElementById('model-info');
 
       let currentAssistantEl = null;
@@ -397,9 +482,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       let isStreaming = false;
       let userScrolledUp = false;
 
-      // ── Auto-scroll (batched via rAF to avoid forced reflow per delta) ──
+      // ── Auto-scroll with drag-selection protection ──
       let scrollPending = false;
+      let isMouseDown = false;
+
+      messagesEl.addEventListener('mousedown', () => { isMouseDown = true; });
+      document.addEventListener('mouseup', () => {
+        isMouseDown = false;
+        const diff = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+        userScrolledUp = diff > 50;
+      });
       messagesEl.addEventListener('scroll', () => {
+        if (isMouseDown) return;
         const diff = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
         userScrolledUp = diff > 50;
       });
@@ -415,7 +509,52 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         });
       }
 
-      // ── Message creation helpers (all use textContent/createTextNode) ──
+      // ── Helpers ──
+
+      function escapeText(s) {
+        const d = document.createElement('span');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      // ── Verification progress list ──
+
+      let verifyContainer = null;
+
+      function createVerifyList(tasks) {
+        if (verifyContainer) verifyContainer.remove();
+        const container = document.createElement('div');
+        container.className = 'verify-progress';
+        container.innerHTML = '<div class="verify-header">🔍 Verification</div>';
+        for (const task of tasks) {
+          const row = document.createElement('div');
+          row.className = 'verify-row';
+          row.id = 'verify-' + task.taskId;
+          row.innerHTML = '<span class="verify-icon running"></span><span class="verify-label">' + escapeText(task.label) + '</span>';
+          container.appendChild(row);
+        }
+        if (currentAssistantEl) { currentAssistantEl.appendChild(container); }
+        else { messagesEl.appendChild(container); }
+        verifyContainer = container;
+        autoScroll();
+      }
+
+      function updateVerifyRow(taskId, status) {
+        const row = document.getElementById('verify-' + taskId);
+        if (!row) return;
+        const icon = row.querySelector('.verify-icon');
+        if (!icon) return;
+        icon.className = 'verify-icon ' + status;
+        switch (status) {
+          case 'passed': icon.textContent = '✓'; break;
+          case 'failed': icon.textContent = '✗'; break;
+          case 'skipped': icon.textContent = '⊘'; break;
+          default: icon.textContent = ''; break;
+        }
+        autoScroll();
+      }
+
+      // ── Message creation helpers ──
 
       function addUserMessage(text) {
         const div = document.createElement('div');
@@ -515,6 +654,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       }
 
       function updateToolCard(toolCallId, text) {
+        // Verify progress interception — before card lookup
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed.__verifyStart) { createVerifyList(parsed.tasks); return; }
+            if (parsed.__verifyProgress) { updateVerifyRow(parsed.taskId, parsed.status); return; }
+          } catch { /* not JSON, normal flow */ }
+        }
         const card = document.getElementById('tool-' + toolCallId);
         if (!card) return;
         const resultPre = card.querySelector('.tool-result');
@@ -550,7 +697,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         } else {
           modelInfoEl.textContent = 'Not connected';
         }
-        // Sync send/abort buttons and input with streaming state
         if (data.isStreaming) {
           isStreaming = true;
           sendBtn.classList.add('hidden');
@@ -588,6 +734,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           case 'retryStart': addSystemMessage('Retrying (' + msg.attempt + '/' + msg.maxAttempts + ')...'); break;
           case 'retryEnd': addSystemMessage(msg.success ? 'Retry succeeded.' : 'Retry failed.'); break;
           case 'clear': messagesEl.innerHTML = ''; break;
+          case 'loadHistory':
+            messagesEl.innerHTML = '';
+            for (const item of msg.messages) {
+              switch (item.role) {
+                case 'user': addUserMessage(item.content); break;
+                case 'assistant': {
+                  const div = document.createElement('div');
+                  div.className = 'msg msg-assistant';
+                  const pre = document.createElement('pre');
+                  pre.textContent = item.content;
+                  div.appendChild(pre);
+                  messagesEl.appendChild(div);
+                  break;
+                }
+                case 'error': addErrorMessage(item.content); break;
+                case 'system': addSystemMessage(item.content); break;
+              }
+            }
+            autoScroll();
+            break;
         }
       });
 
@@ -614,10 +780,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
       abortBtn.addEventListener('click', () => {
         vscode.postMessage({ type: 'abort' });
-      });
-
-      newSessionBtn.addEventListener('click', () => {
-        vscode.postMessage({ type: 'newSession' });
       });
 
       // ── Init ──

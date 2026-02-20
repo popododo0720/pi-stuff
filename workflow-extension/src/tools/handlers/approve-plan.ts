@@ -7,6 +7,7 @@ import {
   runParallelVerification,
   saveVerificationResult,
 } from '../../verification';
+import { runGit } from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
 export async function handleApprovePlan(
@@ -80,6 +81,13 @@ export async function handleApprovePlan(
     if (result.passed) {
       session.state = 'implement';
       session.retryCount = 0;
+      // Capture startCommit for the first active TODO
+      if (session.activeTodoIndex >= 0 && session.todos[session.activeTodoIndex]) {
+        const headResult = await runGit(pi, ['rev-parse', 'HEAD'], ctx.cwd);
+        if (headResult.ok) {
+          session.todos[session.activeTodoIndex].startCommit = headResult.stdout;
+        }
+      }
       const summary = formatVerificationSummary(result);
       const hasWarnings = summary.includes('🟡');
       const hasInfo = summary.includes('🔵');
@@ -130,6 +138,13 @@ export async function handleApprovePlan(
     if (isNoModels) {
       session.state = 'implement';
       session.retryCount = 0;
+      // Capture startCommit for the first active TODO
+      if (session.activeTodoIndex >= 0 && session.todos[session.activeTodoIndex]) {
+        const headResult = await runGit(pi, ['rev-parse', 'HEAD'], ctx.cwd);
+        if (headResult.ok) {
+          session.todos[session.activeTodoIndex].startCommit = headResult.stdout;
+        }
+      }
       session.verifyPlanResult =
         'Auto-verification unavailable — no models configured';
       return {

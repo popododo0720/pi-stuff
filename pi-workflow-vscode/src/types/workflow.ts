@@ -12,10 +12,14 @@ export type WorkflowState =
 export interface TodoItem {
   title: string;
   status: 'pending' | 'active' | 'done';
+  startCommit?: string;
+  endCommit?: string;
+  verifyResult?: string;
 }
 
 export interface WorkflowSession {
   id: string;
+  name?: string;
   state: WorkflowState;
   description: string;
   planContent: string;
@@ -62,3 +66,11 @@ export const STATE_LABELS: Record<WorkflowState, string> = {
   compound: 'Compound',
   done: 'Done',
 };
+
+export interface WorkflowListItem {
+  id: string;
+  name?: string;
+  state: WorkflowState;
+  description: string;
+  active: boolean;
+}

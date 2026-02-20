@@ -1,72 +1,126 @@
-// core/session-watcher.ts — Watches .pi/workflow-session.json for changes
+// core/session-watcher.ts — Watches .pi/workflows/ directory for changes
+// Multi-workflow: tracks all workflow files + active pointer.
 // Single workspace root assumption (Phase 1). Multi-root not supported.
-// Uses RelativePattern(workspaceRoot) to watch only the project root's session file.
 
 import * as vscode from 'vscode';
-import type { TodoItem, WorkflowSession, WorkflowState } from '../types/workflow';
+import type { TodoItem, WorkflowListItem, WorkflowSession, WorkflowState } from '../types/workflow';
 import { VALID_STATES, VALID_TODO_STATUSES } from '../types/workflow';
 
-const SESSION_REL_PATH = '.pi/workflow-session.json';
+const WORKFLOWS_DIR = '.pi/workflows';
+const ACTIVE_FILE = '.pi/workflows/active';
 const DEBOUNCE_MS = 500;
 
 // Safety limits
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_STRING_LENGTH = 500_000; // 500KB per string field
-const MAX_SHORT_STRING = 1000; // id, description, gitBranch, todo title
+const MAX_SHORT_STRING = 1000; // id, description, gitBranch, todo title, name
 const MAX_TODOS = 100;
 
 export class SessionWatcher implements vscode.Disposable {
+  // Active session (for statusBar, todoTree, planPanel, etc.)
   private readonly _onDidChange = new vscode.EventEmitter<WorkflowSession | null>();
   readonly onDidChange = this._onDidChange.event;
-
-  private watcher: vscode.FileSystemWatcher | undefined;
   private state: WorkflowSession | null = null;
+
+  // Workflow list (for workflowTree)
+  private readonly _onDidChangeList = new vscode.EventEmitter<WorkflowListItem[]>();
+  readonly onDidChangeList = this._onDidChangeList.event;
+  private workflows: Map<string, WorkflowSession> = new Map();
+  private activeId: string | null = null;
+
+  // File watchers
+  private dirWatcher: vscode.FileSystemWatcher | undefined;
+  private activeWatcher: vscode.FileSystemWatcher | undefined;
+
+  // Self-write guard: prevents reload loop when VSCode writes to active file
+  private selfWritePending = false;
+
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  private loadVersion = 0; // Monotonic counter to prevent stale async overwrites
-  private readonly sessionUri: vscode.Uri;
+  private loadVersion = 0;
 
   constructor(
     private readonly workspaceRoot: string,
     private readonly outputChannel: vscode.OutputChannel,
-  ) {
-    this.sessionUri = vscode.Uri.joinPath(
-      vscode.Uri.file(workspaceRoot),
-      SESSION_REL_PATH,
-    );
-  }
+  ) {}
 
   /** Start watching and perform initial load. */
   start(): void {
-    void this.loadSession();
+    void this.loadAll();
 
-    // RelativePattern scoped to workspace root — intentionally not using
-    // **/ glob since Phase 1 assumes single workspace root.
-    this.watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(this.workspaceRoot, SESSION_REL_PATH),
+    // Watch all .json files in .pi/workflows/
+    this.dirWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(this.workspaceRoot, '.pi/workflows/*.json'),
     );
+    this.dirWatcher.onDidChange(() => this.scheduleLoad());
+    this.dirWatcher.onDidCreate(() => this.scheduleLoad());
+    this.dirWatcher.onDidDelete(() => this.scheduleLoad());
 
-    this.watcher.onDidChange(() => this.scheduleLoad());
-    this.watcher.onDidCreate(() => this.scheduleLoad());
-    this.watcher.onDidDelete(() => this.resetState());
+    // Watch active pointer file
+    this.activeWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(this.workspaceRoot, ACTIVE_FILE),
+    );
+    this.activeWatcher.onDidChange(() => {
+      if (this.selfWritePending) { this.selfWritePending = false; return; }
+      this.scheduleLoad();
+    });
+    this.activeWatcher.onDidCreate(() => {
+      if (this.selfWritePending) { this.selfWritePending = false; return; }
+      this.scheduleLoad();
+    });
+    this.activeWatcher.onDidDelete(() => this.scheduleLoad());
   }
 
   /** Force a manual reload. */
   reload(): void {
-    void this.loadSession();
+    void this.loadAll();
   }
 
-  /** Get current cached state. */
+  /** Get current active session. */
   getState(): WorkflowSession | null {
     return this.state;
   }
 
+  /** Get list of all workflows. */
+  getList(): WorkflowListItem[] {
+    const items: WorkflowListItem[] = [];
+    for (const [id, session] of this.workflows) {
+      items.push({
+        id,
+        name: session.name,
+        state: session.state,
+        description: session.description,
+        active: id === this.activeId,
+      });
+    }
+    return items;
+  }
+
+  /** Set active workflow ID (writes active file, triggers reload). */
+  async setActiveId(id: string): Promise<void> {
+    this.selfWritePending = true;
+    try {
+      const activeUri = vscode.Uri.joinPath(
+        vscode.Uri.file(this.workspaceRoot),
+        ACTIVE_FILE,
+      );
+      await vscode.workspace.fs.writeFile(activeUri, new TextEncoder().encode(id));
+    } catch {
+      this.selfWritePending = false;
+      return;
+    }
+    // Trigger manual reload after self-write
+    void this.loadAll();
+  }
+
   // ── Private ──────────────────────────────────────────────────
 
-  /** Always resets state to null and fires event. Also invalidates in-flight loads. */
   private resetState(): void {
-    ++this.loadVersion; // Invalidate any in-flight async loadSession
+    ++this.loadVersion;
     this.state = null;
+    this.workflows.clear();
+    this.activeId = null;
     this._onDidChange.fire(null);
+    this._onDidChangeList.fire([]);
   }
 
   private scheduleLoad(): void {
@@ -75,118 +129,135 @@ export class SessionWatcher implements vscode.Disposable {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
-      void this.loadSession();
+      void this.loadAll();
     }, DEBOUNCE_MS);
   }
 
-  private async loadSession(): Promise<void> {
+  private async loadAll(): Promise<void> {
     const thisVersion = ++this.loadVersion;
-
     try {
-      // Check file existence and size (async)
-      let stat: vscode.FileStat;
+      // Read active pointer
+      const activeUri = vscode.Uri.joinPath(
+        vscode.Uri.file(this.workspaceRoot),
+        ACTIVE_FILE,
+      );
+      let newActiveId: string | null = null;
       try {
-        stat = await vscode.workspace.fs.stat(this.sessionUri);
+        const stat = await vscode.workspace.fs.stat(activeUri);
+        // Guard: active file should be tiny (just an ID). Reject if > 1KB.
+        if (stat.size <= 1024) {
+          const bytes = await vscode.workspace.fs.readFile(activeUri);
+          newActiveId = new TextDecoder().decode(bytes).trim() || null;
+        }
       } catch {
-        if (thisVersion !== this.loadVersion) return;
-        this.resetState();
-        return;
+        /* no active file */
       }
 
       if (thisVersion !== this.loadVersion) return;
 
-      if (stat.size > MAX_FILE_SIZE) {
-        this.log(`Session file too large (${stat.size} bytes), ignoring`);
-        this.resetState();
-        return;
+      // Read all workflow files
+      const dirUri = vscode.Uri.joinPath(
+        vscode.Uri.file(this.workspaceRoot),
+        WORKFLOWS_DIR,
+      );
+      let entries: [string, vscode.FileType][] = [];
+      try {
+        entries = await vscode.workspace.fs.readDirectory(dirUri);
+      } catch {
+        /* dir doesn't exist yet */
       }
 
-      // Read file (async)
-      const bytes = await vscode.workspace.fs.readFile(this.sessionUri);
-      const text = new TextDecoder().decode(bytes);
-      const raw = JSON.parse(text);
-      const session = this.parseSession(raw);
-
-      // Stale read guard: a newer load was started, discard this result
       if (thisVersion !== this.loadVersion) return;
 
-      if (session === null) {
-        this.resetState();
-        return;
+      const newWorkflows = new Map<string, WorkflowSession>();
+      for (const [name, type] of entries) {
+        if (type !== vscode.FileType.File || !name.endsWith('.json')) continue;
+        try {
+          const fileUri = vscode.Uri.joinPath(dirUri, name);
+          const stat = await vscode.workspace.fs.stat(fileUri);
+          if (stat.size > MAX_FILE_SIZE) continue;
+          const bytes = await vscode.workspace.fs.readFile(fileUri);
+          const text = new TextDecoder().decode(bytes);
+          const session = this.parseSession(JSON.parse(text));
+          if (session) newWorkflows.set(session.id, session);
+        } catch {
+          /* skip invalid */
+        }
       }
 
-      // Only fire if state actually changed (avoid unnecessary UI refreshes)
-      if (this.state !== null) {
-        const oldJson = JSON.stringify(this.state);
-        const newJson = JSON.stringify(session);
-        if (oldJson === newJson) return;
-      }
-
-      this.state = session;
-      this._onDidChange.fire(session);
-    } catch (e) {
-      // Parse/read failure → fail-closed: reset state to null
       if (thisVersion !== this.loadVersion) return;
-      this.log(`Failed to load session: ${e instanceof Error ? e.message : String(e)}`);
+
+      this.workflows = newWorkflows;
+      this.activeId = newActiveId;
+      const newState = newActiveId
+        ? (newWorkflows.get(newActiveId) ?? null)
+        : null;
+
+      // Fire active session change (lightweight comparison to avoid serializing large fields)
+      const changed = this.state?.id !== newState?.id
+        || this.state?.state !== newState?.state
+        || this.state?.description !== newState?.description
+        || this.state?.retryCount !== newState?.retryCount
+        || this.state?.completed !== newState?.completed
+        || this.state?.activeTodoIndex !== newState?.activeTodoIndex
+        || this.state?.planContent?.length !== newState?.planContent?.length
+        || this.state?.verifyPlanResult?.length !== newState?.verifyPlanResult?.length;
+      this.state = newState;
+      if (changed) this._onDidChange.fire(this.state);
+
+      // Fire list change
+      this._onDidChangeList.fire(this.getList());
+    } catch {
+      if (thisVersion !== this.loadVersion) return;
+      this.log('loadAll failed');
       this.resetState();
     }
   }
 
   private parseSession(raw: unknown): WorkflowSession | null {
     if (raw === null || typeof raw !== 'object') {
-      this.log('Session parse: not an object');
       return null;
     }
 
     const r = raw as Record<string, unknown>;
 
-    // ── Stage 1: Hard-required (reject → null) ──────────────
-
     if (typeof r.id !== 'string' || r.id.length === 0 || r.id.length > MAX_SHORT_STRING) {
-      this.log('Session parse: invalid id');
       return null;
     }
 
     if (typeof r.state !== 'string' || !VALID_STATES.has(r.state)) {
-      this.log(`Session parse: invalid state "${String(r.state)}"`);
       return null;
     }
 
     if (typeof r.description !== 'string' || r.description.length > MAX_SHORT_STRING) {
-      this.log('Session parse: invalid description');
       return null;
     }
 
-    // ── Stage 2: Defaultable fields (coerce with logging) ───
+    // Optional name
+    let name: string | undefined;
+    if (typeof r.name === 'string') {
+      name = this.boundString(r.name, MAX_SHORT_STRING);
+    }
 
     let planContent = '';
     if (typeof r.planContent === 'string') {
       planContent = this.boundString(r.planContent, MAX_STRING_LENGTH);
-    } else if (r.planContent !== undefined) {
-      this.log(`Session parse: planContent is ${typeof r.planContent}, defaulting to ''`);
     }
 
     let verifyPlanResult = '';
     if (typeof r.verifyPlanResult === 'string') {
       verifyPlanResult = this.boundString(r.verifyPlanResult, MAX_STRING_LENGTH);
-    } else if (r.verifyPlanResult !== undefined) {
-      this.log(`Session parse: verifyPlanResult is ${typeof r.verifyPlanResult}, defaulting to ''`);
     }
 
     let retryCount = 0;
     if (typeof r.retryCount === 'number' && Number.isFinite(r.retryCount)) {
       retryCount = Math.max(0, Math.floor(r.retryCount));
-    } else if (r.retryCount !== undefined) {
-      this.log(`Session parse: retryCount is ${typeof r.retryCount}, defaulting to 0`);
     }
 
     let completed: boolean;
     if (typeof r.completed === 'boolean') {
       completed = r.completed;
     } else {
-      if (r.completed !== undefined) {
-        this.log(`Session parse: completed is ${typeof r.completed}, defaulting to state==='done'`);
-      }
       completed = r.state === 'done';
     }
 
@@ -194,42 +265,29 @@ export class SessionWatcher implements vscode.Disposable {
     if (Array.isArray(r.todos)) {
       todos = (r.todos as unknown[])
         .slice(0, MAX_TODOS)
-        .filter((t): t is TodoItem =>
-          typeof t === 'object' &&
-          t !== null &&
-          typeof (t as TodoItem).title === 'string' &&
-          (t as TodoItem).title.length <= MAX_SHORT_STRING &&
-          VALID_TODO_STATUSES.has((t as TodoItem).status),
+        .filter(
+          (t): t is TodoItem =>
+            typeof t === 'object' &&
+            t !== null &&
+            typeof (t as TodoItem).title === 'string' &&
+            (t as TodoItem).title.length <= MAX_SHORT_STRING &&
+            VALID_TODO_STATUSES.has((t as TodoItem).status),
         );
-      const dropped = Math.min(r.todos.length, MAX_TODOS) - todos.length;
-      if (dropped > 0) {
-        this.log(`Session parse: dropped ${dropped} invalid todo items`);
-      }
     } else {
-      if (r.todos !== undefined) {
-        this.log(`Session parse: todos is ${typeof r.todos}, defaulting to []`);
-      }
       todos = [];
     }
 
     let activeTodoIndex: number;
     if (typeof r.activeTodoIndex === 'number' && Number.isFinite(r.activeTodoIndex)) {
-      const raw = Math.floor(r.activeTodoIndex);
-      activeTodoIndex = todos.length === 0 ? -1 : Math.max(-1, Math.min(raw, todos.length - 1));
+      const rawVal = Math.floor(r.activeTodoIndex);
+      activeTodoIndex = todos.length === 0 ? -1 : Math.max(-1, Math.min(rawVal, todos.length - 1));
     } else {
-      if (r.activeTodoIndex !== undefined) {
-        this.log(`Session parse: activeTodoIndex is ${typeof r.activeTodoIndex}, defaulting to -1`);
-      }
       activeTodoIndex = -1;
     }
-
-    // ── Stage 3: Optional fields (undefined if absent) ──────
 
     let gitBranch: string | undefined;
     if (typeof r.gitBranch === 'string') {
       gitBranch = this.boundString(r.gitBranch, MAX_SHORT_STRING);
-    } else if (r.gitBranch !== undefined) {
-      this.log(`Session parse: gitBranch is ${typeof r.gitBranch}, ignoring`);
     }
 
     let compoundStep: number | undefined;
@@ -240,12 +298,11 @@ export class SessionWatcher implements vscode.Disposable {
       Number.isInteger(r.compoundStep)
     ) {
       compoundStep = r.compoundStep;
-    } else if (r.compoundStep !== undefined) {
-      this.log(`Session parse: compoundStep is invalid (${String(r.compoundStep)}), ignoring`);
     }
 
     return {
       id: r.id,
+      name,
       state: r.state as WorkflowState,
       description: r.description,
       planContent,
@@ -271,7 +328,9 @@ export class SessionWatcher implements vscode.Disposable {
     if (this.debounceTimer !== undefined) {
       clearTimeout(this.debounceTimer);
     }
-    this.watcher?.dispose();
+    this.dirWatcher?.dispose();
+    this.activeWatcher?.dispose();
     this._onDidChange.dispose();
+    this._onDidChangeList.dispose();
   }
 }

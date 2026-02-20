@@ -17,6 +17,9 @@ export type ThinkingLevel =
 export interface TodoItem {
   title: string;
   status: 'pending' | 'active' | 'done';
+  startCommit?: string;
+  endCommit?: string;
+  verifyResult?: string;
 }
 
 export interface PatternEntry {
@@ -37,6 +40,7 @@ export interface CompoundStepDef {
 
 export interface WorkflowSession {
   id: string;
+  name?: string;
   state: WorkflowState;
   description: string;
   planContent: string;

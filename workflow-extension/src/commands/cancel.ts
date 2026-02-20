@@ -7,6 +7,7 @@ import type {
 } from '@mariozechner/pi-coding-agent';
 import { updateStatusBar } from '../context/status';
 import { loadMemory, saveMemory } from '../storage/memory';
+import { setActiveWorkflowId } from '../storage/session';
 import type { WorkflowSession } from '../types';
 import { cleanupVerificationResults } from '../verification';
 
@@ -55,6 +56,7 @@ export function registerCancelCommand(
         ? ` Worktree retained: ${session.gitWorktreePath} (cleanup manually if needed).`
         : '';
 
+      setActiveWorkflowId(ctx.cwd, null);
       setSession(null);
       updateStatusBar(ctx, null);
       ctx.ui.notify(`Workflow cancelled.${branchNote}${worktreeNote}`, 'info');

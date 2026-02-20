@@ -1,15 +1,16 @@
 // storage/session.ts — WorkflowSession disk persistence
-// Saves/loads session state to .pi/workflow-session.json.
+// Multi-workflow: saves each workflow to .pi/workflows/{id}.json
+// Active workflow tracked via .pi/workflows/active (plain text ID)
 
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   unlinkSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { MEMORY_DIR } from '../constants';
+import { ACTIVE_WORKFLOW_FILE, WORKFLOWS_DIR } from '../constants';
 import type { TodoItem, WorkflowSession, WorkflowState } from '../types';
 import { atomicWriteFileSync } from './atomic-write';
 
@@ -24,146 +25,277 @@ const VALID_STATES: Set<string> = new Set<WorkflowState>([
 
 const VALID_TODO_STATUSES: Set<string> = new Set(['pending', 'active', 'done']);
 
-const SESSION_FILE = 'workflow-session.json';
+// ── Path helpers ───────────────────────────────────────────────
 
-/**
- * Resolve the absolute path to the session file.
- */
-function resolveSessionPath(cwd: string): string {
-  return resolve(join(cwd, MEMORY_DIR, SESSION_FILE));
+/** Safe ID pattern — prevents path traversal. */
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+function resolveWorkflowPath(cwd: string, id: string): string {
+  if (!SAFE_ID_RE.test(id)) {
+    throw new Error(`Invalid workflow ID: ${id}`);
+  }
+  return resolve(join(cwd, WORKFLOWS_DIR, `${id}.json`));
 }
+
+function resolveActivePath(cwd: string): string {
+  return resolve(join(cwd, WORKFLOWS_DIR, ACTIVE_WORKFLOW_FILE));
+}
+
+function ensureWorkflowsDir(cwd: string): void {
+  const dir = resolve(join(cwd, WORKFLOWS_DIR));
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+// ── Active workflow pointer ────────────────────────────────────
+
+/** Get the active workflow ID from .pi/workflows/active */
+export function getActiveWorkflowId(cwd: string): string | null {
+  try {
+    const path = resolveActivePath(cwd);
+    if (!existsSync(path)) return null;
+    const id = readFileSync(path, 'utf-8').trim();
+    if (!id || !SAFE_ID_RE.test(id)) return null;
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+/** Set (or clear) the active workflow ID */
+export function setActiveWorkflowId(cwd: string, id: string | null): void {
+  ensureWorkflowsDir(cwd);
+  const path = resolveActivePath(cwd);
+  if (id === null) {
+    try {
+      if (existsSync(path)) unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  atomicWriteFileSync(path, id, { encoding: 'utf-8', mode: 0o600 });
+}
+
+// ── Save / Load ────────────────────────────────────────────────
 
 /**
  * Save session state to disk.
- * If session is null, deletes the file.
+ * If session is null, only clears the active pointer (preserves workflow files).
  */
 export function saveSessionToDisk(
   cwd: string,
   session: WorkflowSession | null,
 ): void {
-  const path = resolveSessionPath(cwd);
   if (!session) {
-    try {
-      if (existsSync(path)) unlinkSync(path);
-    } catch (e) {
-      console.error('[workflow] session delete failed:', e);
-    }
+    // Multi-workflow: only clear active pointer, preserve workflow files
+    setActiveWorkflowId(cwd, null);
     return;
   }
   try {
-    const dir = resolve(join(cwd, MEMORY_DIR));
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    ensureWorkflowsDir(cwd);
+    const path = resolveWorkflowPath(cwd, session.id);
     atomicWriteFileSync(path, JSON.stringify(session, null, '\t'), {
       encoding: 'utf-8',
       mode: 0o600,
     });
+    setActiveWorkflowId(cwd, session.id);
   } catch (e) {
     console.error('[workflow] session save failed:', e);
   }
 }
 
 /**
- * Load session state from disk.
- * Returns null if file doesn't exist or is invalid.
+ * Load active session state from disk.
+ * Reads active pointer → loads that workflow file.
  */
 export function loadSessionFromDisk(cwd: string): WorkflowSession | null {
+  const activeId = getActiveWorkflowId(cwd);
+  if (!activeId) return null;
+  return loadWorkflowById(cwd, activeId);
+}
+
+// ── Multi-workflow operations ──────────────────────────────────
+
+/** List all workflow sessions on disk (lightweight summary). */
+export function listWorkflows(cwd: string): Array<{
+  id: string;
+  name?: string;
+  state: string;
+  description: string;
+}> {
+  const dir = resolve(join(cwd, WORKFLOWS_DIR));
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
+  const results: Array<{
+    id: string;
+    name?: string;
+    state: string;
+    description: string;
+  }> = [];
+  for (const file of files) {
+    try {
+      const raw = JSON.parse(readFileSync(join(dir, file), 'utf-8'));
+      if (typeof raw?.id === 'string' && typeof raw?.state === 'string') {
+        results.push({
+          id: raw.id,
+          name: typeof raw.name === 'string' ? raw.name : undefined,
+          state: raw.state,
+          description:
+            typeof raw.description === 'string' ? raw.description : '',
+        });
+      }
+    } catch {
+      /* skip invalid files */
+    }
+  }
+  return results;
+}
+
+/** Load a specific workflow by ID. */
+export function loadWorkflowById(
+  cwd: string,
+  id: string,
+): WorkflowSession | null {
   try {
-    const path = resolveSessionPath(cwd);
+    const path = resolveWorkflowPath(cwd, id);
     if (!existsSync(path)) return null;
     const raw = JSON.parse(readFileSync(path, 'utf-8'));
-    if (
-      typeof raw?.id !== 'string' ||
-      typeof raw?.state !== 'string' ||
-      typeof raw?.description !== 'string' ||
-      !VALID_STATES.has(raw.state)
-    ) {
-      return null;
-    }
-    // Validate and filter todos
-    const todos: TodoItem[] = Array.isArray(raw.todos)
-      ? raw.todos.filter(
-          (t: unknown): t is TodoItem =>
-            typeof t === 'object' &&
-            t !== null &&
-            typeof (t as TodoItem).title === 'string' &&
-            VALID_TODO_STATUSES.has((t as TodoItem).status),
-        )
-      : [];
-    // Clamp activeTodoIndex to valid range
-    const rawIndex =
-      typeof raw.activeTodoIndex === 'number' &&
-      Number.isFinite(raw.activeTodoIndex)
-        ? Math.floor(raw.activeTodoIndex)
-        : -1;
-    const activeTodoIndex =
-      todos.length === 0
-        ? -1
-        : Math.max(-1, Math.min(rawIndex, todos.length - 1));
-    return {
-      id: raw.id,
-      state: raw.state as WorkflowState,
-      description: raw.description,
-      planContent: typeof raw.planContent === 'string' ? raw.planContent : '',
-      verifyPlanResult:
-        typeof raw.verifyPlanResult === 'string' ? raw.verifyPlanResult : '',
-      retryCount: typeof raw.retryCount === 'number' ? raw.retryCount : 0,
-      completed:
-        typeof raw.completed === 'boolean'
-          ? raw.completed
-          : raw.state === 'done',
-      todos,
-      activeTodoIndex,
-      startupPrepRequired:
-        typeof raw.startupPrepRequired === 'boolean'
-          ? raw.startupPrepRequired
-          : false,
-      startupPrepNote:
-        typeof raw.startupPrepNote === 'string' ? raw.startupPrepNote : '',
-      startupPrepLocked:
-        typeof raw.startupPrepLocked === 'boolean'
-          ? raw.startupPrepLocked
-          : false,
-      gitBranch: typeof raw.gitBranch === 'string' ? raw.gitBranch : undefined,
-      gitWorktreePath:
-        typeof raw.gitWorktreePath === 'string'
-          ? raw.gitWorktreePath
-          : undefined,
-      compoundMemorySnapshot:
-        typeof raw.compoundMemorySnapshot === 'object' &&
-        raw.compoundMemorySnapshot !== null &&
-        typeof raw.compoundMemorySnapshot.patterns === 'number' &&
-        typeof raw.compoundMemorySnapshot.gotchas === 'number' &&
-        typeof raw.compoundMemorySnapshot.decisions === 'number'
-          ? raw.compoundMemorySnapshot
-          : undefined,
-      compoundStep:
-        typeof raw.compoundStep === 'number' &&
-        Number.isFinite(raw.compoundStep) &&
-        raw.compoundStep >= 0 &&
-        Number.isInteger(raw.compoundStep)
-          ? Math.min(raw.compoundStep, 8)
-          : undefined,
-    };
+    return parseSession(raw);
   } catch (e) {
-    console.error('[workflow] loadSession failed:', e);
+    console.error('[workflow] loadWorkflowById failed:', e);
     return null;
   }
 }
 
-const BACKUP_FILE = 'workflow-session.backup.json';
+/** Delete a workflow file from disk. */
+export function deleteWorkflow(cwd: string, id: string): void {
+  try {
+    const path = resolveWorkflowPath(cwd, id);
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* ignore */
+  }
+}
+
+// ── Migration ──────────────────────────────────────────────────
 
 /**
- * Backup current session file before replacement.
- * Keeps at most 1 backup (overwrites previous).
- * No-op if no session file exists.
+ * Migrate old single-file .pi/workflow-session.json to new directory layout.
+ * Idempotent: no-op if old file doesn't exist or target already exists.
  */
-export function backupSession(cwd: string): void {
+export function migrateSessionIfNeeded(cwd: string): void {
+  const oldPath = resolve(join(cwd, '.pi', 'workflow-session.json'));
+  if (!existsSync(oldPath)) return;
   try {
-    const sessionPath = resolveSessionPath(cwd);
-    if (!existsSync(sessionPath)) return;
-    const backupPath = resolve(join(cwd, MEMORY_DIR, BACKUP_FILE));
-    copyFileSync(sessionPath, backupPath);
-  } catch (e) {
-    console.error('[workflow] session backup failed:', e);
+    const raw = JSON.parse(readFileSync(oldPath, 'utf-8'));
+    if (typeof raw?.id === 'string') {
+      ensureWorkflowsDir(cwd);
+      const newPath = resolveWorkflowPath(cwd, raw.id);
+      if (!existsSync(newPath)) {
+        atomicWriteFileSync(newPath, JSON.stringify(raw, null, '\t'), {
+          encoding: 'utf-8',
+          mode: 0o600,
+        });
+        setActiveWorkflowId(cwd, raw.id);
+      }
+      unlinkSync(oldPath);
+    }
+  } catch {
+    /* migration best-effort */
   }
+}
+
+// ── Backward-compatible no-op ──────────────────────────────────
+
+/**
+ * No-op in multi-workflow model: each workflow has its own file.
+ * Kept for call-site compatibility.
+ */
+export function backupSession(_cwd: string): void {
+  // No-op: each workflow is already in its own file
+}
+
+// ── Session parsing (shared) ───────────────────────────────────
+
+function parseSession(raw: unknown): WorkflowSession | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+
+  if (
+    typeof r.id !== 'string' ||
+    typeof r.state !== 'string' ||
+    typeof r.description !== 'string' ||
+    !VALID_STATES.has(r.state)
+  ) {
+    return null;
+  }
+
+  // Validate and filter todos
+  const todos: TodoItem[] = Array.isArray(r.todos)
+    ? (r.todos as unknown[]).filter(
+        (t: unknown): t is TodoItem =>
+          typeof t === 'object' &&
+          t !== null &&
+          typeof (t as TodoItem).title === 'string' &&
+          VALID_TODO_STATUSES.has((t as TodoItem).status),
+      )
+    : [];
+
+  // Clamp activeTodoIndex to valid range
+  const rawIndex =
+    typeof r.activeTodoIndex === 'number' && Number.isFinite(r.activeTodoIndex)
+      ? Math.floor(r.activeTodoIndex)
+      : -1;
+  const activeTodoIndex =
+    todos.length === 0
+      ? -1
+      : Math.max(-1, Math.min(rawIndex, todos.length - 1));
+
+  return {
+    id: r.id,
+    name: typeof r.name === 'string' ? r.name : undefined,
+    state: r.state as WorkflowState,
+    description: r.description,
+    planContent: typeof r.planContent === 'string' ? r.planContent : '',
+    verifyPlanResult:
+      typeof r.verifyPlanResult === 'string' ? r.verifyPlanResult : '',
+    retryCount: typeof r.retryCount === 'number' ? r.retryCount : 0,
+    completed:
+      typeof r.completed === 'boolean' ? r.completed : r.state === 'done',
+    todos,
+    activeTodoIndex,
+    startupPrepRequired:
+      typeof r.startupPrepRequired === 'boolean'
+        ? r.startupPrepRequired
+        : false,
+    startupPrepNote:
+      typeof r.startupPrepNote === 'string' ? r.startupPrepNote : '',
+    startupPrepLocked:
+      typeof r.startupPrepLocked === 'boolean' ? r.startupPrepLocked : false,
+    gitBranch: typeof r.gitBranch === 'string' ? r.gitBranch : undefined,
+    gitWorktreePath:
+      typeof r.gitWorktreePath === 'string' ? r.gitWorktreePath : undefined,
+    compoundMemorySnapshot:
+      typeof r.compoundMemorySnapshot === 'object' &&
+      r.compoundMemorySnapshot !== null &&
+      typeof (r.compoundMemorySnapshot as Record<string, unknown>).patterns ===
+        'number' &&
+      typeof (r.compoundMemorySnapshot as Record<string, unknown>).gotchas ===
+        'number' &&
+      typeof (r.compoundMemorySnapshot as Record<string, unknown>).decisions ===
+        'number'
+        ? (r.compoundMemorySnapshot as {
+            patterns: number;
+            gotchas: number;
+            decisions: number;
+          })
+        : undefined,
+    compoundStep:
+      typeof r.compoundStep === 'number' &&
+      Number.isFinite(r.compoundStep) &&
+      r.compoundStep >= 0 &&
+      Number.isInteger(r.compoundStep)
+        ? Math.min(r.compoundStep, 8)
+        : undefined,
+  };
 }

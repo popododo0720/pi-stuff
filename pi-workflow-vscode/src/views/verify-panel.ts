@@ -35,6 +35,25 @@ export class VerifyPanel implements vscode.Disposable {
     });
   }
 
+  showText(title: string, text: string): void {
+    if (this.panel) {
+      this.panel.reveal();
+      this.panel.title = title;
+      this.panel.webview.html = this.getHtml(text);
+      return;
+    }
+    this.panel = vscode.window.createWebviewPanel(
+      'piVerify',
+      title,
+      vscode.ViewColumn.Beside,
+      { enableScripts: false },
+    );
+    this.panel.webview.html = this.getHtml(text);
+    this.panel.onDidDispose(() => {
+      this.panel = undefined;
+    });
+  }
+
   update(session: WorkflowSession | null): void {
     if (!this.panel) return;
     if (!session) {

@@ -1,84 +1,145 @@
 // providers/workflow-tree.ts — Sidebar tree view showing workflow status
+// Multi-workflow: shows list of workflows when >1, details when single or active.
 
 import * as vscode from 'vscode';
-import type { WorkflowSession } from '../types/workflow';
+import type { WorkflowListItem, WorkflowSession, WorkflowState } from '../types/workflow';
 import { STATE_EMOJI, STATE_LABELS } from '../types/workflow';
 
+type WorkflowNode =
+  | { kind: 'workflow'; item: WorkflowListItem }
+  | {
+      kind: 'detail';
+      label: string;
+      icon: string;
+      command?: vscode.Command;
+      description?: string;
+      tooltip?: string;
+    };
+
 export class WorkflowTreeProvider
-  implements vscode.TreeDataProvider<vscode.TreeItem>
+  implements vscode.TreeDataProvider<WorkflowNode>
 {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private session: WorkflowSession | null = null;
+  private list: WorkflowListItem[] = [];
 
+  /** Update active session (called from syncUI via onDidChange). */
   update(session: WorkflowSession | null): void {
     this.session = session;
     this._onDidChangeTreeData.fire();
   }
 
-  getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
-    return element;
+  /** Update workflow list (called from onDidChangeList). */
+  updateList(list: WorkflowListItem[]): void {
+    this.list = list;
+    this._onDidChangeTreeData.fire();
   }
 
-  getChildren(): vscode.TreeItem[] {
-    if (!this.session) return [];
+  getTreeItem(element: WorkflowNode): vscode.TreeItem {
+    if (element.kind === 'workflow') {
+      const w = element.item;
+      const emoji = STATE_EMOJI[w.state as WorkflowState] ?? '❓';
+      const item = new vscode.TreeItem(
+        `${emoji} ${w.name || w.description}`,
+        w.active
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed,
+      );
+      item.description = w.active ? '(active)' : w.state;
+      item.contextValue = w.active ? 'activeWorkflow' : 'inactiveWorkflow';
+      if (!w.active) {
+        item.command = {
+          command: 'pi.selectWorkflow',
+          title: 'Select',
+          arguments: [w.id],
+        };
+      }
+      return item;
+    }
 
-    const s = this.session;
-    const items: vscode.TreeItem[] = [];
+    // Detail node
+    const item = new vscode.TreeItem(
+      element.label,
+      vscode.TreeItemCollapsibleState.None,
+    );
+    item.iconPath = new vscode.ThemeIcon(element.icon);
+    if (element.command) item.command = element.command;
+    if (element.description) item.description = element.description;
+    if (element.tooltip) item.tooltip = element.tooltip;
+    return item;
+  }
+
+  getChildren(element?: WorkflowNode): WorkflowNode[] {
+    if (!element) {
+      // Root level
+      if (this.list.length <= 1 && this.session) {
+        // Single workflow: show details directly (backward compatible)
+        return this.getDetailNodes(this.session);
+      }
+      if (this.list.length === 0) return [];
+      // Multiple workflows: show workflow list
+      return this.list.map((item) => ({
+        kind: 'workflow' as const,
+        item,
+      }));
+    }
+
+    // Children of a workflow node: show details for active workflow
+    if (element.kind === 'workflow' && element.item.active && this.session) {
+      return this.getDetailNodes(this.session);
+    }
+    return [];
+  }
+
+  private getDetailNodes(s: WorkflowSession): WorkflowNode[] {
+    const items: WorkflowNode[] = [];
 
     // Status
-    const statusItem = new vscode.TreeItem(
-      `${STATE_EMOJI[s.state]} ${STATE_LABELS[s.state]}`,
-      vscode.TreeItemCollapsibleState.None,
-    );
-    statusItem.iconPath = new vscode.ThemeIcon('symbol-event');
-    items.push(statusItem);
+    items.push({
+      kind: 'detail',
+      label: `${STATE_EMOJI[s.state]} ${STATE_LABELS[s.state]}`,
+      icon: 'symbol-event',
+    });
 
     // Description
-    const descItem = new vscode.TreeItem(
-      `📋 ${s.description}`,
-      vscode.TreeItemCollapsibleState.None,
-    );
-    descItem.iconPath = new vscode.ThemeIcon('note');
-    descItem.tooltip = s.description;
-    items.push(descItem);
+    items.push({
+      kind: 'detail',
+      label: `📋 ${s.description}`,
+      icon: 'note',
+      tooltip: s.description,
+    });
 
     // Branch (if available)
     if (s.gitBranch) {
-      const branchItem = new vscode.TreeItem(
-        `Branch: ${s.gitBranch}`,
-        vscode.TreeItemCollapsibleState.None,
-      );
-      branchItem.iconPath = new vscode.ThemeIcon('git-branch');
-      items.push(branchItem);
+      items.push({
+        kind: 'detail',
+        label: `Branch: ${s.gitBranch}`,
+        icon: 'git-branch',
+      });
     }
 
     // Plan (clickable)
-    const planItem = new vscode.TreeItem(
-      'Plan',
-      vscode.TreeItemCollapsibleState.None,
-    );
-    planItem.iconPath = new vscode.ThemeIcon('file-text');
-    planItem.command = {
-      command: 'pi.openPlan',
-      title: 'Open Plan',
-    };
-    planItem.description = s.planContent ? '(available)' : '(empty)';
-    items.push(planItem);
+    items.push({
+      kind: 'detail',
+      label: 'Plan',
+      icon: 'file-text',
+      command: { command: 'pi.openPlan', title: 'Open Plan' },
+      description: s.planContent ? '(available)' : '(empty)',
+    });
 
     // Verification (clickable)
-    const verifyItem = new vscode.TreeItem(
-      'Verification',
-      vscode.TreeItemCollapsibleState.None,
-    );
-    verifyItem.iconPath = new vscode.ThemeIcon('checklist');
-    verifyItem.command = {
-      command: 'pi.openVerification',
-      title: 'Open Verification Results',
-    };
-    verifyItem.description = s.verifyPlanResult ? '(available)' : '(empty)';
-    items.push(verifyItem);
+    items.push({
+      kind: 'detail',
+      label: 'Verification',
+      icon: 'checklist',
+      command: {
+        command: 'pi.openVerification',
+        title: 'Open Verification Results',
+      },
+      description: s.verifyPlanResult ? '(available)' : '(empty)',
+    });
 
     return items;
   }

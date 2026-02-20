@@ -104,15 +104,6 @@ export async function handleImplDone(
   session.state = 'verifyImpl';
   hctx.flush();
 
-  onUpdate?.({
-    content: [
-      {
-        type: 'text' as const,
-        text: `🔍 Verifying implementation... (${(settings.stages.verify?.models ?? []).join(' + ') || 'no models'})`,
-      },
-    ],
-  });
-
   try {
     const todoContext =
       session.activeTodoIndex >= 0 && session.todos.length > 1
@@ -137,7 +128,23 @@ export async function handleImplDone(
       signal,
       params.content,
       todoContext,
+      (event) => {
+        onUpdate?.({
+          content: [
+            { type: 'text' as const, text: JSON.stringify(event) },
+          ],
+        });
+      },
     );
+
+    // Save verification result to current TODO
+    if (
+      session.activeTodoIndex >= 0 &&
+      session.todos[session.activeTodoIndex]
+    ) {
+      session.todos[session.activeTodoIndex].verifyResult =
+        formatVerificationSummary(result);
+    }
 
     // Infrastructure error → stay in verifyImpl (allow skipVerification)
     if (result.halted) {

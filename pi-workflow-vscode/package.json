@@ -22,6 +22,13 @@
           "title": "Pi Workflow",
           "icon": "media/pi-icon.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "pi-chat-container",
+          "title": "Pi Chat",
+          "icon": "media/pi-icon.svg"
+        }
       ]
     },
     "views": {
@@ -37,7 +44,9 @@
         {
           "id": "pi.files",
           "name": "Changed Files"
-        },
+        }
+      ],
+      "pi-chat-container": [
         {
           "id": "pi.chat",
           "type": "webview",
@@ -80,14 +89,26 @@
       },
       {
         "command": "pi.newSession",
-        "title": "Pi: New Session",
-        "icon": "$(refresh)"
+        "title": "Pi: New Session"
+      },
+      {
+        "command": "pi.newWorkflow",
+        "title": "Pi: New Workflow",
+        "icon": "$(add)"
+      },
+      {
+        "command": "pi.selectTodo",
+        "title": "Pi: Select TODO"
+      },
+      {
+        "command": "pi.selectWorkflow",
+        "title": "Pi: Select Workflow"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "pi.newSession",
+          "command": "pi.newWorkflow",
           "when": "view == pi.chat",
           "group": "navigation"
         }

@@ -47,7 +47,7 @@ export async function autoCommitTodo(
   session: WorkflowSession,
   todoIndex: number,
   gitCwd: string,
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{ ok: boolean; message: string; commitHash?: string }> {
   const add = await runGit(pi, ['add', '-A'], gitCwd);
   if (!add.ok) {
     return {
@@ -58,7 +58,12 @@ export async function autoCommitTodo(
 
   const hasChanges = await hasUncommittedChanges(pi, gitCwd);
   if (!hasChanges) {
-    return { ok: true, message: 'No changes to commit for this TODO.' };
+    const currentHead = await runGit(pi, ['rev-parse', 'HEAD'], gitCwd);
+    return {
+      ok: true,
+      message: 'No changes to commit for this TODO.',
+      commitHash: currentHead.ok ? currentHead.stdout : undefined,
+    };
   }
 
   const todo = session.todos[todoIndex];
@@ -72,10 +77,11 @@ export async function autoCommitTodo(
     };
   }
 
-  const hash = await runGit(pi, ['rev-parse', '--short', 'HEAD'], gitCwd);
+  const hash = await runGit(pi, ['rev-parse', 'HEAD'], gitCwd);
   return {
     ok: true,
-    message: `Committed TODO #${todoIndex + 1}${hash.ok && hash.stdout ? ` (${hash.stdout})` : ''}`,
+    message: `Committed TODO #${todoIndex + 1}${hash.ok && hash.stdout ? ` (${hash.stdout.slice(0, 7)})` : ''}`,
+    commitHash: hash.ok ? hash.stdout : undefined,
   };
 }
 

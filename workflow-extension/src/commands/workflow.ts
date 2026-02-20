@@ -10,7 +10,11 @@ import type {
 import { generateWorkflowId } from '../constants';
 import { updateStatusBar } from '../context/status';
 import { loadMemory, resolveMemoryPath, saveMemory } from '../storage/memory';
-import { backupSession } from '../storage/session';
+import {
+  listWorkflows,
+  loadWorkflowById,
+  setActiveWorkflowId,
+} from '../storage/session';
 import { loadSettings } from '../storage/settings';
 import { applyStageConfig } from '../tools/transition';
 import type { WorkflowSession } from '../types';
@@ -41,40 +45,75 @@ export function registerWorkflowCommand(
       const currentSession = getSession();
       const settings = loadSettings(ctx.cwd);
 
-      // Resume existing session when no description provided
-      if (!description && currentSession && currentSession.state !== 'done') {
-        const resumeChoice = await ctx.ui.select(
-          'Active workflow in progress',
-          ['Resume current workflow', 'Start new workflow'],
-        );
-        if (!resumeChoice || resumeChoice === 'Resume current workflow') {
-          // Re-apply stage config for current state
-          const stateConfigMap: Record<string, keyof typeof settings.stages> = {
-            plan: 'plan',
-            verifyPlan: 'verify',
-            implement: 'implement',
-            verifyImpl: 'verify',
-            compound: 'compound',
-          };
-          const configKey = stateConfigMap[currentSession.state];
-          if (configKey) {
-            await applyStageConfig(pi, ctx, settings.stages[configKey]);
+      let workflowName: string | undefined;
+
+      // Multi-workflow: list existing workflows or start new
+      if (!description) {
+        const workflows = listWorkflows(ctx.cwd);
+        const activeWorkflows = workflows.filter((w) => w.state !== 'done');
+
+        if (activeWorkflows.length > 0) {
+          const options = [
+            ...activeWorkflows.map(
+              (w) => `📋 ${w.name || w.description} (${w.id} - ${w.state})`,
+            ),
+            '➕ Start new workflow',
+          ];
+          const selected = await ctx.ui.select('Select workflow', options);
+
+          if (!selected) return;
+
+          if (selected !== '➕ Start new workflow') {
+            // Resume selected workflow — extract ID from selection string
+            const wf = activeWorkflows.find((w) => selected.includes(w.id));
+            if (!wf) return;
+            const loaded = loadWorkflowById(ctx.cwd, wf.id);
+            if (loaded) {
+              setActiveWorkflowId(ctx.cwd, loaded.id);
+              setSession(loaded);
+              // Re-apply stage config for current state
+              const stateConfigMap: Record<
+                string,
+                keyof typeof settings.stages
+              > = {
+                plan: 'plan',
+                verifyPlan: 'verify',
+                implement: 'implement',
+                verifyImpl: 'verify',
+                compound: 'compound',
+              };
+              const configKey = stateConfigMap[loaded.state];
+              if (configKey) {
+                await applyStageConfig(pi, ctx, settings.stages[configKey]);
+              }
+              updateStatusBar(ctx, loaded);
+              ctx.ui.notify(
+                `🔄 Resumed: ${loaded.name || loaded.description} (${loaded.state})`,
+                'info',
+              );
+              return;
+            }
           }
-          updateStatusBar(ctx, currentSession);
-          ctx.ui.notify(
-            `🔄 Resumed workflow: ${currentSession.description} (${currentSession.state})`,
-            'info',
-          );
-          return;
+          // Fall through to new workflow creation
         }
-        // Fall through to new workflow creation
+
+        // Ask for name when no description provided
+        const nameInput = await ctx.ui.input(
+          'Workflow name (brief description)',
+        );
+        if (!nameInput) return;
+        workflowName = nameInput;
+      }
+
+      if (description) {
+        workflowName = description;
       }
 
       // Confirm replacement if a workflow is already active
       if (currentSession && currentSession.state !== 'done') {
         const confirmed = await ctx.ui.confirm(
           'Active workflow exists',
-          'A workflow is in progress. Replace with a new one?',
+          'A workflow is in progress. Start a new one alongside it?',
         );
         if (!confirmed) return;
       }
@@ -107,8 +146,9 @@ export function registerWorkflowCommand(
       const id = generateWorkflowId();
       const session: WorkflowSession = {
         id,
+        name: workflowName,
         state: 'plan',
-        description: description || 'Workflow',
+        description: description || workflowName || 'Workflow',
         planContent: '',
         verifyPlanResult: '',
         retryCount: 0,
@@ -293,9 +333,6 @@ export function registerWorkflowCommand(
           );
         }
       }
-
-      // Backup previous session before replacement
-      backupSession(ctx.cwd);
 
       // Clean up previous workflow only after new-start decisions are finalized
       cleanupVerificationResults(ctx.cwd);

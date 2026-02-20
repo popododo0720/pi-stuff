@@ -19,6 +19,18 @@ import {
 } from './prompt-builder';
 import { detectStack, getStackHint } from './stack-detect';
 
+// ── Verification progress types ──────────────────────────────────
+
+export interface VerifyTaskInfo {
+  taskId: string;
+  label: string;
+}
+
+export interface VerifyProgressEvent extends VerifyTaskInfo {
+  __verifyProgress: true;
+  status: 'running' | 'passed' | 'failed' | 'skipped';
+}
+
 // ── Parallel verification ────────────────────────────────────────
 
 export async function runParallelVerification(
@@ -35,6 +47,11 @@ export async function runParallelVerification(
     totalCount: number;
     completedTitles: string[];
   },
+  onProgress?: (
+    event:
+      | VerifyProgressEvent
+      | { __verifyStart: true; tasks: VerifyTaskInfo[] },
+  ) => void,
 ): Promise<VerificationResult> {
   const verifyConfig = settings.stages.verify;
   const verifyModels = verifyConfig?.models ?? [];
@@ -84,17 +101,6 @@ export async function runParallelVerification(
     customChecks,
   });
 
-  const corePromises = verifyModels.map((model) =>
-    runSingleModel(
-      model,
-      corePrompt,
-      pi,
-      settings.verifyTimeout,
-      verifyThinking,
-      signal,
-    ),
-  );
-
   // ── Build domain task descriptors (stable index for retry) ──
   interface DomainTask {
     domain: (typeof ALL_DOMAINS)[number];
@@ -128,25 +134,89 @@ export async function runParallelVerification(
   }
 
   // Must have at least one verification call
-  if (corePromises.length === 0 && domainTasks.length === 0) {
+  if (verifyModels.length === 0 && domainTasks.length === 0) {
     throw new Error(
       'No verification models configured. Use /workflow-settings to add models.',
     );
   }
 
+  // Emit task list for progress tracking (before any running events)
+  if (onProgress) {
+    const taskList: VerifyTaskInfo[] = [];
+    verifyModels.forEach((model, i) => {
+      taskList.push({ taskId: `core-${i}`, label: `${model} (Core)` });
+    });
+    domainTasks.forEach((task, i) => {
+      taskList.push({
+        taskId: `domain-${task.domain.id}-${i}`,
+        label: `${task.model} (${task.domain.name})`,
+      });
+    });
+    onProgress({ __verifyStart: true, tasks: taskList });
+  }
+
   // Execute core + domain in parallel
-  const domainPromises = domainTasks.map((task) =>
-    runSingleModel(
+  const corePromises = verifyModels.map((model, i) => {
+    const taskId = `core-${i}`;
+    const label = `${model} (Core)`;
+    onProgress?.({
+      __verifyProgress: true,
+      taskId,
+      label,
+      status: 'running',
+    });
+    return runSingleModel(
+      model,
+      corePrompt,
+      pi,
+      settings.verifyTimeout,
+      verifyThinking,
+      signal,
+    ).then((r) => {
+      onProgress?.({
+        __verifyProgress: true,
+        taskId,
+        label,
+        status: r.infrastructureError
+          ? 'skipped'
+          : r.passed
+            ? 'passed'
+            : 'failed',
+      });
+      return r;
+    });
+  });
+
+  const domainPromises = domainTasks.map((task, i) => {
+    const taskId = `domain-${task.domain.id}-${i}`;
+    const label = `${task.model} (${task.domain.name})`;
+    onProgress?.({
+      __verifyProgress: true,
+      taskId,
+      label,
+      status: 'running',
+    });
+    return runSingleModel(
       task.model,
       task.prompt,
       pi,
       settings.verifyTimeout,
       task.thinking,
       signal,
-    ).then(
-      (r): ModelVerificationResult => ({ ...r, domain: task.domain.name }),
-    ),
-  );
+    ).then((r): ModelVerificationResult => {
+      onProgress?.({
+        __verifyProgress: true,
+        taskId,
+        label,
+        status: r.infrastructureError
+          ? 'skipped'
+          : r.passed
+            ? 'passed'
+            : 'failed',
+      });
+      return { ...r, domain: task.domain.name };
+    });
+  });
 
   const [coreResults, domainResults] = await Promise.all([
     Promise.all(corePromises),
@@ -170,6 +240,14 @@ export async function runParallelVerification(
   if (retryIndices.length > 0) {
     const retryPromises = retryIndices.map((i) => {
       const task = domainTasks[i];
+      const taskId = `domain-${task.domain.id}-${i}`;
+      const label = `${task.model} (${task.domain.name})`;
+      onProgress?.({
+        __verifyProgress: true,
+        taskId,
+        label,
+        status: 'running',
+      });
       return runSingleModel(
         task.model,
         task.prompt,
@@ -177,10 +255,22 @@ export async function runParallelVerification(
         settings.verifyTimeout,
         task.thinking,
         signal,
-      ).then((retried): [number, ModelVerificationResult] => [
-        i,
-        { ...retried, domain: task.domain.name, retryAttempt: 1 },
-      ]);
+      ).then((retried): [number, ModelVerificationResult] => {
+        onProgress?.({
+          __verifyProgress: true,
+          taskId,
+          label,
+          status: retried.infrastructureError
+            ? 'skipped'
+            : retried.passed
+              ? 'passed'
+              : 'failed',
+        });
+        return [
+          i,
+          { ...retried, domain: task.domain.name, retryAttempt: 1 },
+        ];
+      });
     });
     const retryResults = await Promise.all(retryPromises);
     for (const [i, result] of retryResults) {

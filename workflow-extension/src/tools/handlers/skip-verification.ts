@@ -2,6 +2,7 @@
 // Allows skipping verification when models are unavailable (infra errors).
 
 import { loadMemory } from '../../storage/memory';
+import { runGit } from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
 export async function handleSkipVerification(
@@ -13,6 +14,13 @@ export async function handleSkipVerification(
     session.state = 'implement';
     session.retryCount = 0;
     session.verifyPlanResult = 'Verification skipped by user';
+    // Capture startCommit for the first active TODO
+    if (session.activeTodoIndex >= 0 && session.todos[session.activeTodoIndex]) {
+      const headResult = await runGit(hctx.pi, ['rev-parse', 'HEAD'], hctx.ctx.cwd);
+      if (headResult.ok) {
+        session.todos[session.activeTodoIndex].startCommit = headResult.stdout;
+      }
+    }
     return {
       text: '⚠️ Plan verification skipped. Proceeding to implementation.\nNote: No automated quality gate was applied.',
       stageConfig: settings.stages.implement,
