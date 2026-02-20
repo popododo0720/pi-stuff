@@ -3,6 +3,7 @@
 
 import * as vscode from 'vscode';
 import type { PiRpcClient } from '../core/rpc-client';
+import type { ChatHistoryStore } from '../core/chat-history';
 import type {
   AgentState,
   AutoRetryStartEvent,
@@ -25,7 +26,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private readonly _onDidResolve = new vscode.EventEmitter<void>();
   readonly onDidResolve = this._onDidResolve.event;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly historyStore: ChatHistoryStore,
+  ) {}
 
   // ── WebviewViewProvider ──────────────────────────────────────
 
@@ -113,6 +117,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           break;
         case 'text_end':
           this.postToWebview({ type: 'textEnd', fullText: evt.content ?? '' });
+          this.historyStore.append({
+            role: 'assistant',
+            content: evt.content ?? '',
+            timestamp: Date.now(),
+          });
           break;
         case 'thinking_start':
           this.postToWebview({ type: 'thinkingStart' });
@@ -127,6 +136,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           break;
         case 'error':
           this.postToWebview({ type: 'error', message: evt.reason ?? 'Unknown error' });
+          this.historyStore.append({
+            role: 'error',
+            content: evt.reason ?? 'Unknown error',
+            timestamp: Date.now(),
+          });
           break;
         // done → ignored (normal completion, agent_end handles it)
         // start, text_start, toolcall_start/delta/end → ignored
@@ -199,47 +213,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     // Top-level validation: reject malformed messages
     if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
 
-    if (!this.rpcClient?.isRunning()) {
-      // Post idle state so webview knows pi is not connected
-      this.postToWebview({ type: 'stateUpdate', isStreaming: false });
-      if (msg.type !== 'ready') {
-        this.postToWebview({
-          type: 'error',
-          message: 'Pi is not running. Use "Pi: Start Chat" first.',
-        });
+    // Handle 'ready' before rpcClient guard — history must load even if pi isn't running yet
+    if (msg.type === 'ready') {
+      const history = this.historyStore.getAll();
+      if (history.length > 0) {
+        this.postToWebview({ type: 'loadHistory', messages: history });
       }
-      return;
-    }
-
-    const client = this.rpcClient;
-
-    switch (msg.type) {
-      case 'sendMessage':
-        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
-        client.prompt(msg.text).catch((err) =>
-          this.postToWebview({ type: 'error', message: String(err) }),
-        );
-        break;
-      case 'abort':
-        client.abort().catch((err) =>
-          this.postToWebview({ type: 'error', message: String(err) }),
-        );
-        break;
-      case 'newSession':
-        client
-          .newSession()
-          .then((resp) => {
-            const d = resp.data as { cancelled?: boolean } | undefined;
-            if (!d?.cancelled) {
-              this.postToWebview({ type: 'clear' });
-            }
-          })
-          .catch((err) =>
-            this.postToWebview({ type: 'error', message: String(err) }),
-          );
-        break;
-      case 'ready':
-        client
+      // If pi is running, also fetch current state
+      if (this.rpcClient?.isRunning()) {
+        this.rpcClient
           .getState()
           .then((resp) => {
             const d = resp.data as AgentState | undefined;
@@ -255,6 +237,49 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
               type: 'error',
               message: 'Failed to get state: ' + String(err),
             }),
+          );
+      } else {
+        this.postToWebview({ type: 'stateUpdate', isStreaming: false });
+      }
+      return;
+    }
+
+    if (!this.rpcClient?.isRunning()) {
+      this.postToWebview({ type: 'stateUpdate', isStreaming: false });
+      this.postToWebview({
+        type: 'error',
+        message: 'Pi is not running. Use "Pi: Start Chat" first.',
+      });
+      return;
+    }
+
+    const client = this.rpcClient;
+
+    switch (msg.type) {
+      case 'sendMessage':
+        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
+        this.historyStore.append({ role: 'user', content: msg.text, timestamp: Date.now() });
+        client.prompt(msg.text).catch((err) =>
+          this.postToWebview({ type: 'error', message: String(err) }),
+        );
+        break;
+      case 'abort':
+        client.abort().catch((err) =>
+          this.postToWebview({ type: 'error', message: String(err) }),
+        );
+        break;
+      case 'newSession':
+        client
+          .newSession()
+          .then((resp) => {
+            const d = resp.data as { cancelled?: boolean } | undefined;
+            if (!d?.cancelled) {
+              this.historyStore.addSessionSeparator();
+              this.postToWebview({ type: 'clear' });
+            }
+          })
+          .catch((err) =>
+            this.postToWebview({ type: 'error', message: String(err) }),
           );
         break;
     }
@@ -602,6 +627,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
           case 'retryStart': addSystemMessage('Retrying (' + msg.attempt + '/' + msg.maxAttempts + ')...'); break;
           case 'retryEnd': addSystemMessage(msg.success ? 'Retry succeeded.' : 'Retry failed.'); break;
           case 'clear': messagesEl.innerHTML = ''; break;
+          case 'loadHistory':
+            messagesEl.innerHTML = '';
+            for (const item of msg.messages) {
+              switch (item.role) {
+                case 'user': addUserMessage(item.content); break;
+                case 'assistant': {
+                  const div = document.createElement('div');
+                  div.className = 'msg msg-assistant';
+                  const pre = document.createElement('pre');
+                  pre.textContent = item.content;
+                  div.appendChild(pre);
+                  messagesEl.appendChild(div);
+                  break;
+                }
+                case 'error': addErrorMessage(item.content); break;
+                case 'system': addSystemMessage(item.content); break;
+              }
+            }
+            autoScroll();
+            break;
         }
       });
 

@@ -199,6 +199,14 @@ export type RpcEvent =
   | AutoRetryEndEvent
   | ExtensionUIRequest;
 
+// ── Chat History ───────────────────────────────────────────────
+
+export interface ChatHistoryItem {
+  role: 'user' | 'assistant' | 'system' | 'error';
+  content: string;
+  timestamp: number;
+}
+
 // ── Webview <-> Extension messages ─────────────────────────────
 
 export type ExtToWebview =
@@ -240,7 +248,8 @@ export type ExtToWebview =
       error: string;
     }
   | { type: 'retryEnd'; success: boolean }
-  | { type: 'clear' };
+  | { type: 'clear' }
+  | { type: 'loadHistory'; messages: ChatHistoryItem[] };
 
 export type WebviewToExt =
   | { type: 'sendMessage'; text: string }

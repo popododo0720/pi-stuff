@@ -12,6 +12,7 @@ import { WorkflowStatusBar } from './providers/status-bar';
 import { TodoTreeProvider } from './providers/todo-tree';
 import { WorkflowTreeProvider } from './providers/workflow-tree';
 import type { WorkflowSession } from './types/workflow';
+import { ChatHistoryStore } from './core/chat-history';
 import { ChatViewProvider } from './views/chat-panel';
 import { PlanPanel } from './views/plan-panel';
 import { VerifyPanel } from './views/verify-panel';
@@ -35,7 +36,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(outputChannel);
 
   // ── Phase 2: Chat Webview (registered regardless of workspace) ──
-  const chatViewProvider = new ChatViewProvider(context.extensionUri);
+  const chatHistoryStore = new ChatHistoryStore(context.workspaceState);
+  const chatViewProvider = new ChatViewProvider(context.extensionUri, chatHistoryStore);
   context.subscriptions.push(chatViewProvider);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider, {
@@ -117,9 +119,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('pi.newSession', () => {
       if (currentClient?.isRunning()) {
-        currentClient.newSession().catch((err) => {
-          vscode.window.showErrorMessage(`New session failed: ${err}`);
-        });
+        currentClient
+          .newSession()
+          .then((resp) => {
+            const d = resp.data as { cancelled?: boolean } | undefined;
+            if (!d?.cancelled) {
+              chatHistoryStore.addSessionSeparator();
+              chatViewProvider.postToWebview({ type: 'clear' });
+            }
+          })
+          .catch((err) => {
+            vscode.window.showErrorMessage(`New session failed: ${err}`);
+          });
       }
     }),
   );
