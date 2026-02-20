@@ -2,7 +2,10 @@
 // Runs parallel impl verification, transitions based on result.
 
 import { SELF_AUDIT_TEMPLATE } from '../../constants';
-import { loadMemory, saveMemory } from '../../storage/memory';
+import {
+  loadWorkflowMemory,
+  saveWorkflowMemory,
+} from '../../storage/memory';
 import {
   formatVerificationSummary,
   runParallelVerification,
@@ -179,11 +182,11 @@ export async function handleImplDone(
 
     // Passed → compound
     if (result.passed) {
-      const mem = loadMemory(ctx.cwd);
+      const wfMem = loadWorkflowMemory(ctx.cwd, session.id);
       session.compoundMemorySnapshot = {
-        patterns: mem.patterns.length,
-        gotchas: mem.gotchas.length,
-        decisions: mem.decisions.length,
+        patterns: wfMem.patterns.length,
+        gotchas: wfMem.gotchas.length,
+        decisions: wfMem.decisions.length,
       };
       session.state = 'compound';
       session.retryCount = 0;
@@ -231,9 +234,9 @@ export async function handleImplDone(
           .join('; ')
           .slice(0, 200);
         if (criticals) {
-          const mem = loadMemory(ctx.cwd);
-          mem.gotchas.push(`[auto] Verification failure: ${criticals}`);
-          saveMemory(ctx.cwd, mem);
+          const wfMem = loadWorkflowMemory(ctx.cwd, session.id);
+          wfMem.gotchas.push(`[auto] Verification failure: ${criticals}`);
+          saveWorkflowMemory(ctx.cwd, session.id, wfMem);
         }
       } catch {
         /* ignore auto-gotcha errors */
@@ -268,11 +271,11 @@ export async function handleImplDone(
     const isNoModels =
       e instanceof Error && e.message.includes('No verification models');
     if (isNoModels) {
-      const mem = loadMemory(ctx.cwd);
+      const wfMem = loadWorkflowMemory(ctx.cwd, session.id);
       session.compoundMemorySnapshot = {
-        patterns: mem.patterns.length,
-        gotchas: mem.gotchas.length,
-        decisions: mem.decisions.length,
+        patterns: wfMem.patterns.length,
+        gotchas: wfMem.gotchas.length,
+        decisions: wfMem.decisions.length,
       };
       session.state = 'compound';
       session.retryCount = 0;

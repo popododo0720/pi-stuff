@@ -112,6 +112,48 @@ export class SessionWatcher implements vscode.Disposable {
     void this.loadAll();
   }
 
+  /** Delete a workflow: remove JSON + memory files, clear active pointer if needed. */
+  async deleteWorkflow(id: string): Promise<{ gitBranch?: string }> {
+    const session = this.workflows.get(id);
+    const gitBranch = session?.gitBranch;
+
+    // Delete workflow JSON
+    try {
+      const fileUri = vscode.Uri.joinPath(
+        vscode.Uri.file(this.workspaceRoot), WORKFLOWS_DIR, `${id}.json`);
+      await vscode.workspace.fs.delete(fileUri);
+    } catch { /* file may not exist */ }
+
+    // Delete per-workflow memory file
+    try {
+      const memUri = vscode.Uri.joinPath(
+        vscode.Uri.file(this.workspaceRoot), WORKFLOWS_DIR, `${id}-memory.json`);
+      await vscode.workspace.fs.delete(memUri);
+    } catch { /* file may not exist */ }
+
+    // Clear active pointer if this was the active workflow
+    if (this.activeId === id) {
+      this.selfWritePending = true;
+      try {
+        const activeUri = vscode.Uri.joinPath(
+          vscode.Uri.file(this.workspaceRoot), ACTIVE_FILE);
+        await vscode.workspace.fs.writeFile(activeUri, new TextEncoder().encode(''));
+      } catch {
+        this.selfWritePending = false;
+      }
+    }
+
+    // Update in-memory state
+    this.workflows.delete(id);
+    if (this.activeId === id) {
+      this.activeId = null;
+      this.state = null;
+      this._onDidChange.fire(null);
+    }
+    this._onDidChangeList.fire(this.getList());
+    return { gitBranch };
+  }
+
   // ── Private ──────────────────────────────────────────────────
 
   private resetState(): void {

@@ -1,7 +1,7 @@
 // tools/handlers/skip-verification.ts — skipVerification action handler
 // Allows skipping verification when models are unavailable (infra errors).
 
-import { loadMemory } from '../../storage/memory';
+import { loadWorkflowMemory } from '../../storage/memory';
 import { runGit } from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
@@ -28,11 +28,11 @@ export async function handleSkipVerification(
   }
 
   if (session.state === 'verifyImpl') {
-    const mem = loadMemory(hctx.ctx.cwd);
+    const wfMem = loadWorkflowMemory(hctx.ctx.cwd, session.id);
     session.compoundMemorySnapshot = {
-      patterns: mem.patterns.length,
-      gotchas: mem.gotchas.length,
-      decisions: mem.decisions.length,
+      patterns: wfMem.patterns.length,
+      gotchas: wfMem.gotchas.length,
+      decisions: wfMem.decisions.length,
     };
     session.state = 'compound';
     session.retryCount = 0;

@@ -49,6 +49,7 @@ export class WorkflowTreeProvider
       );
       item.description = w.active ? '(active)' : w.state;
       item.contextValue = w.active ? 'activeWorkflow' : 'inactiveWorkflow';
+      item.id = w.id;
       if (!w.active) {
         item.command = {
           command: 'pi.selectWorkflow',

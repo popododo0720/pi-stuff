@@ -285,20 +285,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <style nonce="${nonce}">
     :root {
-      --color-token-bg-primary: var(--vscode-editor-background);
-      --color-token-bg-secondary: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      --color-token-bg-primary: var(--vscode-sideBar-background, var(--vscode-editor-background));
+      --color-token-bg-secondary: color-mix(in srgb, var(--color-token-bg-primary) 92%, transparent);
       --color-token-foreground: var(--vscode-editor-foreground);
-      --color-token-border: var(--vscode-panel-border);
+      --color-token-border: color-mix(in oklab, var(--vscode-foreground) 8%, transparent);
       --color-token-input-background: var(--vscode-input-background);
       --color-token-input-border: var(--vscode-input-border, transparent);
       --color-token-input-foreground: var(--vscode-input-foreground);
-      --color-token-text-secondary: var(--vscode-descriptionForeground);
+      --color-token-text-secondary: color-mix(in srgb, var(--color-token-foreground) 70%, transparent);
       --color-token-terminal-background: var(--vscode-textCodeBlock-background);
       --color-token-button-background: var(--vscode-button-background);
       --color-token-button-foreground: var(--vscode-button-foreground);
       --color-token-error: var(--vscode-errorForeground, #f48771);
       --color-token-success: var(--vscode-testing-iconPassed, #73c991);
       --color-token-warning: var(--vscode-editorWarning-foreground, #cca700);
+      --color-token-bg-tertiary: color-mix(in srgb, var(--color-token-bg-primary) 85%, transparent);
+      --color-token-user-bubble: color-mix(in oklab, var(--color-token-foreground) 5%, transparent);
       --radius-xl: 12px;
       --radius-lg: 8px;
       --font-mono: var(--vscode-editor-font-family);
@@ -327,11 +329,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       user-select: text; -webkit-user-select: text;
     }
     .msg-user {
-      border-left: 3px solid var(--color-token-button-background);
+      align-self: flex-end;
+      max-width: 77%;
+      background: var(--color-token-user-bubble);
+      border-radius: 16px;
+      padding: 8px 12px;
       font-weight: 500;
+      word-break: break-word;
     }
     .msg-assistant {
-      /* flat — no background, no border */
+      align-self: stretch;
     }
     .msg-assistant pre {
       white-space: pre-wrap; font-family: var(--font-mono);

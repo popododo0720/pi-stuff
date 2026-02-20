@@ -84,6 +84,12 @@ export interface ProjectMemory {
   decisions: string[];
 }
 
+export interface WorkflowMemory {
+  patterns: PatternEntry[];
+  gotchas: string[];
+  decisions: string[];
+}
+
 export type SolutionCategory =
   | 'build-errors'
   | 'performance-issues'

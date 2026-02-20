@@ -3,7 +3,12 @@
 
 import { COMPOUND_STEPS, shouldSkipStep } from '../../constants';
 import { appendCriticalPattern } from '../../storage/critical-patterns';
-import { loadMemory, saveMemory } from '../../storage/memory';
+import {
+  loadMemory,
+  loadWorkflowMemory,
+  saveMemory,
+  saveWorkflowMemory,
+} from '../../storage/memory';
 import { saveSolution } from '../../storage/solution';
 import { RESET_MARKER } from '../compact';
 import { autoCommitTodo, autoPush, getGitCwd, runGit } from '../git-automation';
@@ -53,13 +58,13 @@ function extractSolutionMeta(summary: string): SolutionMeta {
 // ── Validators ─────────────────────────────────────────────────
 
 async function validateReflect(hctx: HandlerContext): Promise<string | null> {
-  const memory = loadMemory(hctx.ctx.cwd);
+  const wfMem = loadWorkflowMemory(hctx.ctx.cwd, hctx.session.id);
   const prev = hctx.session.compoundMemorySnapshot;
   if (!prev) return null; // no snapshot → skip check
   const hasNew =
-    memory.patterns.length > prev.patterns ||
-    memory.gotchas.length > prev.gotchas ||
-    memory.decisions.length > prev.decisions;
+    wfMem.patterns.length > prev.patterns ||
+    wfMem.gotchas.length > prev.gotchas ||
+    wfMem.decisions.length > prev.decisions;
   if (!hasNew) {
     return (
       '⚠️ No new learnings captured.\n' +
@@ -381,9 +386,9 @@ export async function handleCompoundDone(
   // 4. Step-specific post-processing
   if (stepDef.id === 'reflect') {
     // Auto-promotion: patterns with count >= 3 → critical.md
-    const memory = loadMemory(hctx.ctx.cwd);
+    const wfMem = loadWorkflowMemory(hctx.ctx.cwd, hctx.session.id);
     const promoted: string[] = [];
-    const remaining = memory.patterns.filter((p) => {
+    const remaining = wfMem.patterns.filter((p) => {
       if (p.count >= 3) {
         appendCriticalPattern(hctx.ctx.cwd, p);
         promoted.push(p.text);
@@ -392,8 +397,8 @@ export async function handleCompoundDone(
       return true;
     });
     if (promoted.length > 0) {
-      memory.patterns = remaining;
-      saveMemory(hctx.ctx.cwd, memory);
+      wfMem.patterns = remaining;
+      saveWorkflowMemory(hctx.ctx.cwd, hctx.session.id, wfMem);
     }
   }
 

@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
     () => sm.get(),
     (s) => sm.set(s),
   );
-  registerProjectMemoryTool(pi);
+  registerProjectMemoryTool(pi, () => sm.get());
   registerModuleConventionsTool(pi);
 
   // ── Session reconstruction from disk ─────────────────────────

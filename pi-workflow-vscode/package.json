@@ -103,6 +103,11 @@
       {
         "command": "pi.selectWorkflow",
         "title": "Pi: Select Workflow"
+      },
+      {
+        "command": "pi.deleteWorkflow",
+        "title": "Pi: Delete Workflow",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -111,6 +116,13 @@
           "command": "pi.newWorkflow",
           "when": "view == pi.chat",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "pi.deleteWorkflow",
+          "when": "view == pi.status && viewItem =~ /Workflow$/",
+          "group": "context"
         }
       ]
     },
