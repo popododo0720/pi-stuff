@@ -3,9 +3,7 @@
 
 import { SELF_AUDIT_TEMPLATE } from '../../constants';
 import {
-  loadMemory,
   loadWorkflowMemory,
-  saveMemory,
   saveWorkflowMemory,
 } from '../../storage/memory';
 import {
