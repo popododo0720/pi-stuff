@@ -1,0 +1,80 @@
+{
+  "name": "pi-workflow",
+  "displayName": "Pi Workflow",
+  "description": "Visual companion for pi coding agent workflows",
+  "version": "0.1.0",
+  "publisher": "pi-workflow",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pi-workflow",
+          "title": "Pi Workflow",
+          "icon": "media/pi-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "pi-workflow": [
+        {
+          "id": "pi.status",
+          "name": "Workflow Status"
+        },
+        {
+          "id": "pi.todos",
+          "name": "TODOs"
+        },
+        {
+          "id": "pi.files",
+          "name": "Changed Files"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "pi.status",
+        "contents": "No active workflow detected.\n\nStart a workflow with pi:\n[Open Terminal](command:workbench.action.terminal.new)\n\nThen run: /workflow Your task",
+        "when": "!pi.hasActiveWorkflow"
+      }
+    ],
+    "commands": [
+      {
+        "command": "pi.openPlan",
+        "title": "Pi: Open Plan"
+      },
+      {
+        "command": "pi.openVerification",
+        "title": "Pi: Verification Results"
+      },
+      {
+        "command": "pi.showDiff",
+        "title": "Pi: Show Changes"
+      },
+      {
+        "command": "pi.refresh",
+        "title": "Pi: Refresh",
+        "icon": "$(refresh)"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
