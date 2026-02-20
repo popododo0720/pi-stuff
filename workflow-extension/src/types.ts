@@ -17,6 +17,9 @@ export type ThinkingLevel =
 export interface TodoItem {
   title: string;
   status: 'pending' | 'active' | 'done';
+  startCommit?: string;
+  endCommit?: string;
+  verifyResult?: string;
 }
 
 export interface PatternEntry {
