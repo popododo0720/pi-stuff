@@ -254,5 +254,4 @@ export type ExtToWebview =
 export type WebviewToExt =
   | { type: 'sendMessage'; text: string }
   | { type: 'abort' }
-  | { type: 'newSession' }
   | { type: 'ready' };
