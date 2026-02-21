@@ -49,20 +49,25 @@ async function detectMainBranch(cwd: string): Promise<string> {
 
 // ── Git content URI helper ──────────────────────────────────────
 /**
+ * Content cache for git-show virtual documents.
+ * Avoids encoding large file content into URI query strings.
+ */
+const gitContentCache = new Map<string, string>();
+let gitContentSeq = 0;
+
+/**
  * Create a virtual URI showing file content at a specific commit.
- * Uses `git show <commit>:<path>` and encodes as a virtual document.
+ * Uses `git show <commit>:<path>` and caches content in memory.
  */
 async function gitShowUri(cwd: string, commit: string, filePath: string): Promise<vscode.Uri> {
   const { stdout } = await execFileAsync(
     'git', ['show', `${commit}:${filePath}`],
     { cwd, timeout: 5000, maxBuffer: 5 * 1024 * 1024 },
   );
-  // Encode content as a git-show URI that VSCode can render read-only
-  const encodedContent = encodeURIComponent(stdout);
   const shortRef = commit === 'HEAD' ? 'HEAD' : commit.slice(0, 7);
-  return vscode.Uri.parse(
-    `pi-git-show:${filePath}@${shortRef}?${encodedContent}`,
-  );
+  const cacheKey = `${++gitContentSeq}`;
+  gitContentCache.set(cacheKey, stdout);
+  return vscode.Uri.parse(`pi-git-show:${filePath}@${shortRef}?${cacheKey}`);
 }
 
 // ── Phase 2 state ──────────────────────────────────────────────
@@ -219,8 +224,15 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider('pi-git-show', {
       provideTextDocumentContent(uri: vscode.Uri): string {
-        // Content is encoded in the query string
-        return decodeURIComponent(uri.query);
+        // Query is a cache key into gitContentCache
+        const key = uri.query;
+        if (!key) return ''; // empty document (used for A/D diff sides)
+        const content = gitContentCache.get(key);
+        if (content !== undefined) {
+          gitContentCache.delete(key); // one-time use, prevent memory leak
+          return content;
+        }
+        return '';
       },
     }),
   );
@@ -417,7 +429,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
           if (status === 'A') {
             // Added file: show right side only (empty → new)
-            const rightUri = await gitShowUri(workspaceRoot, endCommit, filePath);
+            // Use workspace file when endCommit is HEAD (active TODO)
+            const rightUri = endCommit === 'HEAD'
+              ? fileUri
+              : await gitShowUri(workspaceRoot, endCommit, filePath);
             await vscode.commands.executeCommand('vscode.diff',
               emptyUri, rightUri,
               `${filePath} (Added)`,
