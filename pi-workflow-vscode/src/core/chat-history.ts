@@ -6,7 +6,7 @@ import type { ChatHistoryItem } from '../types/rpc';
 
 const STORAGE_KEY = 'pi.chatHistory';
 const MAX_MESSAGES = 500;
-const MAX_CONTENT_LENGTH = 10_000;
+const MAX_CONTENT_LENGTH = 50_000;
 
 export class ChatHistoryStore {
   private workflowId: string | null = null;

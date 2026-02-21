@@ -165,11 +165,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     });
 
     on('tool_execution_end', (data: ToolExecutionEndEvent) => {
+      const outputText = extractText(data.result);
       this.postToWebview({
         type: 'toolEnd',
         toolCallId: data.toolCallId,
-        text: extractText(data.result),
+        text: outputText,
         isError: data.isError,
+      });
+      this.historyStore.append({
+        role: 'tool',
+        content: outputText.slice(0, 500),
+        toolName: data.toolName,
+        isError: data.isError,
+        timestamp: Date.now(),
       });
     });
 

@@ -341,6 +341,30 @@ function finalizeToolCard(
   }
 }
 
+function createRestoredToolCard(toolName: string, content: string, isError: boolean): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  const header = document.createElement('div');
+  header.className = 'tool-header';
+  header.innerHTML =
+    `<span class="tool-chevron">▶</span>` +
+    `<span class="tool-icon">${getToolIcon(toolName)}</span>` +
+    `<span class="tool-name">${escapeHtml(toolName)}</span>` +
+    `<span class="tool-status ${isError ? 'error' : 'done'}">${isError ? '✗' : '✓'}</span>`;
+  header.addEventListener('click', () => card.classList.toggle('open'));
+  card.appendChild(header);
+  if (content) {
+    const body = document.createElement('div');
+    body.className = 'tool-body';
+    const output = document.createElement('div');
+    output.className = 'tool-output';
+    output.textContent = content;
+    body.appendChild(output);
+    card.appendChild(body);
+  }
+  return card;
+}
+
 function bindCopyButtons(container: HTMLElement): void {
   container.querySelectorAll('.copy-btn').forEach((btn) => {
     if (btn.getAttribute('data-bound')) return;
@@ -464,11 +488,13 @@ window.addEventListener('message', (event: MessageEvent) => {
     case 'clear':
       messagesEl.innerHTML = '';
       break;
-    case 'loadHistory':
+    case 'loadHistory': {
       messagesEl.innerHTML = '';
+      let lastAssistantDiv: HTMLElement | null = null;
       for (const item of msg.messages) {
         switch (item.role) {
           case 'user':
+            lastAssistantDiv = null;
             addUserMessage(item.content);
             break;
           case 'assistant': {
@@ -480,18 +506,32 @@ window.addEventListener('message', (event: MessageEvent) => {
             bindCopyButtons(content);
             div.appendChild(content);
             messagesEl.appendChild(div);
+            lastAssistantDiv = div;
+            break;
+          }
+          case 'tool': {
+            const card = createRestoredToolCard(
+              item.toolName || 'tool',
+              item.content,
+              item.isError || false,
+            );
+            if (lastAssistantDiv) lastAssistantDiv.appendChild(card);
+            else messagesEl.appendChild(card);
             break;
           }
           case 'error':
+            lastAssistantDiv = null;
             addErrorMessage(item.content);
             break;
           case 'system':
+            lastAssistantDiv = null;
             addSystemMessage(item.content);
             break;
         }
       }
       autoScroll();
       break;
+    }
   }
 });
 

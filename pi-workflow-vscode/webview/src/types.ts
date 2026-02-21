@@ -3,9 +3,13 @@
 // are separate build targets that cannot share imports.
 
 export interface ChatHistoryItem {
-  role: 'user' | 'assistant' | 'system' | 'error';
+  role: 'user' | 'assistant' | 'system' | 'error' | 'tool';
   content: string;
   timestamp: number;
+  /** Tool name (tool role only) */
+  toolName?: string;
+  /** Whether tool execution errored (tool role only) */
+  isError?: boolean;
 }
 
 export interface AttachedFile {

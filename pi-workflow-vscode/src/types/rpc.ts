@@ -202,9 +202,13 @@ export type RpcEvent =
 // ── Chat History ───────────────────────────────────────────────
 
 export interface ChatHistoryItem {
-  role: 'user' | 'assistant' | 'system' | 'error';
+  role: 'user' | 'assistant' | 'system' | 'error' | 'tool';
   content: string;
   timestamp: number;
+  /** Tool name (tool role only) */
+  toolName?: string;
+  /** Whether tool execution errored (tool role only) */
+  isError?: boolean;
 }
 
 // ── Webview <-> Extension messages ─────────────────────────────

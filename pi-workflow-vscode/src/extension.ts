@@ -268,10 +268,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Track last auto-opened plan to avoid reopening after user closes
   let lastAutoOpenPlanId = '';
+  let lastSyncedWorkflowId: string | null = null;
 
   // ── UI Sync Helper ────────────────────────────────────────────
   function syncUI(session: WorkflowSession | null): void {
-    chatHistoryStore.setWorkflowId(session?.id ?? null);
+    const newId = session?.id ?? null;
+    const idChanged = newId !== lastSyncedWorkflowId;
+    lastSyncedWorkflowId = newId;
+    chatHistoryStore.setWorkflowId(newId);
     statusBar.update(session);
     workflowTree.update(session);
     todoTree.update(session);
@@ -308,6 +312,15 @@ export function activate(context: vscode.ExtensionContext): void {
         filesTree.setBaseBranch(null);
         filesTree.setCommitRange(null, null);
         filesTree.refresh();
+      }
+    }
+
+    // Resend history when workflowId changes (fixes race condition on reload)
+    if (idChanged) {
+      chatViewProvider.postToWebview({ type: 'clear' });
+      const history = chatHistoryStore.getAll();
+      if (history.length > 0) {
+        chatViewProvider.postToWebview({ type: 'loadHistory', messages: history });
       }
     }
   }
@@ -368,20 +381,12 @@ export function activate(context: vscode.ExtensionContext): void {
           : undefined;
       if (!id) return;
       await sessionWatcher.setActiveId(id);
-
-      // Switch chat history to new workflow
-      chatHistoryStore.setWorkflowId(id);
+      // syncUI handles workflowId switch + history resend via onDidChange
 
       // Reset pi context if running
       if (currentClient?.isRunning()) {
         try {
           await currentClient.newSession();
-          // Clear webview and reload this workflow's chat history
-          chatViewProvider.postToWebview({ type: 'clear' });
-          const history = chatHistoryStore.getAll();
-          if (history.length > 0) {
-            chatViewProvider.postToWebview({ type: 'loadHistory', messages: history });
-          }
           // Resume workflow in new pi session (fire-and-forget)
           currentClient.prompt('/workflow').catch(() => {});
         } catch { /* pi may not be running */ }
