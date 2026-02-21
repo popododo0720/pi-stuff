@@ -18,6 +18,9 @@ import type {
 } from '../types/rpc';
 import { getNonce } from './html-utils';
 
+/** Max chars of tool output to persist in chat history */
+const MAX_TOOL_HISTORY_LENGTH = 500;
+
 export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'pi.chat';
 
@@ -174,7 +177,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       });
       this.historyStore.append({
         role: 'tool',
-        content: outputText.slice(0, 500),
+        content: outputText.slice(0, MAX_TOOL_HISTORY_LENGTH),
         toolName: data.toolName,
         isError: data.isError,
         timestamp: Date.now(),
