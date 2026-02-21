@@ -108,6 +108,11 @@
         "command": "pi.deleteWorkflow",
         "title": "Pi: Delete Workflow",
         "icon": "$(trash)"
+      },
+      {
+        "command": "pi.openSettings",
+        "title": "Pi: Settings",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -115,6 +120,11 @@
         {
           "command": "pi.newWorkflow",
           "when": "view == pi.chat",
+          "group": "navigation"
+        },
+        {
+          "command": "pi.openSettings",
+          "when": "view == pi.status",
           "group": "navigation"
         }
       ],

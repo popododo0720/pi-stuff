@@ -16,6 +16,7 @@ import type { WorkflowSession } from './types/workflow';
 import { ChatHistoryStore } from './core/chat-history';
 import { ChatViewProvider } from './views/chat-panel';
 import { PlanPanel } from './views/plan-panel';
+import { SettingsPanel } from './views/settings-panel';
 import { VerifyPanel } from './views/verify-panel';
 
 // ── Main branch detection (async + cached) ─────────────────────
@@ -264,7 +265,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Webview Panels ───────────────────────────────────────────
   const planPanel = new PlanPanel();
   const verifyPanel = new VerifyPanel();
-  context.subscriptions.push(planPanel, verifyPanel);
+  const settingsPanel = new SettingsPanel(workspaceRoot, context.extensionUri);
+  context.subscriptions.push(planPanel, verifyPanel, settingsPanel);
 
   // Track last auto-opened plan to avoid reopening after user closes
   let lastAutoOpenPlanId = '';
@@ -353,6 +355,7 @@ export function activate(context: vscode.ExtensionContext): void {
       sessionWatcher.reload();
       filesTree.refresh();
     }),
+    vscode.commands.registerCommand('pi.openSettings', () => settingsPanel.show()),
     vscode.commands.registerCommand('pi.openPlan', () => {
       const session = sessionWatcher.getState();
       if (session?.planContent) {

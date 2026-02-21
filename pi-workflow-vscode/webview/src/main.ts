@@ -1,7 +1,7 @@
 // webview/src/main.ts — Chat webview entry point
 // Handles message routing, DOM manipulation, and user input.
 
-import type { AttachedFile, ExtToWebview } from './types';
+import type { ExtToWebview } from './types';
 import { renderMarkdown, escapeHtml } from './markdown';
 import { ansiToHtml } from './ansi';
 import cssText from './styles.css';
@@ -22,8 +22,6 @@ const messagesEl = document.getElementById('messages')!;
 const inputEl = document.getElementById('input') as HTMLTextAreaElement;
 const sendBtn = document.getElementById('send-btn')!;
 const abortBtn = document.getElementById('abort-btn')!;
-const attachBtn = document.getElementById('attach-btn')!;
-const fileChipsEl = document.getElementById('file-chips')!;
 const modelInfoEl = document.getElementById('model-info')!;
 
 let currentAssistantEl: HTMLElement | null = null;
@@ -35,6 +33,10 @@ let userScrolledUp = false;
 // Streaming markdown state
 let assistantRawBuffer = '';
 let renderPending = false;
+
+// ── Tool group state ──
+let currentToolGroup: HTMLElement | null = null;
+let toolGroupCount = 0;
 
 // ── Auto-scroll with drag-selection protection ──
 let scrollPending = false;
@@ -62,8 +64,6 @@ function autoScroll(): void {
     }
   });
 }
-
-// ── Helpers ──
 
 // ── Verification progress list ──
 
@@ -144,9 +144,7 @@ function addSystemMessage(text: string): void {
 
 function startStreaming(): void {
   isStreaming = true;
-  sendBtn.classList.add('hidden');
   abortBtn.classList.remove('hidden');
-  inputEl.disabled = true;
 
   const div = document.createElement('div');
   div.className = 'msg msg-assistant';
@@ -163,12 +161,12 @@ function startStreaming(): void {
 
 function appendToAssistant(delta: string): void {
   if (!currentAssistantContent) return;
+  collapseCurrentToolGroup();
   assistantRawBuffer += delta;
   if (!renderPending) {
     renderPending = true;
     requestAnimationFrame(() => {
       renderPending = false;
-      // Guard: if finalized or buffer cleared, skip stale render
       if (!currentAssistantContent || !assistantRawBuffer) return;
       currentAssistantContent.innerHTML =
         renderMarkdown(assistantRawBuffer) +
@@ -210,6 +208,45 @@ function finalizeThinking(fullThinking: string): void {
   if (!currentThinkingPre) return;
   currentThinkingPre.textContent = fullThinking;
   currentThinkingPre = null;
+}
+
+// ── Tool group helpers ──
+
+function getOrCreateToolGroup(): HTMLElement {
+  if (currentToolGroup) return currentToolGroup;
+  const group = document.createElement('div');
+  group.className = 'tool-group';
+  const header = document.createElement('div');
+  header.className = 'tool-group-header';
+  header.innerHTML =
+    '<span class="tool-group-chevron">▶</span>' +
+    '<span class="tool-group-label">⚡ Tools</span>';
+  header.addEventListener('click', () => group.classList.toggle('collapsed'));
+  group.appendChild(header);
+  const body = document.createElement('div');
+  body.className = 'tool-group-body';
+  group.appendChild(body);
+  if (currentAssistantEl) currentAssistantEl.appendChild(group);
+  else messagesEl.appendChild(group);
+  currentToolGroup = group;
+  toolGroupCount = 0;
+  return group;
+}
+
+function updateToolGroupLabel(): void {
+  if (!currentToolGroup) return;
+  const label = currentToolGroup.querySelector('.tool-group-label');
+  if (label) {
+    label.textContent = `⚡ ${toolGroupCount} tool${toolGroupCount > 1 ? 's' : ''} ran`;
+  }
+}
+
+function collapseCurrentToolGroup(): void {
+  if (currentToolGroup) {
+    currentToolGroup.classList.add('collapsed');
+    currentToolGroup = null;
+    toolGroupCount = 0;
+  }
 }
 
 // ── Tool card helpers ──
@@ -255,7 +292,8 @@ function createToolCard(
   toolName: string,
   args: Record<string, unknown>,
 ): void {
-  if (!currentAssistantEl) return;
+  const group = getOrCreateToolGroup();
+  const body = group.querySelector('.tool-group-body')!;
 
   const card = document.createElement('div');
   card.className = 'tool-card';
@@ -269,24 +307,24 @@ function createToolCard(
     `<span class="tool-name">${escapeHtml(toolName)}</span>` +
     `<span class="tool-summary">${escapeHtml(getToolSummary(toolName, args))}</span>` +
     `<span class="tool-status"><span class="spinner"></span></span>`;
-  header.addEventListener('click', () => {
-    card.classList.toggle('open');
-  });
+  header.addEventListener('click', () => card.classList.toggle('open'));
   card.appendChild(header);
 
-  const body = document.createElement('div');
-  body.className = 'tool-body';
+  const cardBody = document.createElement('div');
+  cardBody.className = 'tool-body';
   const output = document.createElement('div');
   output.className = 'tool-output';
-  body.appendChild(output);
-  card.appendChild(body);
+  cardBody.appendChild(output);
+  card.appendChild(cardBody);
 
-  currentAssistantEl.appendChild(card);
+  body.appendChild(card);
+  toolGroupCount++;
+  updateToolGroupLabel();
   autoScroll();
 }
 
 function updateToolCard(toolCallId: string, text: string): void {
-  // Verify progress interception — before card lookup
+  // Verify progress interception
   if (text) {
     try {
       const parsed = JSON.parse(text);
@@ -317,7 +355,6 @@ function finalizeToolCard(
   const card = document.querySelector(`[data-tool-id="${toolCallId}"]`);
   if (!card) return;
 
-  // Update status icon
   const status = card.querySelector('.tool-status');
   if (status) {
     if (isError) {
@@ -329,13 +366,11 @@ function finalizeToolCard(
     }
   }
 
-  // Update output with ANSI colors
   const output = card.querySelector('.tool-output');
   if (output) {
     output.innerHTML = text ? ansiToHtml(text) : (isError ? '(error)' : '(done)');
   }
 
-  // Auto-expand on error
   if (isError) {
     card.classList.add('tool-error', 'open');
   }
@@ -373,9 +408,7 @@ function bindCopyButtons(container: HTMLElement): void {
       const code = btn.getAttribute('data-code') || '';
       navigator.clipboard.writeText(code).then(() => {
         btn.textContent = 'Copied!';
-        setTimeout(() => {
-          btn.textContent = 'Copy';
-        }, 1500);
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
       });
     });
   });
@@ -383,10 +416,8 @@ function bindCopyButtons(container: HTMLElement): void {
 
 function endStreaming(): void {
   isStreaming = false;
-  sendBtn.classList.remove('hidden');
   abortBtn.classList.add('hidden');
-  inputEl.disabled = false;
-  // Remove cursor blink from content
+  collapseCurrentToolGroup();
   if (currentAssistantContent) {
     const cursor = currentAssistantContent.querySelector('.cursor-blink');
     if (cursor) cursor.remove();
@@ -412,14 +443,10 @@ function updateToolbar(data: {
   }
   if (data.isStreaming) {
     isStreaming = true;
-    sendBtn.classList.add('hidden');
     abortBtn.classList.remove('hidden');
-    inputEl.disabled = true;
   } else {
     isStreaming = false;
-    sendBtn.classList.remove('hidden');
     abortBtn.classList.add('hidden');
-    inputEl.disabled = false;
   }
 }
 
@@ -482,9 +509,6 @@ window.addEventListener('message', (event: MessageEvent) => {
     case 'retryEnd':
       addSystemMessage(msg.success ? 'Retry succeeded.' : 'Retry failed.');
       break;
-    case 'fileAttached':
-      addFileChip(msg.file);
-      break;
     case 'clear':
       messagesEl.innerHTML = '';
       break;
@@ -539,7 +563,7 @@ window.addEventListener('message', (event: MessageEvent) => {
 
 const MIN_ROWS = 1;
 const MAX_ROWS = 12;
-const LINE_HEIGHT = 20; // px, matches CSS
+const LINE_HEIGHT = 20;
 
 function autoResizeInput(): void {
   inputEl.style.height = 'auto';
@@ -551,111 +575,21 @@ function autoResizeInput(): void {
 }
 
 inputEl.addEventListener('input', autoResizeInput);
-
-// Initialize height
 requestAnimationFrame(autoResizeInput);
-
-// ── File attachment state ──
-
-const attachedFiles: AttachedFile[] = [];
-
-function addFileChip(file: AttachedFile): void {
-  attachedFiles.push(file);
-  renderFileChips();
-}
-
-function removeFileChip(index: number): void {
-  attachedFiles.splice(index, 1);
-  renderFileChips();
-}
-
-function renderFileChips(): void {
-  fileChipsEl.innerHTML = '';
-  for (let i = 0; i < attachedFiles.length; i++) {
-    const file = attachedFiles[i];
-    const chip = document.createElement('div');
-    chip.className = 'file-chip';
-
-    const isImage = file.mimeType.startsWith('image/');
-    if (isImage && file.data) {
-      const thumb = document.createElement('img');
-      thumb.src = `data:${file.mimeType};base64,${file.data}`;
-      thumb.className = 'file-thumb';
-      thumb.alt = file.name;
-      chip.appendChild(thumb);
-    } else {
-      const icon = document.createElement('span');
-      icon.className = 'file-icon';
-      icon.textContent = '📄';
-      chip.appendChild(icon);
-    }
-
-    const name = document.createElement('span');
-    name.className = 'file-name';
-    name.textContent = file.name;
-    chip.appendChild(name);
-
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'file-remove';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'Remove';
-    const idx = i;
-    removeBtn.addEventListener('click', () => removeFileChip(idx));
-    chip.appendChild(removeBtn);
-
-    fileChipsEl.appendChild(chip);
-  }
-  fileChipsEl.style.display = attachedFiles.length > 0 ? 'flex' : 'none';
-}
 
 // ── Input ──
 
 function sendMessage(): void {
-  if (isStreaming) return;
   const text = inputEl.value.trim();
-  if (!text && attachedFiles.length === 0) return;
-
-  // Collect images for RPC
-  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-  const textFileRefs: string[] = [];
-
-  for (const f of attachedFiles) {
-    if (f.mimeType.startsWith('image/') && f.data) {
-      images.push({ type: 'image', data: f.data, mimeType: f.mimeType });
-    } else if (f.path) {
-      textFileRefs.push(f.path);
-    }
-  }
-
-  // Build message: append file references for non-image files
-  let message = text;
-  if (textFileRefs.length > 0) {
-    const refs = textFileRefs.map((p) => `[attached: ${p}]`).join('\n');
-    message = message ? message + '\n\n' + refs : refs;
-  }
-
-  if (!message && images.length === 0) return;
+  if (!text) return;
 
   vscode.postMessage({
     type: 'sendMessage',
-    text: message,
-    images: images.length > 0 ? images : undefined,
+    text,
+    streamingBehavior: isStreaming ? 'followUp' : undefined,
   });
-
-  // Show user message
-  let displayText = text;
-  if (attachedFiles.length > 0) {
-    const fileNames = attachedFiles.map((f) => f.name).join(', ');
-    displayText = displayText
-      ? displayText + '\n📎 ' + fileNames
-      : '📎 ' + fileNames;
-  }
-  addUserMessage(displayText);
-
-  // Reset
+  addUserMessage(text);
   inputEl.value = '';
-  attachedFiles.length = 0;
-  renderFileChips();
   autoResizeInput();
   userScrolledUp = false;
 }
@@ -673,15 +607,5 @@ abortBtn.addEventListener('click', () => {
   vscode.postMessage({ type: 'abort' });
 });
 
-attachBtn.addEventListener('click', () => {
-  vscode.postMessage({ type: 'pickFile' });
-});
-
-// ── Event handler for file attachment responses ──
-
-// Handle fileAttached in the message handler
-// (already in the switch case above via main event handler)
-
 // ── Init ──
-renderFileChips(); // hide initially
 vscode.postMessage({ type: 'ready' });

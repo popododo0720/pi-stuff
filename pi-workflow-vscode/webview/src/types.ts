@@ -12,15 +12,6 @@ export interface ChatHistoryItem {
   isError?: boolean;
 }
 
-export interface AttachedFile {
-  name: string;
-  mimeType: string;
-  /** base64-encoded data for images */
-  data?: string;
-  /** Absolute path for non-image files */
-  path?: string;
-}
-
 export type ExtToWebview =
   | { type: 'agentStart' }
   | { type: 'agentEnd' }
@@ -40,11 +31,9 @@ export type ExtToWebview =
   | { type: 'retryStart'; attempt: number; maxAttempts: number; delayMs: number; error: string }
   | { type: 'retryEnd'; success: boolean }
   | { type: 'clear' }
-  | { type: 'loadHistory'; messages: ChatHistoryItem[] }
-  | { type: 'fileAttached'; file: AttachedFile };
+  | { type: 'loadHistory'; messages: ChatHistoryItem[] };
 
 export type WebviewToExt =
-  | { type: 'sendMessage'; text: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'sendMessage'; text: string; streamingBehavior?: 'steer' | 'followUp' }
   | { type: 'abort' }
-  | { type: 'ready' }
-  | { type: 'pickFile' };
+  | { type: 'ready' };

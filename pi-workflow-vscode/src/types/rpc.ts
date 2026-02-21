@@ -254,24 +254,13 @@ export type ExtToWebview =
     }
   | { type: 'retryEnd'; success: boolean }
   | { type: 'clear' }
-  | { type: 'loadHistory'; messages: ChatHistoryItem[] }
-  | { type: 'fileAttached'; file: AttachedFile };
-
-export interface AttachedFile {
-  name: string;
-  mimeType: string;
-  /** base64-encoded data for images */
-  data?: string;
-  /** Absolute path for non-image files */
-  path?: string;
-}
+  | { type: 'loadHistory'; messages: ChatHistoryItem[] };
 
 export type WebviewToExt =
   | {
       type: 'sendMessage';
       text: string;
-      images?: ImageContent[];
+      streamingBehavior?: 'steer' | 'followUp';
     }
   | { type: 'abort' }
-  | { type: 'ready' }
-  | { type: 'pickFile' };
+  | { type: 'ready' };
