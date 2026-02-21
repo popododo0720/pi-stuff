@@ -1,7 +1,8 @@
 // views/settings-panel.ts — WebviewPanel for editing .pi/workflow-settings.json
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { getNonce } from './html-utils';
 
@@ -91,7 +92,36 @@ export class SettingsPanel implements vscode.Disposable {
       const dir = join(this.workspaceRoot, PI_DIR);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const path = join(this.workspaceRoot, SETTINGS_REL);
-      writeFileSync(path, JSON.stringify(settings, null, '\t'), 'utf-8');
+
+      // Clamp numeric values to valid ranges (mirror backend validation)
+      if (settings.verifyTimeout != null) {
+        settings.verifyTimeout = Math.max(10000, Math.min(600000, settings.verifyTimeout));
+      }
+      if (settings.maxRetries != null) {
+        settings.maxRetries = Math.max(1, Math.min(20, settings.maxRetries));
+      }
+      if (settings.stages?.search) {
+        const s = settings.stages.search;
+        if (s.maxParallel != null) s.maxParallel = Math.max(1, Math.min(10, s.maxParallel));
+        if (s.timeout != null) s.timeout = Math.max(10000, Math.min(300000, s.timeout));
+      }
+      if (settings.repoMap?.tokenBudget != null) {
+        settings.repoMap.tokenBudget = Math.max(256, Math.min(8192, settings.repoMap.tokenBudget));
+      }
+      if (settings.preflight?.timeout != null) {
+        settings.preflight.timeout = Math.max(10, Math.min(300, settings.preflight.timeout));
+      }
+
+      // Atomic write: write to temp file then rename
+      const content = JSON.stringify(settings, null, '\t');
+      const tmpPath = path + '.tmp.' + randomBytes(4).toString('hex');
+      writeFileSync(tmpPath, content, { encoding: 'utf-8', mode: 0o600 });
+      try {
+        renameSync(tmpPath, path);
+      } catch {
+        // Cross-device fallback: direct write
+        writeFileSync(path, content, { encoding: 'utf-8', mode: 0o600 });
+      }
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to save settings: ${err}`);
     }
