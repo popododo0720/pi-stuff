@@ -50,13 +50,6 @@ export class WorkflowTreeProvider
       item.description = w.active ? '(active)' : w.state;
       item.contextValue = w.active ? 'activeWorkflow' : 'inactiveWorkflow';
       item.id = w.id;
-      if (!w.active) {
-        item.command = {
-          command: 'pi.selectWorkflow',
-          title: 'Select',
-          arguments: [w.id],
-        };
-      }
       return item;
     }
 
@@ -75,21 +68,46 @@ export class WorkflowTreeProvider
   getChildren(element?: WorkflowNode): WorkflowNode[] {
     if (!element) {
       // Root level
-      if (this.list.length <= 1 && this.session) {
-        // Single workflow: show details directly (backward compatible)
-        return this.getDetailNodes(this.session);
+      if (this.list.length === 0 && this.session) {
+        // No list yet but session exists → synthesize a workflow node
+        return [{
+          kind: 'workflow' as const,
+          item: {
+            id: this.session.id,
+            name: this.session.description,
+            description: this.session.description,
+            state: this.session.state,
+            active: true,
+          },
+        }];
       }
       if (this.list.length === 0) return [];
-      // Multiple workflows: show workflow list
+      // Workflow list (1 or more)
       return this.list.map((item) => ({
         kind: 'workflow' as const,
         item,
       }));
     }
 
-    // Children of a workflow node: show details for active workflow
-    if (element.kind === 'workflow' && element.item.active && this.session) {
-      return this.getDetailNodes(this.session);
+    // Children of a workflow node
+    if (element.kind === 'workflow') {
+      if (element.item.active && this.session) {
+        return this.getDetailNodes(this.session);
+      }
+      // Inactive: basic info from list item
+      const state = element.item.state as WorkflowState;
+      return [
+        {
+          kind: 'detail' as const,
+          label: `${STATE_EMOJI[state] ?? '❓'} ${STATE_LABELS[state] ?? state}`,
+          icon: 'symbol-event',
+        },
+        {
+          kind: 'detail' as const,
+          label: `📋 ${element.item.description}`,
+          icon: 'note',
+        },
+      ];
     }
     return [];
   }

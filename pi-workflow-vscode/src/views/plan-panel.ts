@@ -49,6 +49,11 @@ export class PlanPanel implements vscode.Disposable {
     );
   }
 
+  /** Whether the plan panel is currently open. */
+  isVisible(): boolean {
+    return this.panel !== undefined;
+  }
+
   private getHtml(
     planContent: string,
     activeTodoIndex: number,

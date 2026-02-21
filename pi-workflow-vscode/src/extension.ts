@@ -266,28 +266,49 @@ export function activate(context: vscode.ExtensionContext): void {
   const verifyPanel = new VerifyPanel();
   context.subscriptions.push(planPanel, verifyPanel);
 
+  // Track last auto-opened plan to avoid reopening after user closes
+  let lastAutoOpenPlanId = '';
+
   // ── UI Sync Helper ────────────────────────────────────────────
   function syncUI(session: WorkflowSession | null): void {
     chatHistoryStore.setWorkflowId(session?.id ?? null);
     statusBar.update(session);
     workflowTree.update(session);
     todoTree.update(session);
-    planPanel.update(session);
+
+    // Auto-open plan panel when planContent first appears (or changes)
+    const planKey = session ? `${session.id}:${session.planContent?.length ?? 0}` : '';
+    if (session?.planContent && !planPanel.isVisible() && planKey !== lastAutoOpenPlanId) {
+      lastAutoOpenPlanId = planKey;
+      planPanel.show(session);
+    } else {
+      planPanel.update(session);
+    }
+
     verifyPanel.update(session);
     updateContextKey(session);
 
-    // Branch-based diff when workflow has a git branch (including done state)
-    const gitBranch = session?.gitBranch ?? null;
-    if (gitBranch) {
-      detectMainBranch(workspaceRoot!).then((base) => {
-        filesTree.setBaseBranch(base);
+    // Done state: commit range from TODOs (survives branch deletion)
+    if (session?.state === 'done' || session?.completed) {
+      const firstStart = session.todos.find(t => t.startCommit)?.startCommit;
+      const lastEnd = [...session.todos].reverse().find(t => t.endCommit)?.endCommit;
+      filesTree.setBaseBranch(null);
+      filesTree.setCommitRange(firstStart ?? null, lastEnd ?? null);
+      filesTree.refresh();
+    } else {
+      // Active workflow: branch-based diff
+      const gitBranch = session?.gitBranch ?? null;
+      if (gitBranch) {
+        detectMainBranch(workspaceRoot!).then((base) => {
+          filesTree.setBaseBranch(base);
+          filesTree.setCommitRange(null, null);
+          filesTree.refresh();
+        });
+      } else {
+        filesTree.setBaseBranch(null);
         filesTree.setCommitRange(null, null);
         filesTree.refresh();
-      });
-    } else {
-      filesTree.setBaseBranch(null);
-      filesTree.setCommitRange(null, null);
-      filesTree.refresh();
+      }
     }
   }
 
@@ -338,7 +359,14 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
-    vscode.commands.registerCommand('pi.selectWorkflow', async (id: string) => {
+    vscode.commands.registerCommand('pi.selectWorkflow', async (arg: unknown) => {
+      // Support both direct id (string) and WorkflowNode from context menu
+      const id = typeof arg === 'string'
+        ? arg
+        : (arg && typeof arg === 'object' && 'kind' in arg)
+          ? (arg as { item?: { id?: string } }).item?.id
+          : undefined;
+      if (!id) return;
       await sessionWatcher.setActiveId(id);
 
       // Switch chat history to new workflow

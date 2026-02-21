@@ -38,8 +38,8 @@ const BLOCK_REASONS: Partial<Record<WorkflowState, string>> = {
  * Avoids false positives like `grep rm file` or `curl .../install`.
  */
 const BASH_WRITE_PATTERNS: RegExp[] = [
-  // Redirections (not inside quotes)
-  /[^"'\\]\s*>{1,2}\s*[^&]/, // > or >> redirect (not >&)
+  // Redirections — excludes fd redirects (2>, 1>) and /dev/null targets
+  /(?<!\d)\s*>{1,2}\s*(?!\/dev\/null|&)\S/, // > file or >> file (not 2>/dev/null, not >&2)
   // Commands that must appear at statement start
   /(?:^|[;&|]\s*)sed\s+-i/, // sed in-place edit
   /(?:^|[;&|]\s*)tee\s/, // tee writes to file
@@ -53,6 +53,7 @@ const BASH_WRITE_PATTERNS: RegExp[] = [
   /(?:^|[;&|]\s*)npm\s+(install|i|ci|update)\b/, // npm install
   /(?:^|[;&|]\s*)git\s+(add|commit|push|checkout|merge|rebase)\b/, // git write
   /(?:^|[;&|]\s*)cat\s*>/, // cat > file
+  /(?:^|[;&|]\s*)find\s.*(?:-exec|-execdir|-delete)\b/, // find with file-modifying actions
 ];
 
 /** States where git commands are allowed despite general bash write block */

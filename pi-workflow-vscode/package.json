@@ -102,7 +102,7 @@
       },
       {
         "command": "pi.selectWorkflow",
-        "title": "Pi: Select Workflow"
+        "title": "Switch Workflow"
       },
       {
         "command": "pi.deleteWorkflow",
@@ -120,9 +120,14 @@
       ],
       "view/item/context": [
         {
+          "command": "pi.selectWorkflow",
+          "when": "view == pi.status && viewItem == inactiveWorkflow",
+          "group": "1_switch"
+        },
+        {
           "command": "pi.deleteWorkflow",
           "when": "view == pi.status && viewItem =~ /Workflow$/",
-          "group": "context"
+          "group": "2_danger"
         }
       ]
     },
