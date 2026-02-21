@@ -2,6 +2,7 @@
 // Handles message routing, DOM manipulation, and user input.
 
 import type { ExtToWebview } from './types';
+import { renderMarkdown, escapeHtml } from './markdown';
 import cssText from './styles.css';
 
 // ── CSS injection (nonce-based) ──
@@ -23,10 +24,14 @@ const abortBtn = document.getElementById('abort-btn')!;
 const modelInfoEl = document.getElementById('model-info')!;
 
 let currentAssistantEl: HTMLElement | null = null;
-let currentAssistantPre: HTMLPreElement | null = null;
+let currentAssistantContent: HTMLDivElement | null = null;
 let currentThinkingPre: HTMLPreElement | null = null;
 let isStreaming = false;
 let userScrolledUp = false;
+
+// Streaming markdown state
+let assistantRawBuffer = '';
+let renderPending = false;
 
 // ── Auto-scroll with drag-selection protection ──
 let scrollPending = false;
@@ -57,12 +62,6 @@ function autoScroll(): void {
 
 // ── Helpers ──
 
-function escapeText(s: string): string {
-  const d = document.createElement('span');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
 // ── Verification progress list ──
 
 let verifyContainer: HTMLElement | null = null;
@@ -78,7 +77,7 @@ function createVerifyList(tasks: Array<{ taskId: string; label: string }>): void
     row.id = 'verify-' + task.taskId;
     row.innerHTML =
       '<span class="verify-icon running"></span><span class="verify-label">' +
-      escapeText(task.label) +
+      escapeHtml(task.label) +
       '</span>';
     container.appendChild(row);
   }
@@ -148,25 +147,41 @@ function startStreaming(): void {
 
   const div = document.createElement('div');
   div.className = 'msg msg-assistant';
-  const pre = document.createElement('pre');
-  pre.className = 'cursor-blink';
-  div.appendChild(pre);
+  const content = document.createElement('div');
+  content.className = 'msg-content';
+  content.innerHTML = '<span class="cursor-blink"></span>';
+  div.appendChild(content);
   messagesEl.appendChild(div);
   currentAssistantEl = div;
-  currentAssistantPre = pre;
+  currentAssistantContent = content;
+  assistantRawBuffer = '';
   autoScroll();
 }
 
 function appendToAssistant(delta: string): void {
-  if (!currentAssistantPre) return;
-  currentAssistantPre.appendChild(document.createTextNode(delta));
-  autoScroll();
+  if (!currentAssistantContent) return;
+  assistantRawBuffer += delta;
+  if (!renderPending) {
+    renderPending = true;
+    requestAnimationFrame(() => {
+      renderPending = false;
+      // Guard: if finalized or buffer cleared, skip stale render
+      if (!currentAssistantContent || !assistantRawBuffer) return;
+      currentAssistantContent.innerHTML =
+        renderMarkdown(assistantRawBuffer) +
+        '<span class="cursor-blink"></span>';
+      bindCopyButtons(currentAssistantContent);
+      autoScroll();
+    });
+  }
 }
 
 function finalizeAssistantText(fullText: string): void {
-  if (!currentAssistantPre) return;
-  currentAssistantPre.textContent = fullText;
-  currentAssistantPre.classList.remove('cursor-blink');
+  if (!currentAssistantContent) return;
+  currentAssistantContent.innerHTML = renderMarkdown(fullText);
+  bindCopyButtons(currentAssistantContent);
+  assistantRawBuffer = '';
+  renderPending = false;
 }
 
 function createThinkingBlock(): void {
@@ -253,17 +268,37 @@ function finalizeToolCard(
   if (resultPre) resultPre.textContent = text || (isError ? '(error)' : '(done)');
 }
 
+function bindCopyButtons(container: HTMLElement): void {
+  container.querySelectorAll('.copy-btn').forEach((btn) => {
+    if (btn.getAttribute('data-bound')) return;
+    btn.setAttribute('data-bound', '1');
+    btn.addEventListener('click', () => {
+      const code = btn.getAttribute('data-code') || '';
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+        }, 1500);
+      });
+    });
+  });
+}
+
 function endStreaming(): void {
   isStreaming = false;
   sendBtn.classList.remove('hidden');
   abortBtn.classList.add('hidden');
   inputEl.disabled = false;
-  if (currentAssistantPre) {
-    currentAssistantPre.classList.remove('cursor-blink');
+  // Remove cursor blink from content
+  if (currentAssistantContent) {
+    const cursor = currentAssistantContent.querySelector('.cursor-blink');
+    if (cursor) cursor.remove();
   }
   currentAssistantEl = null;
-  currentAssistantPre = null;
+  currentAssistantContent = null;
   currentThinkingPre = null;
+  assistantRawBuffer = '';
+  renderPending = false;
   autoScroll();
 }
 
@@ -363,9 +398,11 @@ window.addEventListener('message', (event: MessageEvent) => {
           case 'assistant': {
             const div = document.createElement('div');
             div.className = 'msg msg-assistant';
-            const pre = document.createElement('pre');
-            pre.textContent = item.content;
-            div.appendChild(pre);
+            const content = document.createElement('div');
+            content.className = 'msg-content';
+            content.innerHTML = renderMarkdown(item.content);
+            bindCopyButtons(content);
+            div.appendChild(content);
             messagesEl.appendChild(div);
             break;
           }
