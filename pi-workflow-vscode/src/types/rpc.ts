@@ -208,6 +208,7 @@ export interface ChatHistoryItem {
 }
 
 // ── Webview <-> Extension messages ─────────────────────────────
+// SYNC: keep in sync with webview/src/types.ts
 
 export type ExtToWebview =
   | { type: 'agentStart' }
