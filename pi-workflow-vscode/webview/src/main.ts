@@ -3,6 +3,7 @@
 
 import type { ExtToWebview } from './types';
 import { renderMarkdown, escapeHtml } from './markdown';
+import { ansiToHtml } from './ansi';
 import cssText from './styles.css';
 
 // ── CSS injection (nonce-based) ──
@@ -209,26 +210,76 @@ function finalizeThinking(fullThinking: string): void {
   currentThinkingPre = null;
 }
 
+// ── Tool card helpers ──
+
+function getToolIcon(name: string): string {
+  const icons: Record<string, string> = {
+    Bash: '⚡', Read: '📄', Edit: '✏️', Write: '📝',
+    workflow_transition: '🔄', project_memory: '🧠',
+    module_conventions: '📦',
+  };
+  return icons[name] || '🔧';
+}
+
+function getToolSummary(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case 'Bash': {
+      const cmd = typeof args.command === 'string' ? args.command : '';
+      const firstLine = cmd.split('\n')[0] || '';
+      return firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
+    }
+    case 'Read':
+      return typeof args.path === 'string' ? args.path : '';
+    case 'Edit':
+      return typeof args.path === 'string' ? args.path + ' (edit)' : '';
+    case 'Write':
+      return typeof args.path === 'string' ? args.path + ' (write)' : '';
+    case 'workflow_transition':
+      return typeof args.action === 'string' ? args.action : '';
+    case 'project_memory': {
+      const action = typeof args.action === 'string' ? args.action : '';
+      const cat = typeof args.category === 'string' ? args.category : '';
+      return cat ? `${action} ${cat}` : action;
+    }
+    default: {
+      const s = JSON.stringify(args);
+      return s.length > 80 ? s.slice(0, 77) + '...' : s;
+    }
+  }
+}
+
 function createToolCard(
   toolCallId: string,
   toolName: string,
   args: Record<string, unknown>,
 ): void {
   if (!currentAssistantEl) return;
-  const details = document.createElement('details');
-  details.className = 'tool-card';
-  details.id = 'tool-' + toolCallId;
-  const summary = document.createElement('summary');
-  summary.textContent = '🔧 ' + toolName;
-  details.appendChild(summary);
-  const argsPre = document.createElement('pre');
-  argsPre.textContent = JSON.stringify(args, null, 2);
-  details.appendChild(argsPre);
-  const resultPre = document.createElement('pre');
-  resultPre.className = 'tool-result';
-  resultPre.textContent = 'Running...';
-  details.appendChild(resultPre);
-  currentAssistantEl.appendChild(details);
+
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  card.setAttribute('data-tool-id', toolCallId);
+
+  const header = document.createElement('div');
+  header.className = 'tool-header';
+  header.innerHTML =
+    `<span class="tool-chevron">▶</span>` +
+    `<span class="tool-icon">${getToolIcon(toolName)}</span>` +
+    `<span class="tool-name">${escapeHtml(toolName)}</span>` +
+    `<span class="tool-summary">${escapeHtml(getToolSummary(toolName, args))}</span>` +
+    `<span class="tool-status"><span class="spinner"></span></span>`;
+  header.addEventListener('click', () => {
+    card.classList.toggle('open');
+  });
+  card.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'tool-body';
+  const output = document.createElement('div');
+  output.className = 'tool-output';
+  body.appendChild(output);
+  card.appendChild(body);
+
+  currentAssistantEl.appendChild(card);
   autoScroll();
 }
 
@@ -249,10 +300,10 @@ function updateToolCard(toolCallId: string, text: string): void {
       /* not JSON, normal flow */
     }
   }
-  const card = document.getElementById('tool-' + toolCallId);
+  const card = document.querySelector(`[data-tool-id="${toolCallId}"]`);
   if (!card) return;
-  const resultPre = card.querySelector('.tool-result');
-  if (resultPre) resultPre.textContent = text || 'Running...';
+  const output = card.querySelector('.tool-output');
+  if (output) output.innerHTML = ansiToHtml(text || '');
   autoScroll();
 }
 
@@ -261,11 +312,31 @@ function finalizeToolCard(
   text: string,
   isError: boolean,
 ): void {
-  const card = document.getElementById('tool-' + toolCallId);
+  const card = document.querySelector(`[data-tool-id="${toolCallId}"]`);
   if (!card) return;
-  if (isError) card.classList.add('tool-error');
-  const resultPre = card.querySelector('.tool-result');
-  if (resultPre) resultPre.textContent = text || (isError ? '(error)' : '(done)');
+
+  // Update status icon
+  const status = card.querySelector('.tool-status');
+  if (status) {
+    if (isError) {
+      status.className = 'tool-status error';
+      status.textContent = '✗';
+    } else {
+      status.className = 'tool-status done';
+      status.textContent = '✓';
+    }
+  }
+
+  // Update output with ANSI colors
+  const output = card.querySelector('.tool-output');
+  if (output) {
+    output.innerHTML = text ? ansiToHtml(text) : (isError ? '(error)' : '(done)');
+  }
+
+  // Auto-expand on error
+  if (isError) {
+    card.classList.add('tool-error', 'open');
+  }
 }
 
 function bindCopyButtons(container: HTMLElement): void {
