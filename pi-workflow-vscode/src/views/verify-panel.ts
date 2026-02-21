@@ -35,7 +35,7 @@ export class VerifyPanel implements vscode.Disposable {
       'piVerify',
       'Pi: Verification',
       vscode.ViewColumn.Beside,
-      { enableScripts: true },
+      { enableScripts: false },
     );
 
     this.panel.webview.html = this.getHtml(session.verifyPlanResult);
@@ -56,7 +56,7 @@ export class VerifyPanel implements vscode.Disposable {
       'piVerify',
       title,
       vscode.ViewColumn.Beside,
-      { enableScripts: true },
+      { enableScripts: false },
     );
     this.panel.webview.html = this.getHtml(text);
     this.panel.onDidDispose(() => {
@@ -119,34 +119,73 @@ export class VerifyPanel implements vscode.Disposable {
 
   /**
    * Parse multi-domain verification output.
-   * Format from formatting.ts: `## [model/domain] STATUS\n\n<output>`
-   * separated by `\n\n---\n\n`
+   * Supports two formats:
+   * 1. formatVerificationSummary(): `[label] STATUS (counts)\noutput` blocks separated by \n\n
+   * 2. saveVerificationResult(): `## [label] STATUS\n\n<output>` blocks separated by \n---\n
    */
   private parseDomainResults(text: string): DomainResult[] {
-    // Split by --- separator
-    const blocks = text.split(/\n---\n/).map(b => b.trim()).filter(Boolean);
+    // Try file format first (## headers with --- separators)
+    const fileBlocks = text.split(/\n---\n/).map(b => b.trim()).filter(Boolean);
+    const fileHeaderRe = /^##\s*\[([^\]]+)\]\s*(✅\s*PASS|❌\s*FAIL|⛔\s*(?:HALTED|SKIPPED)\s*(?:\([^)]*\))?)(.*?)$/m;
+
+    let blocks: Array<{ label: string; statusRaw: string; suffix: string; body: string }> = [];
+
+    // Check if file format matches
+    const fileMatches = fileBlocks.map(b => ({ block: b, match: b.match(fileHeaderRe) }));
+    if (fileMatches.some(f => f.match)) {
+      for (const { block, match } of fileMatches) {
+        if (!match) continue;
+        const headerEnd = block.indexOf('\n');
+        blocks.push({
+          label: match[1],
+          statusRaw: match[2].trim(),
+          suffix: match[3]?.trim() ?? '',
+          body: headerEnd >= 0 ? block.slice(headerEnd + 1).trim() : '',
+        });
+      }
+    }
+
+    // Fallback: summary format — [label] STATUS lines
+    if (blocks.length === 0) {
+      const summaryHeaderRe = /^\[([^\]]+)\]\s*(✅\s*PASS|❌\s*FAIL|⛔\s*(?:HALTED|SKIPPED)\s*(?:\([^)]*\))?)(.*?)$/;
+      const lines = text.split('\n');
+      let currentBlock: { label: string; statusRaw: string; suffix: string; bodyLines: string[] } | null = null;
+
+      for (const line of lines) {
+        const m = line.match(summaryHeaderRe);
+        if (m) {
+          if (currentBlock) {
+            blocks.push({
+              ...currentBlock,
+              body: currentBlock.bodyLines.join('\n').trim(),
+            });
+          }
+          currentBlock = { label: m[1], statusRaw: m[2].trim(), suffix: m[3]?.trim() ?? '', bodyLines: [] };
+        } else if (currentBlock) {
+          currentBlock.bodyLines.push(line);
+        }
+      }
+      if (currentBlock) {
+        blocks.push({
+          ...currentBlock,
+          body: currentBlock.bodyLines.join('\n').trim(),
+        });
+      }
+    }
+
     if (blocks.length === 0) return [];
 
     const results: DomainResult[] = [];
-
     for (const block of blocks) {
-      // Match header: ## [label] STATUS (optional suffix)
-      const headerMatch = block.match(/^##\s*\[([^\]]+)\]\s*(✅\s*PASS|❌\s*FAIL|⛔\s*(?:HALTED|SKIPPED)\s*(?:\([^)]*\))?)(.*?)$/m);
-      if (!headerMatch) continue;
-
-      const label = headerMatch[1];
-      const statusRaw = headerMatch[2].trim();
-      const suffix = headerMatch[3]?.trim() ?? '';
-
       let status: string;
       let statusIcon: string;
-      if (statusRaw.includes('PASS')) {
+      if (block.statusRaw.includes('PASS')) {
         status = 'PASS';
         statusIcon = '✅';
-      } else if (statusRaw.includes('FAIL')) {
+      } else if (block.statusRaw.includes('FAIL')) {
         status = 'FAIL';
         statusIcon = '❌';
-      } else if (statusRaw.includes('HALTED')) {
+      } else if (block.statusRaw.includes('HALTED')) {
         status = 'HALTED';
         statusIcon = '⛔';
       } else {
@@ -154,20 +193,16 @@ export class VerifyPanel implements vscode.Disposable {
         statusIcon = '⛔';
       }
 
-      // Body is everything after the header line
-      const headerEnd = block.indexOf('\n');
-      const body = headerEnd >= 0 ? block.slice(headerEnd + 1).trim() : '';
-
-      const { sections, verdict, otherLines } = this.parseResult(body);
+      const { sections, verdict, otherLines } = this.parseResult(block.body);
 
       results.push({
-        label: label + (suffix ? ` ${suffix}` : ''),
+        label: block.label + (block.suffix ? ` ${block.suffix}` : ''),
         status,
         statusIcon,
         sections,
         verdict,
         otherLines,
-        raw: body,
+        raw: block.body,
       });
     }
 
