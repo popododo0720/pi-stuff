@@ -3,10 +3,17 @@
 // for codebase exploration, reducing cost vs using the primary model.
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import type { SearchScope } from '../search/prompts';
 import type { SearchQuery, SearchResult } from '../search/runner';
 import { runParallelSearch } from '../search/runner';
 import { loadSettings } from '../storage/settings';
+
+const MAX_QUERIES = 10;
+
+function t(text: string) {
+  return { content: [{ type: 'text' as const, text }] };
+}
 
 /**
  * Register the `search` tool that dispatches parallel search queries
@@ -15,6 +22,7 @@ import { loadSettings } from '../storage/settings';
 export function registerSearchTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'search',
+    label: 'Parallel Search',
     description:
       'Run parallel codebase searches using a lightweight model. ' +
       'Provide multiple search queries to explore different aspects simultaneously. ' +
@@ -22,74 +30,72 @@ export function registerSearchTool(pi: ExtensionAPI): void {
       'Each query runs as an independent subprocess with read-only tools (read, grep, find, ls). ' +
       'Use this when you need to explore unfamiliar code, find patterns across files, ' +
       'or gather context from multiple areas of the codebase at once.',
-    parameters: {
-      type: 'object',
-      properties: {
-        queries: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description:
-                  'A specific search question, e.g. "Find all API route handlers and their middleware"',
-              },
-              scope: {
-                type: 'string',
-                enum: ['codebase', 'docs', 'both'],
+    parameters: Type.Object({
+      queries: Type.Array(
+        Type.Object({
+          query: Type.String({
+            description:
+              'A specific search question, e.g. "Find all API route handlers and their middleware"',
+          }),
+          scope: Type.Optional(
+            Type.Union(
+              [
+                Type.Literal('codebase'),
+                Type.Literal('docs'),
+                Type.Literal('both'),
+              ],
+              {
                 description:
                   'Search scope: codebase (source files), docs (documentation), both. Default: codebase',
               },
-            },
-            required: ['query'],
-          },
+            ),
+          ),
+        }),
+        {
           description:
             'List of search queries to run in parallel. Each gets its own subprocess.',
         },
-      },
-      required: ['queries'],
-    },
-    execute: async (args, ctx) => {
-      const input = args as {
-        queries: Array<{ query: string; scope?: string }>;
-      };
-
-      if (!input.queries || input.queries.length === 0) {
-        return 'Error: No search queries provided.';
+      ),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      if (!params.queries || params.queries.length === 0) {
+        return t('Error: No search queries provided.');
       }
 
-      // Cap query count to prevent abuse
-      const MAX_QUERIES = 10;
-      if (input.queries.length > MAX_QUERIES) {
-        return `Error: Too many queries (${input.queries.length}). Maximum is ${MAX_QUERIES}.`;
+      if (params.queries.length > MAX_QUERIES) {
+        return t(
+          `Error: Too many queries (${params.queries.length}). Maximum is ${MAX_QUERIES}.`,
+        );
       }
 
       const settings = loadSettings(ctx.cwd);
       const searchConfig = settings.stages.search;
 
       if (!searchConfig?.model) {
-        return (
+        return t(
           'Error: No search model configured.\n' +
-          'Set stages.search.model in .pi/workflow-settings.json\n' +
-          'Example: { "stages": { "search": { "model": "anthropic/claude-haiku-4-5" } } }\n' +
-          'Use a lightweight/cheap model for cost-effective parallel search.'
+            'Set stages.search.model in .pi/workflow-settings.json\n' +
+            'Example: { "stages": { "search": { "model": "anthropic/claude-haiku-4-5" } } }\n' +
+            'Use a lightweight/cheap model for cost-effective parallel search.',
         );
       }
 
-      const queries: SearchQuery[] = input.queries.map((q) => ({
-        query: q.query,
-        scope: (q.scope as SearchScope) ?? 'codebase',
-      }));
+      const queries: SearchQuery[] = params.queries.map(
+        (q: { query: string; scope?: string }) => ({
+          query: q.query,
+          scope: (q.scope as SearchScope) ?? 'codebase',
+        }),
+      );
 
       const results = await runParallelSearch(
         queries,
         searchConfig,
         pi,
         ctx.cwd,
+        signal,
       );
 
-      return formatResults(results);
+      return t(formatResults(results));
     },
   });
 }
