@@ -6,8 +6,10 @@ import type { PiRpcClient } from '../core/rpc-client';
 import type { ChatHistoryStore } from '../core/chat-history';
 import type {
   AgentState,
+  AttachedFile,
   AutoRetryStartEvent,
   ExtToWebview,
+  ImageContent,
   MessageUpdateEvent,
   ToolExecutionEndEvent,
   ToolExecutionStartEvent,
@@ -257,16 +259,75 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       case 'sendMessage':
         if (typeof msg.text !== 'string' || !msg.text.trim()) return;
         this.historyStore.append({ role: 'user', content: msg.text, timestamp: Date.now() });
-        client.prompt(msg.text).catch((err) =>
-          this.postToWebview({ type: 'error', message: String(err) }),
-        );
+        {
+          const images = Array.isArray(msg.images) && msg.images.length > 0
+            ? msg.images as ImageContent[]
+            : undefined;
+          client.prompt(msg.text, images ? { images } : undefined).catch((err) =>
+            this.postToWebview({ type: 'error', message: String(err) }),
+          );
+        }
         break;
       case 'abort':
         client.abort().catch((err) =>
           this.postToWebview({ type: 'error', message: String(err) }),
         );
         break;
+      case 'pickFile':
+        this.handlePickFile();
+        break;
     }
+  }
+
+  // ── File attachment ───────────────────────────────────────────
+
+  private async handlePickFile(): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: 'Attach',
+      filters: {
+        'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+        'Text': ['txt', 'md', 'json', 'yaml', 'yml', 'toml', 'ts', 'js', 'py', 'rs', 'go', 'java', 'sh'],
+        'All Files': ['*'],
+      },
+    });
+
+    if (!uris || uris.length === 0) return;
+
+    const uri = uris[0];
+    const name = uri.path.split('/').pop() || 'file';
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+
+    const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+    const MIME_MAP: Record<string, string> = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+    };
+
+    const attached: AttachedFile = { name, mimeType: 'text/plain' };
+
+    if (IMAGE_EXTS.has(ext)) {
+      try {
+        const fileData = await vscode.workspace.fs.readFile(uri);
+        // Size guard: max 10MB for images
+        if (fileData.byteLength > 10 * 1024 * 1024) {
+          this.postToWebview({ type: 'error', message: `File too large: ${name} (max 10MB)` });
+          return;
+        }
+        attached.mimeType = MIME_MAP[ext] || 'image/png';
+        attached.data = Buffer.from(fileData).toString('base64');
+      } catch (err) {
+        this.postToWebview({ type: 'error', message: `Failed to read file: ${String(err)}` });
+        return;
+      }
+    } else {
+      attached.path = uri.fsPath;
+    }
+
+    this.postToWebview({ type: 'fileAttached', file: attached });
   }
 
   // ── HTML ─────────────────────────────────────────────────────
@@ -291,9 +352,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   </div>
   <div id="messages"></div>
   <div id="input-area">
+    <div id="file-chips"></div>
     <div id="input-card">
-      <textarea id="input" rows="3" placeholder="메시지 입력... (Shift+Enter 줄바꿈)"></textarea>
+      <textarea id="input" rows="1" placeholder="메시지 입력... (Shift+Enter 줄바꿈)"></textarea>
       <div id="input-buttons">
+        <button id="attach-btn" title="Attach file">📎</button>
         <button id="send-btn">Send</button>
         <button id="abort-btn" class="hidden">Stop</button>
       </div>

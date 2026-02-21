@@ -8,6 +8,15 @@ export interface ChatHistoryItem {
   timestamp: number;
 }
 
+export interface AttachedFile {
+  name: string;
+  mimeType: string;
+  /** base64-encoded data for images */
+  data?: string;
+  /** Absolute path for non-image files */
+  path?: string;
+}
+
 export type ExtToWebview =
   | { type: 'agentStart' }
   | { type: 'agentEnd' }
@@ -27,9 +36,11 @@ export type ExtToWebview =
   | { type: 'retryStart'; attempt: number; maxAttempts: number; delayMs: number; error: string }
   | { type: 'retryEnd'; success: boolean }
   | { type: 'clear' }
-  | { type: 'loadHistory'; messages: ChatHistoryItem[] };
+  | { type: 'loadHistory'; messages: ChatHistoryItem[] }
+  | { type: 'fileAttached'; file: AttachedFile };
 
 export type WebviewToExt =
-  | { type: 'sendMessage'; text: string }
+  | { type: 'sendMessage'; text: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'abort' }
-  | { type: 'ready' };
+  | { type: 'ready' }
+  | { type: 'pickFile' };

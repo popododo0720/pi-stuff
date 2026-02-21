@@ -117,11 +117,17 @@ export class PiRpcClient extends EventEmitter {
 
   prompt(
     message: string,
-    streamingBehavior?: 'steer' | 'followUp',
+    options?: {
+      streamingBehavior?: 'steer' | 'followUp';
+      images?: Array<{ type: 'image'; data: string; mimeType: string }>;
+    },
   ): Promise<RpcResponse> {
     const cmd: Record<string, unknown> = { type: 'prompt', message };
-    if (streamingBehavior) {
-      cmd.streamingBehavior = streamingBehavior;
+    if (options?.streamingBehavior) {
+      cmd.streamingBehavior = options.streamingBehavior;
+    }
+    if (options?.images && options.images.length > 0) {
+      cmd.images = options.images;
     }
     return this.sendCommand(cmd);
   }

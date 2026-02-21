@@ -178,6 +178,31 @@ body {
 #input-area {
   margin: 8px 12px 12px; padding: 0;
 }
+#file-chips {
+  display: none; flex-wrap: wrap; gap: 4px;
+  padding: 0 0 4px;
+}
+.file-chip {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--color-token-bg-secondary);
+  border: 1px solid var(--color-token-border);
+  border-radius: var(--radius-lg); padding: 2px 8px;
+  font-size: 12px; max-width: 200px;
+}
+.file-thumb {
+  width: 20px; height: 20px; object-fit: cover;
+  border-radius: 3px;
+}
+.file-icon { font-size: 14px; }
+.file-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-token-foreground); flex: 1; min-width: 0;
+}
+.file-remove {
+  background: none; border: none; color: var(--color-token-text-secondary);
+  cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1;
+}
+.file-remove:hover { color: var(--color-token-error); }
 #input-card {
   background: var(--color-token-input-background);
   border: 1px solid var(--color-token-input-border);
@@ -190,10 +215,18 @@ body {
   background: transparent; color: var(--color-token-input-foreground);
   border: none; outline: none;
   font-family: var(--vscode-font-family);
-  font-size: 13px; line-height: 1.4;
+  font-size: 13px; line-height: 20px;
+  min-height: 20px; max-height: 240px;
+  overflow-y: hidden;
 }
 #input:focus { outline: none; }
 #input-buttons { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+#attach-btn {
+  background: none; border: none; font-size: 16px;
+  cursor: pointer; padding: 4px; opacity: 0.7;
+  transition: opacity 0.15s;
+}
+#attach-btn:hover { opacity: 1; }
 #send-btn {
   background: var(--color-token-button-background);
   color: var(--color-token-button-foreground);

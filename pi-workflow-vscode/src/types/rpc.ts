@@ -250,9 +250,24 @@ export type ExtToWebview =
     }
   | { type: 'retryEnd'; success: boolean }
   | { type: 'clear' }
-  | { type: 'loadHistory'; messages: ChatHistoryItem[] };
+  | { type: 'loadHistory'; messages: ChatHistoryItem[] }
+  | { type: 'fileAttached'; file: AttachedFile };
+
+export interface AttachedFile {
+  name: string;
+  mimeType: string;
+  /** base64-encoded data for images */
+  data?: string;
+  /** Absolute path for non-image files */
+  path?: string;
+}
 
 export type WebviewToExt =
-  | { type: 'sendMessage'; text: string }
+  | {
+      type: 'sendMessage';
+      text: string;
+      images?: ImageContent[];
+    }
   | { type: 'abort' }
-  | { type: 'ready' };
+  | { type: 'ready' }
+  | { type: 'pickFile' };

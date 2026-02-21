@@ -1,7 +1,7 @@
 // webview/src/main.ts — Chat webview entry point
 // Handles message routing, DOM manipulation, and user input.
 
-import type { ExtToWebview } from './types';
+import type { AttachedFile, ExtToWebview } from './types';
 import { renderMarkdown, escapeHtml } from './markdown';
 import { ansiToHtml } from './ansi';
 import cssText from './styles.css';
@@ -22,6 +22,8 @@ const messagesEl = document.getElementById('messages')!;
 const inputEl = document.getElementById('input') as HTMLTextAreaElement;
 const sendBtn = document.getElementById('send-btn')!;
 const abortBtn = document.getElementById('abort-btn')!;
+const attachBtn = document.getElementById('attach-btn')!;
+const fileChipsEl = document.getElementById('file-chips')!;
 const modelInfoEl = document.getElementById('model-info')!;
 
 let currentAssistantEl: HTMLElement | null = null;
@@ -456,6 +458,9 @@ window.addEventListener('message', (event: MessageEvent) => {
     case 'retryEnd':
       addSystemMessage(msg.success ? 'Retry succeeded.' : 'Retry failed.');
       break;
+    case 'fileAttached':
+      addFileChip(msg.file);
+      break;
     case 'clear':
       messagesEl.innerHTML = '';
       break;
@@ -490,15 +495,128 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 });
 
+// ── Auto-resize textarea ──
+
+const MIN_ROWS = 1;
+const MAX_ROWS = 12;
+const LINE_HEIGHT = 20; // px, matches CSS
+
+function autoResizeInput(): void {
+  inputEl.style.height = 'auto';
+  const scrollH = inputEl.scrollHeight;
+  const maxH = MAX_ROWS * LINE_HEIGHT;
+  const minH = MIN_ROWS * LINE_HEIGHT;
+  inputEl.style.height = Math.min(Math.max(scrollH, minH), maxH) + 'px';
+  inputEl.style.overflowY = scrollH > maxH ? 'auto' : 'hidden';
+}
+
+inputEl.addEventListener('input', autoResizeInput);
+
+// Initialize height
+requestAnimationFrame(autoResizeInput);
+
+// ── File attachment state ──
+
+const attachedFiles: AttachedFile[] = [];
+
+function addFileChip(file: AttachedFile): void {
+  attachedFiles.push(file);
+  renderFileChips();
+}
+
+function removeFileChip(index: number): void {
+  attachedFiles.splice(index, 1);
+  renderFileChips();
+}
+
+function renderFileChips(): void {
+  fileChipsEl.innerHTML = '';
+  for (let i = 0; i < attachedFiles.length; i++) {
+    const file = attachedFiles[i];
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+
+    const isImage = file.mimeType.startsWith('image/');
+    if (isImage && file.data) {
+      const thumb = document.createElement('img');
+      thumb.src = `data:${file.mimeType};base64,${file.data}`;
+      thumb.className = 'file-thumb';
+      thumb.alt = file.name;
+      chip.appendChild(thumb);
+    } else {
+      const icon = document.createElement('span');
+      icon.className = 'file-icon';
+      icon.textContent = '📄';
+      chip.appendChild(icon);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = file.name;
+    chip.appendChild(name);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'file-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    const idx = i;
+    removeBtn.addEventListener('click', () => removeFileChip(idx));
+    chip.appendChild(removeBtn);
+
+    fileChipsEl.appendChild(chip);
+  }
+  fileChipsEl.style.display = attachedFiles.length > 0 ? 'flex' : 'none';
+}
+
 // ── Input ──
 
 function sendMessage(): void {
   if (isStreaming) return;
   const text = inputEl.value.trim();
-  if (!text) return;
-  vscode.postMessage({ type: 'sendMessage', text });
-  addUserMessage(text);
+  if (!text && attachedFiles.length === 0) return;
+
+  // Collect images for RPC
+  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
+  const textFileRefs: string[] = [];
+
+  for (const f of attachedFiles) {
+    if (f.mimeType.startsWith('image/') && f.data) {
+      images.push({ type: 'image', data: f.data, mimeType: f.mimeType });
+    } else if (f.path) {
+      textFileRefs.push(f.path);
+    }
+  }
+
+  // Build message: append file references for non-image files
+  let message = text;
+  if (textFileRefs.length > 0) {
+    const refs = textFileRefs.map((p) => `[attached: ${p}]`).join('\n');
+    message = message ? message + '\n\n' + refs : refs;
+  }
+
+  if (!message && images.length === 0) return;
+
+  vscode.postMessage({
+    type: 'sendMessage',
+    text: message,
+    images: images.length > 0 ? images : undefined,
+  });
+
+  // Show user message
+  let displayText = text;
+  if (attachedFiles.length > 0) {
+    const fileNames = attachedFiles.map((f) => f.name).join(', ');
+    displayText = displayText
+      ? displayText + '\n📎 ' + fileNames
+      : '📎 ' + fileNames;
+  }
+  addUserMessage(displayText);
+
+  // Reset
   inputEl.value = '';
+  attachedFiles.length = 0;
+  renderFileChips();
+  autoResizeInput();
   userScrolledUp = false;
 }
 
@@ -515,5 +633,15 @@ abortBtn.addEventListener('click', () => {
   vscode.postMessage({ type: 'abort' });
 });
 
+attachBtn.addEventListener('click', () => {
+  vscode.postMessage({ type: 'pickFile' });
+});
+
+// ── Event handler for file attachment responses ──
+
+// Handle fileAttached in the message handler
+// (already in the switch case above via main event handler)
+
 // ── Init ──
+renderFileChips(); // hide initially
 vscode.postMessage({ type: 'ready' });
