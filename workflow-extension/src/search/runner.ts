@@ -56,7 +56,12 @@ export async function runParallelSearch(
   const thinking = config.thinking ?? DEFAULT_THINKING;
 
   // Execute with concurrency limit
-  const results: SearchResult[] = new Array(queries.length);
+  // Pre-fill with error defaults to avoid undefined holes on abort
+  const results: SearchResult[] = queries.map((q) => ({
+    query: q.query,
+    findings: [],
+    error: 'Aborted',
+  }));
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
