@@ -10,6 +10,7 @@ import type {
   GitAutomationConfig,
   PreflightConfig,
   RepoMapConfig,
+  SearchStageConfig,
   StageConfig,
   StageConfigs,
   VerifyStageConfig,
@@ -124,6 +125,30 @@ function validateVerifyConfig(raw: unknown): VerifyStageConfig | undefined {
     : undefined;
 }
 
+function validateSearchConfig(raw: unknown): SearchStageConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const config: SearchStageConfig = {};
+  if (typeof r.model === 'string' && r.model) config.model = r.model;
+  if (typeof r.thinking === 'string' && VALID_THINKING.has(r.thinking))
+    config.thinking = r.thinking as SearchStageConfig['thinking'];
+  if (
+    typeof r.maxParallel === 'number' &&
+    Number.isFinite(r.maxParallel) &&
+    r.maxParallel > 0
+  ) {
+    config.maxParallel = Math.max(1, Math.min(10, Math.floor(r.maxParallel)));
+  }
+  if (
+    typeof r.timeout === 'number' &&
+    Number.isFinite(r.timeout) &&
+    r.timeout > 0
+  ) {
+    config.timeout = Math.max(10000, Math.min(300000, Math.floor(r.timeout)));
+  }
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
 function validatePreflightConfig(raw: unknown): PreflightConfig | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
@@ -178,6 +203,8 @@ export function loadSettings(cwd: string): WorkflowSettings {
     if (implement) stages.implement = implement;
     const compound = validateStageConfig(rawStages.compound);
     if (compound) stages.compound = compound;
+    const search = validateSearchConfig(rawStages.search);
+    if (search) stages.search = search;
 
     const timeout =
       typeof raw.verifyTimeout === 'number' &&

@@ -82,10 +82,14 @@ export async function handleApprovePlan(
       session.state = 'implement';
       session.retryCount = 0;
       // Capture startCommit for the first active TODO
-      if (session.activeTodoIndex >= 0 && session.todos[session.activeTodoIndex]) {
+      if (
+        session.activeTodoIndex >= 0 &&
+        session.todos[session.activeTodoIndex]
+      ) {
         const headResult = await runGit(pi, ['rev-parse', 'HEAD'], ctx.cwd);
         if (headResult.ok) {
-          session.todos[session.activeTodoIndex].startCommit = headResult.stdout;
+          session.todos[session.activeTodoIndex].startCommit =
+            headResult.stdout;
         }
       }
       const summary = formatVerificationSummary(result);
@@ -139,10 +143,14 @@ export async function handleApprovePlan(
       session.state = 'implement';
       session.retryCount = 0;
       // Capture startCommit for the first active TODO
-      if (session.activeTodoIndex >= 0 && session.todos[session.activeTodoIndex]) {
+      if (
+        session.activeTodoIndex >= 0 &&
+        session.todos[session.activeTodoIndex]
+      ) {
         const headResult = await runGit(pi, ['rev-parse', 'HEAD'], ctx.cwd);
         if (headResult.ok) {
-          session.todos[session.activeTodoIndex].startCommit = headResult.stdout;
+          session.todos[session.activeTodoIndex].startCommit =
+            headResult.stdout;
         }
       }
       session.verifyPlanResult =

@@ -11,6 +11,19 @@ const PI_DIR = '.pi';
 const THINKING_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 const DETAIL_OPTIONS = ['minimal', 'standard', 'detailed'];
 
+interface DomainConfig {
+  models?: string[];
+  thinking?: string;
+  enabled?: boolean;
+}
+
+interface SearchConfig {
+  model?: string;
+  thinking?: string;
+  maxParallel?: number;
+  timeout?: number;
+}
+
 interface Settings {
   verifyTimeout?: number;
   maxRetries?: number;
@@ -19,12 +32,15 @@ interface Settings {
     plan?: { model?: string; thinking?: string };
     implement?: { model?: string; thinking?: string };
     compound?: { model?: string; thinking?: string };
-    verify?: { models?: string[]; thinking?: string };
+    verify?: { models?: string[]; thinking?: string; domains?: Record<string, DomainConfig> };
+    search?: SearchConfig;
   };
   git?: Record<string, boolean | undefined>;
   preflight?: { enabled?: boolean; commands?: string[]; timeout?: number };
   repoMap?: { enabled?: boolean; tokenBudget?: number };
 }
+
+const DOMAIN_IDS = ['security', 'performance', 'architecture', 'data-integrity', 'simplicity'] as const;
 
 export class SettingsPanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -210,6 +226,35 @@ export class SettingsPanel implements vscode.Disposable {
     <select id="verify-thinking"><option value="">(default)</option>${thinkingOpts}</select>
   </div>
 
+  <h2>Verify Domains</h2>
+  <p class="desc" style="margin-left:0">Per-domain model/thinking overrides. Leave empty to inherit from Verify defaults.</p>
+  ${DOMAIN_IDS.map(d => `
+  <details style="margin:8px 0;border:1px solid var(--vscode-panel-border,#333);border-radius:4px;padding:4px 8px;">
+    <summary style="cursor:pointer;font-size:13px;font-weight:500;padding:4px 0;">${d}</summary>
+    <div class="field-check" style="margin-top:6px;"><input type="checkbox" id="domain-${d}-enabled" checked><label for="domain-${d}-enabled">Enabled</label></div>
+    <div class="field"><label>Models (comma-sep)</label><input type="text" id="domain-${d}-models" placeholder="(inherit)" style="width:280px"></div>
+    <div class="field"><label>Thinking</label><select id="domain-${d}-thinking"><option value="">(inherit)</option>${thinkingOpts}</select></div>
+  </details>`).join('')}
+
+  <h2>Stages — Search</h2>
+  <p class="desc" style="margin-left:0">Lightweight model for parallel codebase search. Use a cheap/fast model to reduce costs.</p>
+  <div class="field">
+    <label>Model</label>
+    <input type="text" id="search-model" placeholder="e.g. anthropic/claude-haiku-4-5">
+  </div>
+  <div class="field">
+    <label>Thinking</label>
+    <select id="search-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+  </div>
+  <div class="field">
+    <label>Max Parallel</label>
+    <input type="number" id="search-maxParallel" min="1" max="10" placeholder="3">
+  </div>
+  <div class="field">
+    <label>Timeout (ms)</label>
+    <input type="number" id="search-timeout" min="10000" max="300000" step="1000" placeholder="60000">
+  </div>
+
   <h2>Git</h2>
   <div class="field-check"><input type="checkbox" id="git-enabled"><label for="git-enabled">Enabled</label></div>
   <div class="field-check"><input type="checkbox" id="git-commitPerTodo"><label for="git-commitPerTodo">Commit per TODO</label></div>
@@ -263,6 +308,23 @@ export class SettingsPanel implements vscode.Disposable {
     val('verify-models', (stages.verify?.models || []).join(', '));
     val('verify-thinking', stages.verify?.thinking || '');
 
+    // Verify domains
+    const domains = stages.verify?.domains || {};
+    const domainIds = ${JSON.stringify(DOMAIN_IDS)};
+    for (const d of domainIds) {
+      const dc = domains[d] || {};
+      chk('domain-' + d + '-enabled', dc.enabled !== false);
+      val('domain-' + d + '-models', (dc.models || []).join(', '));
+      val('domain-' + d + '-thinking', dc.thinking || '');
+    }
+
+    // Search
+    const searchCfg = stages.search || {};
+    val('search-model', searchCfg.model || '');
+    val('search-thinking', searchCfg.thinking || '');
+    val('search-maxParallel', searchCfg.maxParallel || 3);
+    val('search-timeout', searchCfg.timeout || 60000);
+
     const git = settings.git || {};
     chk('git-enabled', git.enabled !== false);
     chk('git-commitPerTodo', git.commitPerTodo !== false);
@@ -301,8 +363,20 @@ export class SettingsPanel implements vscode.Disposable {
       const verifyStage = {};
       if (verifyModels.length) verifyStage.models = verifyModels;
       if (verifyThinking) verifyStage.thinking = verifyThinking;
-      // Preserve existing domains config
-      if (stages.verify?.domains) verifyStage.domains = stages.verify.domains;
+
+      // Collect per-domain verify config
+      const domainsOut = {};
+      for (const d of domainIds) {
+        const dc = {};
+        const enabled = getChk('domain-' + d + '-enabled');
+        if (!enabled) dc.enabled = false;
+        const dModels = getVal('domain-' + d + '-models').split(',').map(s => s.trim()).filter(Boolean);
+        if (dModels.length) dc.models = dModels;
+        const dThinking = getVal('domain-' + d + '-thinking');
+        if (dThinking) dc.thinking = dThinking;
+        if (Object.keys(dc).length) domainsOut[d] = dc;
+      }
+      if (Object.keys(domainsOut).length) verifyStage.domains = domainsOut;
 
       const stagesOut = {};
       const plan = stageConfig('plan-model', 'plan-thinking');
@@ -312,6 +386,18 @@ export class SettingsPanel implements vscode.Disposable {
       const compound = stageConfig('compound-model', 'compound-thinking');
       if (compound) stagesOut.compound = compound;
       if (Object.keys(verifyStage).length) stagesOut.verify = verifyStage;
+
+      // Collect search config
+      const searchOut = {};
+      const searchModel = getVal('search-model');
+      if (searchModel) searchOut.model = searchModel;
+      const searchThinking = getVal('search-thinking');
+      if (searchThinking) searchOut.thinking = searchThinking;
+      const searchMaxP = getNum('search-maxParallel');
+      if (searchMaxP > 0) searchOut.maxParallel = searchMaxP;
+      const searchTimeout = getNum('search-timeout');
+      if (searchTimeout > 0) searchOut.timeout = searchTimeout;
+      if (Object.keys(searchOut).length) stagesOut.search = searchOut;
 
       const cmdLines = getVal('preflight-commands').split('\\n').filter(Boolean);
 

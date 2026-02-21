@@ -266,10 +266,7 @@ export async function runParallelVerification(
               ? 'passed'
               : 'failed',
         });
-        return [
-          i,
-          { ...retried, domain: task.domain.name, retryAttempt: 1 },
-        ];
+        return [i, { ...retried, domain: task.domain.name, retryAttempt: 1 }];
       });
     });
     const retryResults = await Promise.all(retryPromises);

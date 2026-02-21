@@ -106,6 +106,13 @@ export interface StageConfig {
   thinking?: ThinkingLevel;
 }
 
+export interface SearchStageConfig {
+  model?: string;
+  thinking?: ThinkingLevel;
+  maxParallel?: number; // concurrent search subprocess limit, default 3
+  timeout?: number; // per-search timeout in ms, default 60000
+}
+
 export interface DomainVerifyConfig {
   models?: string[];
   thinking?: ThinkingLevel;
@@ -123,6 +130,7 @@ export interface StageConfigs {
   verify?: VerifyStageConfig;
   implement?: StageConfig;
   compound?: StageConfig;
+  search?: SearchStageConfig;
 }
 
 export interface RepoMapConfig {

@@ -2,10 +2,7 @@
 // Runs parallel impl verification, transitions based on result.
 
 import { SELF_AUDIT_TEMPLATE } from '../../constants';
-import {
-  loadWorkflowMemory,
-  saveWorkflowMemory,
-} from '../../storage/memory';
+import { loadWorkflowMemory, saveWorkflowMemory } from '../../storage/memory';
 import {
   formatVerificationSummary,
   runParallelVerification,
@@ -133,9 +130,7 @@ export async function handleImplDone(
       todoContext,
       (event) => {
         onUpdate?.({
-          content: [
-            { type: 'text' as const, text: JSON.stringify(event) },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify(event) }],
         });
       },
     );

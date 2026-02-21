@@ -89,7 +89,9 @@ export function registerProjectMemoryTool(
           case 'get': {
             const data = wfMem[cat];
             if (!Array.isArray(data)) {
-              return t(`${params.category}: (invalid data — use clear to reset)`);
+              return t(
+                `${params.category}: (invalid data — use clear to reset)`,
+              );
             }
             return t(formatArray(params.category, data));
           }
@@ -104,7 +106,9 @@ export function registerProjectMemoryTool(
             } else {
               const arr = wfMem[cat] as string[];
               if (arr.length >= MAX_MEMORY_ENTRIES) {
-                return t(`${params.category} reached max entries (${MAX_MEMORY_ENTRIES}).`);
+                return t(
+                  `${params.category} reached max entries (${MAX_MEMORY_ENTRIES}).`,
+                );
               }
               arr.push(value);
             }

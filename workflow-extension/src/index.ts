@@ -19,6 +19,7 @@ import { loadSettings } from './storage/settings';
 import { compactManager, RESET_MARKER } from './tools/compact';
 import { registerModuleConventionsTool } from './tools/module-conventions';
 import { registerProjectMemoryTool } from './tools/project-memory';
+import { registerSearchTool } from './tools/search';
 import { applyStageConfig, registerTransitionTool } from './tools/transition';
 import type { StageConfig, WorkflowSession, WorkflowSettings } from './types';
 import { cleanupVerificationResults } from './verification';
@@ -67,6 +68,7 @@ export default function (pi: ExtensionAPI) {
   );
   registerProjectMemoryTool(pi, () => sm.get());
   registerModuleConventionsTool(pi);
+  registerSearchTool(pi);
 
   // ── Session reconstruction from disk ─────────────────────────
   const reconstruct = async (ctx: ExtensionContext) => {

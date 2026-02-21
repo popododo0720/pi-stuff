@@ -15,8 +15,15 @@ export async function handleSkipVerification(
     session.retryCount = 0;
     session.verifyPlanResult = 'Verification skipped by user';
     // Capture startCommit for the first active TODO
-    if (session.activeTodoIndex >= 0 && session.todos[session.activeTodoIndex]) {
-      const headResult = await runGit(hctx.pi, ['rev-parse', 'HEAD'], hctx.ctx.cwd);
+    if (
+      session.activeTodoIndex >= 0 &&
+      session.todos[session.activeTodoIndex]
+    ) {
+      const headResult = await runGit(
+        hctx.pi,
+        ['rev-parse', 'HEAD'],
+        hctx.ctx.cwd,
+      );
       if (headResult.ok) {
         session.todos[session.activeTodoIndex].startCommit = headResult.stdout;
       }

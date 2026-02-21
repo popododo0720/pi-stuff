@@ -2,7 +2,10 @@
 
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import * as vscode from 'vscode';
+
+const execFileAsync = promisify(execFile);
 
 const GIT_TIMEOUT_MS = 5000;
 const DEBOUNCE_MS = 500;
@@ -70,13 +73,23 @@ export class ChangedFilesTreeProvider
       item.iconPath = new vscode.ThemeIcon(display.icon);
       item.tooltip = `${display.label}: ${f.path}`;
       item.description = f.status;
+      item.resourceUri = vscode.Uri.file(join(this.workspaceRoot, f.path));
 
-      // Open diff via VSCode built-in git extension (works for all statuses)
-      item.command = {
-        command: 'git.openChange',
-        title: 'Open Change',
-        arguments: [vscode.Uri.file(join(this.workspaceRoot, f.path))],
-      };
+      if (this.commitRange) {
+        // Commit range mode: open diff via pi.openCommitDiff command
+        item.command = {
+          command: 'pi.openCommitDiff',
+          title: 'Open Diff',
+          arguments: [f.path, f.status, this.commitRange.start, this.commitRange.end],
+        };
+      } else {
+        // Working tree mode: use built-in git extension
+        item.command = {
+          command: 'git.openChange',
+          title: 'Open Change',
+          arguments: [vscode.Uri.file(join(this.workspaceRoot, f.path))],
+        };
+      }
 
       return item;
     });

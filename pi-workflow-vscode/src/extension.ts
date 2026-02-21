@@ -3,7 +3,11 @@
 // Phase 2: RPC-based chat integration with pi coding agent.
 
 import { execFile as execFileCb } from 'node:child_process';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import * as vscode from 'vscode';
+
+const execFileAsync = promisify(execFileCb);
 import { showDiff } from './commands/show-diff';
 import { SessionWatcher } from './core/session-watcher';
 import { PiRpcClient } from './core/rpc-client';
@@ -41,6 +45,24 @@ async function detectMainBranch(cwd: string): Promise<string> {
   }
   cachedMainBranch = 'main';
   return 'main';
+}
+
+// ── Git content URI helper ──────────────────────────────────────
+/**
+ * Create a virtual URI showing file content at a specific commit.
+ * Uses `git show <commit>:<path>` and encodes as a virtual document.
+ */
+async function gitShowUri(cwd: string, commit: string, filePath: string): Promise<vscode.Uri> {
+  const { stdout } = await execFileAsync(
+    'git', ['show', `${commit}:${filePath}`],
+    { cwd, timeout: 5000, maxBuffer: 5 * 1024 * 1024 },
+  );
+  // Encode content as a git-show URI that VSCode can render read-only
+  const encodedContent = encodeURIComponent(stdout);
+  const shortRef = commit === 'HEAD' ? 'HEAD' : commit.slice(0, 7);
+  return vscode.Uri.parse(
+    `pi-git-show:${filePath}@${shortRef}?${encodedContent}`,
+  );
 }
 
 // ── Phase 2 state ──────────────────────────────────────────────
@@ -192,6 +214,16 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Session Watcher (created but not started yet) ────────────
   const sessionWatcher = new SessionWatcher(workspaceRoot, outputChannel);
   context.subscriptions.push(sessionWatcher);
+
+  // ── Git Show virtual document provider ─────────────────────
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider('pi-git-show', {
+      provideTextDocumentContent(uri: vscode.Uri): string {
+        // Content is encoded in the query string
+        return decodeURIComponent(uri.query);
+      },
+    }),
+  );
 
   // ── Status Bar ───────────────────────────────────────────────
   const statusBar = new WorkflowStatusBar();
@@ -375,6 +407,46 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
+    vscode.commands.registerCommand(
+      'pi.openCommitDiff',
+      async (filePath: string, status: string, startCommit: string, endCommit: string) => {
+        try {
+          const absPath = join(workspaceRoot, filePath);
+          const fileUri = vscode.Uri.file(absPath);
+
+          if (status === 'A') {
+            // Added file: show right side only (empty → new)
+            const rightUri = await gitShowUri(workspaceRoot, endCommit, filePath);
+            await vscode.commands.executeCommand('vscode.diff',
+              vscode.Uri.parse('untitled:empty'), rightUri,
+              `${filePath} (Added)`,
+            );
+          } else if (status === 'D') {
+            // Deleted file: show left side only (old → empty)
+            const leftUri = await gitShowUri(workspaceRoot, startCommit, filePath);
+            await vscode.commands.executeCommand('vscode.diff',
+              leftUri, vscode.Uri.parse('untitled:empty'),
+              `${filePath} (Deleted)`,
+            );
+          } else {
+            // Modified/Renamed/Copied: show both sides
+            const leftUri = await gitShowUri(workspaceRoot, startCommit, filePath);
+            // If endCommit is HEAD and file exists on disk, use the workspace file
+            const rightUri = endCommit === 'HEAD'
+              ? fileUri
+              : await gitShowUri(workspaceRoot, endCommit, filePath);
+            await vscode.commands.executeCommand('vscode.diff',
+              leftUri, rightUri,
+              `${filePath} (${startCommit.slice(0, 7)}..${endCommit.slice(0, 7)})`,
+            );
+          }
+        } catch {
+          // Fallback: just open the file
+          const fileUri = vscode.Uri.file(join(workspaceRoot, filePath));
+          await vscode.commands.executeCommand('vscode.open', fileUri);
+        }
+      },
+    ),
     vscode.commands.registerCommand('pi.selectWorkflow', async (arg: unknown) => {
       // Support both direct id (string) and WorkflowNode from context menu
       const id = typeof arg === 'string'
