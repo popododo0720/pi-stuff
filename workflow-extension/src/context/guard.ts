@@ -39,7 +39,7 @@ const BLOCK_REASONS: Partial<Record<WorkflowState, string>> = {
  */
 const BASH_WRITE_PATTERNS: RegExp[] = [
   // Redirections — excludes fd redirects (2>, 1>) and /dev/null targets
-  /(?<!\d)\s*>{1,2}\s*(?!\/dev\/null|&)\S/, // > file or >> file (not 2>/dev/null, not >&2)
+  /(?<!\d)\s*>{1,2}\s*(?!\/dev\/null|&|>)\S/, // > file or >> file (not 2>/dev/null, not >&2, not >>)
   // Commands that must appear at statement start
   /(?:^|[;&|]\s*)sed\s+-i/, // sed in-place edit
   /(?:^|[;&|]\s*)tee\s/, // tee writes to file
