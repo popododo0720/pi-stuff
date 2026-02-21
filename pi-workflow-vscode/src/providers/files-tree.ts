@@ -13,6 +13,7 @@ const DEBOUNCE_MS = 500;
 interface ChangedFile {
   status: string; // M, A, D, R, C, ?
   path: string;
+  oldPath?: string; // For rename/copy: the original file path
 }
 
 // Map git status codes to display info
@@ -77,10 +78,11 @@ export class ChangedFilesTreeProvider
 
       if (this.commitRange) {
         // Commit range mode: open diff via pi.openCommitDiff command
+        // For rename/copy, pass oldPath so the left side can be resolved
         item.command = {
           command: 'pi.openCommitDiff',
           title: 'Open Diff',
-          arguments: [f.path, f.status, this.commitRange.start, this.commitRange.end],
+          arguments: [f.path, f.status, this.commitRange.start, this.commitRange.end, f.oldPath],
         };
       } else {
         // Working tree mode: use built-in git extension
@@ -199,8 +201,11 @@ export class ChangedFilesTreeProvider
       .map((line) => {
         const parts = line.split('\t');
         const status = parts[0]?.[0] ?? 'M';
-        const path = parts.length > 2 ? parts[2]! : parts[1] ?? '';
-        return { status, path };
+        // Rename/Copy: parts = [status, oldPath, newPath]
+        if ((status === 'R' || status === 'C') && parts.length > 2) {
+          return { status, path: parts[2]!, oldPath: parts[1] };
+        }
+        return { status, path: parts[1] ?? '' };
       })
       .filter((f) => f.path);
   }

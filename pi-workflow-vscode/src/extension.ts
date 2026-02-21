@@ -409,28 +409,31 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('pi.showDiff', () => showDiff(workspaceRoot)),
     vscode.commands.registerCommand(
       'pi.openCommitDiff',
-      async (filePath: string, status: string, startCommit: string, endCommit: string) => {
+      async (filePath: string, status: string, startCommit: string, endCommit: string, oldPath?: string) => {
         try {
           const absPath = join(workspaceRoot, filePath);
           const fileUri = vscode.Uri.file(absPath);
+          const emptyUri = vscode.Uri.parse('pi-git-show:empty?');
 
           if (status === 'A') {
             // Added file: show right side only (empty → new)
             const rightUri = await gitShowUri(workspaceRoot, endCommit, filePath);
             await vscode.commands.executeCommand('vscode.diff',
-              vscode.Uri.parse('untitled:empty'), rightUri,
+              emptyUri, rightUri,
               `${filePath} (Added)`,
             );
           } else if (status === 'D') {
             // Deleted file: show left side only (old → empty)
             const leftUri = await gitShowUri(workspaceRoot, startCommit, filePath);
             await vscode.commands.executeCommand('vscode.diff',
-              leftUri, vscode.Uri.parse('untitled:empty'),
+              leftUri, emptyUri,
               `${filePath} (Deleted)`,
             );
           } else {
             // Modified/Renamed/Copied: show both sides
-            const leftUri = await gitShowUri(workspaceRoot, startCommit, filePath);
+            // For rename/copy, use oldPath for the left (start commit) side
+            const leftPath = oldPath ?? filePath;
+            const leftUri = await gitShowUri(workspaceRoot, startCommit, leftPath);
             // If endCommit is HEAD and file exists on disk, use the workspace file
             const rightUri = endCommit === 'HEAD'
               ? fileUri

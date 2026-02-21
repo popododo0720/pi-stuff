@@ -85,7 +85,7 @@ export class VerifyPanel implements vscode.Disposable {
     const domainResults = this.parseDomainResults(verifyResult);
 
     if (domainResults.length > 0) {
-      return this.wrapHtml(nonce, csp, this.renderDomainResults(domainResults, nonce));
+      return this.wrapHtml(nonce, csp, this.renderDomainResults(domainResults));
     }
 
     // Fallback: legacy single-result parsing
@@ -177,7 +177,7 @@ export class VerifyPanel implements vscode.Disposable {
   /**
    * Render domain-based results as collapsible sections.
    */
-  private renderDomainResults(results: DomainResult[], nonce: string): string {
+  private renderDomainResults(results: DomainResult[]): string {
     // Overall summary
     const passCount = results.filter(r => r.status === 'PASS').length;
     const failCount = results.filter(r => r.status === 'FAIL').length;
@@ -188,10 +188,6 @@ export class VerifyPanel implements vscode.Disposable {
     summaryHtml += allPass ? 'ALL PASSED' : `${failCount} FAILED`;
     summaryHtml += ` (${passCount}✅ ${failCount}❌ ${errorCount}⛔)`;
     summaryHtml += '</div>';
-
-    // Group by domain type: core vs domain
-    const coreResults = results.filter(r => !r.label.includes('/') || r.label.split('/').length <= 2);
-    const domainResultsGrouped = results.filter(r => r.label.split('/').length > 2);
 
     let bodyHtml = summaryHtml;
 
