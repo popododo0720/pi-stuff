@@ -105,7 +105,7 @@ async function executeSingleSearch(
     prompt,
     '--no-extensions',
     '--tools',
-    'read,bash,grep,find,ls',
+    'read,grep,find,ls',
     '--provider',
     provider,
     '--model',
