@@ -1,6 +1,6 @@
 // views/settings-panel.ts — WebviewPanel for editing .pi/workflow-settings.json
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
@@ -119,7 +119,8 @@ export class SettingsPanel implements vscode.Disposable {
       try {
         renameSync(tmpPath, path);
       } catch {
-        // Cross-device fallback: direct write
+        // Cross-device fallback: direct write + cleanup orphan
+        try { unlinkSync(tmpPath); } catch { /* ignore */ }
         writeFileSync(path, content, { encoding: 'utf-8', mode: 0o600 });
       }
     } catch (err) {
@@ -448,19 +449,18 @@ export class SettingsPanel implements vscode.Disposable {
       if (mr > 0) result.maxRetries = mr;
       const dl = getVal('detailLevel');
       if (dl) result.detailLevel = dl;
-      if (getChk('preflight-enabled') || cmdLines.length) {
-        result.preflight = { enabled: getChk('preflight-enabled') };
-        if (cmdLines.length) result.preflight.commands = cmdLines;
-        const pt = getNum('preflight-timeout');
-        if (pt > 0) result.preflight.timeout = pt;
-      }
+      // Always persist preflight (even when disabled, to preserve user intent)
+      const pfEnabled = getChk('preflight-enabled');
+      result.preflight = { enabled: pfEnabled };
+      if (cmdLines.length) result.preflight.commands = cmdLines;
+      const pt = getNum('preflight-timeout');
+      if (pt > 0) result.preflight.timeout = pt;
+
+      // Always persist repoMap (even when disabled, to preserve user intent)
       const rmEnabled = getChk('repoMap-enabled');
       const rmBudget = getNum('repoMap-tokenBudget');
-      if (rmEnabled || rmBudget) {
-        result.repoMap = {};
-        if (rmEnabled) result.repoMap.enabled = true;
-        if (rmBudget) result.repoMap.tokenBudget = rmBudget;
-      }
+      result.repoMap = { enabled: rmEnabled };
+      if (rmBudget) result.repoMap.tokenBudget = rmBudget;
 
       vscode.postMessage({ type: 'save', settings: result });
     });
