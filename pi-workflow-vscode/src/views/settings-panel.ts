@@ -198,119 +198,153 @@ export class SettingsPanel implements vscode.Disposable {
     }
     .save-btn:hover { opacity: 0.9; }
     .desc { font-size: 12px; color: var(--vscode-descriptionForeground); margin: 2px 0 8px 192px; }
+    .tab-bar {
+      display: flex; gap: 0; margin-bottom: 16px;
+      border-bottom: 1px solid var(--vscode-panel-border, transparent);
+    }
+    .tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--vscode-descriptionForeground);
+      padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 500;
+    }
+    .tab-btn:hover { color: var(--vscode-editor-foreground); }
+    .tab-btn.active {
+      color: var(--vscode-editor-foreground);
+      border-bottom-color: var(--vscode-focusBorder, #007fd4);
+    }
+    .tab-content.hidden { display: none; }
   </style>
 </head>
 <body>
   <h1>⚙️ Pi Workflow Settings</h1>
 
-  <h2>General</h2>
-  <div class="field">
-    <label>Verify Timeout (ms)</label>
-    <input type="number" id="verifyTimeout" min="10000" max="600000" step="1000">
-  </div>
-  <div class="field">
-    <label>Max Retries</label>
-    <input type="number" id="maxRetries" min="1" max="20">
-  </div>
-  <div class="field">
-    <label>Detail Level</label>
-    <select id="detailLevel"><option value="">(default)</option>${detailOpts}</select>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="general">General</button>
+    <button class="tab-btn" data-tab="stages">Stages</button>
+    <button class="tab-btn" data-tab="git">Git</button>
+    <button class="tab-btn" data-tab="advanced">Advanced</button>
   </div>
 
-  <h2>Stages — Plan</h2>
-  <div class="field">
-    <label>Model</label>
-    <input type="text" id="plan-model" placeholder="e.g. anthropic/claude-opus-4-6">
-  </div>
-  <div class="field">
-    <label>Thinking</label>
-    <select id="plan-thinking"><option value="">(default)</option>${thinkingOpts}</select>
-  </div>
-
-  <h2>Stages — Implement</h2>
-  <div class="field">
-    <label>Model</label>
-    <input type="text" id="impl-model" placeholder="e.g. anthropic/claude-opus-4-6">
-  </div>
-  <div class="field">
-    <label>Thinking</label>
-    <select id="impl-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+  <!-- ── General Tab ── -->
+  <div class="tab-content" id="tab-general">
+    <h2>General</h2>
+    <div class="field">
+      <label>Verify Timeout (ms)</label>
+      <input type="number" id="verifyTimeout" min="10000" max="600000" step="1000">
+    </div>
+    <div class="field">
+      <label>Max Retries</label>
+      <input type="number" id="maxRetries" min="1" max="20">
+    </div>
+    <div class="field">
+      <label>Detail Level</label>
+      <select id="detailLevel"><option value="">(default)</option>${detailOpts}</select>
+    </div>
   </div>
 
-  <h2>Stages — Compound</h2>
-  <div class="field">
-    <label>Model</label>
-    <input type="text" id="compound-model" placeholder="">
-  </div>
-  <div class="field">
-    <label>Thinking</label>
-    <select id="compound-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+  <!-- ── Stages Tab ── -->
+  <div class="tab-content hidden" id="tab-stages">
+    <h2>Plan</h2>
+    <div class="field">
+      <label>Model</label>
+      <input type="text" id="plan-model" placeholder="e.g. anthropic/claude-opus-4-6">
+    </div>
+    <div class="field">
+      <label>Thinking</label>
+      <select id="plan-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+    </div>
+
+    <h2>Implement</h2>
+    <div class="field">
+      <label>Model</label>
+      <input type="text" id="impl-model" placeholder="e.g. anthropic/claude-opus-4-6">
+    </div>
+    <div class="field">
+      <label>Thinking</label>
+      <select id="impl-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+    </div>
+
+    <h2>Compound</h2>
+    <div class="field">
+      <label>Model</label>
+      <input type="text" id="compound-model" placeholder="">
+    </div>
+    <div class="field">
+      <label>Thinking</label>
+      <select id="compound-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+    </div>
+
+    <h2>Verify</h2>
+    <div class="field">
+      <label>Models (comma-sep)</label>
+      <input type="text" id="verify-models" placeholder="model1, model2" style="width:300px">
+    </div>
+    <div class="field">
+      <label>Thinking</label>
+      <select id="verify-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+    </div>
+
+    <h2>Verify Domains</h2>
+    <p class="desc" style="margin-left:0">Per-domain model/thinking overrides. Leave empty to inherit from Verify defaults.</p>
+    ${DOMAIN_IDS.map(d => `
+    <details style="margin:8px 0;border:1px solid var(--vscode-panel-border,#333);border-radius:4px;padding:4px 8px;">
+      <summary style="cursor:pointer;font-size:13px;font-weight:500;padding:4px 0;">${d}</summary>
+      <div class="field-check" style="margin-top:6px;"><input type="checkbox" id="domain-${d}-enabled" checked><label for="domain-${d}-enabled">Enabled</label></div>
+      <div class="field"><label>Models (comma-sep)</label><input type="text" id="domain-${d}-models" placeholder="(inherit)" style="width:280px"></div>
+      <div class="field"><label>Thinking</label><select id="domain-${d}-thinking"><option value="">(inherit)</option>${thinkingOpts}</select></div>
+    </details>`).join('')}
+
+    <h2>Search</h2>
+    <p class="desc" style="margin-left:0">Lightweight model for parallel codebase search. Use a cheap/fast model to reduce costs.</p>
+    <div class="field">
+      <label>Model</label>
+      <input type="text" id="search-model" placeholder="e.g. anthropic/claude-haiku-4-5">
+    </div>
+    <div class="field">
+      <label>Thinking</label>
+      <select id="search-thinking"><option value="">(default)</option>${thinkingOpts}</select>
+    </div>
+    <div class="field">
+      <label>Max Parallel</label>
+      <input type="number" id="search-maxParallel" min="1" max="10" placeholder="3">
+    </div>
+    <div class="field">
+      <label>Timeout (ms)</label>
+      <input type="number" id="search-timeout" min="10000" max="300000" step="1000" placeholder="60000">
+    </div>
   </div>
 
-  <h2>Stages — Verify</h2>
-  <div class="field">
-    <label>Models (comma-sep)</label>
-    <input type="text" id="verify-models" placeholder="model1, model2" style="width:300px">
-  </div>
-  <div class="field">
-    <label>Thinking</label>
-    <select id="verify-thinking"><option value="">(default)</option>${thinkingOpts}</select>
-  </div>
-
-  <h2>Verify Domains</h2>
-  <p class="desc" style="margin-left:0">Per-domain model/thinking overrides. Leave empty to inherit from Verify defaults.</p>
-  ${DOMAIN_IDS.map(d => `
-  <details style="margin:8px 0;border:1px solid var(--vscode-panel-border,#333);border-radius:4px;padding:4px 8px;">
-    <summary style="cursor:pointer;font-size:13px;font-weight:500;padding:4px 0;">${d}</summary>
-    <div class="field-check" style="margin-top:6px;"><input type="checkbox" id="domain-${d}-enabled" checked><label for="domain-${d}-enabled">Enabled</label></div>
-    <div class="field"><label>Models (comma-sep)</label><input type="text" id="domain-${d}-models" placeholder="(inherit)" style="width:280px"></div>
-    <div class="field"><label>Thinking</label><select id="domain-${d}-thinking"><option value="">(inherit)</option>${thinkingOpts}</select></div>
-  </details>`).join('')}
-
-  <h2>Stages — Search</h2>
-  <p class="desc" style="margin-left:0">Lightweight model for parallel codebase search. Use a cheap/fast model to reduce costs.</p>
-  <div class="field">
-    <label>Model</label>
-    <input type="text" id="search-model" placeholder="e.g. anthropic/claude-haiku-4-5">
-  </div>
-  <div class="field">
-    <label>Thinking</label>
-    <select id="search-thinking"><option value="">(default)</option>${thinkingOpts}</select>
-  </div>
-  <div class="field">
-    <label>Max Parallel</label>
-    <input type="number" id="search-maxParallel" min="1" max="10" placeholder="3">
-  </div>
-  <div class="field">
-    <label>Timeout (ms)</label>
-    <input type="number" id="search-timeout" min="10000" max="300000" step="1000" placeholder="60000">
+  <!-- ── Git Tab ── -->
+  <div class="tab-content hidden" id="tab-git">
+    <h2>Git Automation</h2>
+    <div class="field-check"><input type="checkbox" id="git-enabled"><label for="git-enabled">Enabled</label></div>
+    <div class="field-check"><input type="checkbox" id="git-commitPerTodo"><label for="git-commitPerTodo">Commit per TODO</label></div>
+    <div class="field-check"><input type="checkbox" id="git-pushPerTodo"><label for="git-pushPerTodo">Push per TODO</label></div>
+    <div class="field-check"><input type="checkbox" id="git-pushOnComplete"><label for="git-pushOnComplete">Push on complete</label></div>
+    <div class="field-check"><input type="checkbox" id="git-requireCleanStart"><label for="git-requireCleanStart">Require clean start</label></div>
+    <div class="field-check"><input type="checkbox" id="git-useWorkflowBranch"><label for="git-useWorkflowBranch">Use workflow branch</label></div>
+    <div class="field-check"><input type="checkbox" id="git-useWorkflowWorktree"><label for="git-useWorkflowWorktree">Use workflow worktree</label></div>
   </div>
 
-  <h2>Git</h2>
-  <div class="field-check"><input type="checkbox" id="git-enabled"><label for="git-enabled">Enabled</label></div>
-  <div class="field-check"><input type="checkbox" id="git-commitPerTodo"><label for="git-commitPerTodo">Commit per TODO</label></div>
-  <div class="field-check"><input type="checkbox" id="git-pushPerTodo"><label for="git-pushPerTodo">Push per TODO</label></div>
-  <div class="field-check"><input type="checkbox" id="git-pushOnComplete"><label for="git-pushOnComplete">Push on complete</label></div>
-  <div class="field-check"><input type="checkbox" id="git-requireCleanStart"><label for="git-requireCleanStart">Require clean start</label></div>
-  <div class="field-check"><input type="checkbox" id="git-useWorkflowBranch"><label for="git-useWorkflowBranch">Use workflow branch</label></div>
-  <div class="field-check"><input type="checkbox" id="git-useWorkflowWorktree"><label for="git-useWorkflowWorktree">Use workflow worktree</label></div>
+  <!-- ── Advanced Tab ── -->
+  <div class="tab-content hidden" id="tab-advanced">
+    <h2>Preflight</h2>
+    <div class="field-check"><input type="checkbox" id="preflight-enabled"><label for="preflight-enabled">Enabled</label></div>
+    <div class="field">
+      <label>Timeout (seconds)</label>
+      <input type="number" id="preflight-timeout" min="10" max="300">
+    </div>
+    <div style="margin: 8px 0;">
+      <label style="font-size:13px; display:block; margin-bottom:4px;">Commands (one per line)</label>
+      <textarea id="preflight-commands" rows="3"></textarea>
+    </div>
 
-  <h2>Preflight</h2>
-  <div class="field-check"><input type="checkbox" id="preflight-enabled"><label for="preflight-enabled">Enabled</label></div>
-  <div class="field">
-    <label>Timeout (seconds)</label>
-    <input type="number" id="preflight-timeout" min="10" max="300">
-  </div>
-  <div style="margin: 8px 0;">
-    <label style="font-size:13px; display:block; margin-bottom:4px;">Commands (one per line)</label>
-    <textarea id="preflight-commands" rows="3"></textarea>
-  </div>
-
-  <h2>Repo Map</h2>
-  <div class="field-check"><input type="checkbox" id="repoMap-enabled"><label for="repoMap-enabled">Enabled</label></div>
-  <div class="field">
-    <label>Token Budget</label>
-    <input type="number" id="repoMap-tokenBudget" min="256" max="8192">
+    <h2>Repo Map</h2>
+    <div class="field-check"><input type="checkbox" id="repoMap-enabled"><label for="repoMap-enabled">Enabled</label></div>
+    <div class="field">
+      <label>Token Budget</label>
+      <input type="number" id="repoMap-tokenBudget" min="256" max="8192">
+    </div>
   </div>
 
   <div class="save-bar">
@@ -320,6 +354,18 @@ export class SettingsPanel implements vscode.Disposable {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const settings = ${settingsJson};
+
+    // ── Tab switching ──
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+        btn.classList.add('active');
+        const tabId = 'tab-' + btn.getAttribute('data-tab');
+        const tabEl = document.getElementById(tabId);
+        if (tabEl) tabEl.classList.remove('hidden');
+      });
+    });
 
     // ── Populate ──
     function val(id, v) { const el = document.getElementById(id); if (el && v != null) el.value = v; }
