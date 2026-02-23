@@ -361,7 +361,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }
 
-    // Resend history when workflowId changes (fixes race condition on reload)
+    // Resend history when workflowId changes (fixes race condition on reload).
+    // Uses local store here because pi session may not have switched yet
+    // (selectWorkflow calls newSession after syncUI fires).
+    // The webview 'ready' handler uses getMessages() for accurate pi-sourced history.
     if (idChanged) {
       chatViewProvider.postToWebview({ type: 'clear' });
       const history = chatHistoryStore.getAll();

@@ -199,6 +199,27 @@ export type RpcEvent =
   | AutoRetryEndEvent
   | ExtensionUIRequest;
 
+// ── Agent Messages (from get_messages RPC) ─────────────────────
+
+/** Minimal AgentMessage shape from pi get_messages RPC response. */
+export interface AgentMessage {
+  role: 'user' | 'assistant' | 'toolResult' | 'bashExecution';
+  content:
+    | string
+    | Array<{
+        type: string;
+        text?: string;
+        thinking?: string;
+        id?: string;
+        name?: string;
+        arguments?: Record<string, unknown>;
+      }>;
+  timestamp?: number;
+  toolCallId?: string;
+  toolName?: string;
+  isError?: boolean;
+}
+
 // ── Chat History ───────────────────────────────────────────────
 
 export interface ChatHistoryItem {

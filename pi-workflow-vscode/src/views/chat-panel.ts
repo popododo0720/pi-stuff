@@ -5,8 +5,10 @@ import * as vscode from 'vscode';
 import type { PiRpcClient } from '../core/rpc-client';
 import type { ChatHistoryStore } from '../core/chat-history';
 import type {
+  AgentMessage,
   AgentState,
   AutoRetryStartEvent,
+  ChatHistoryItem,
   ExtToWebview,
   MessageUpdateEvent,
   ToolExecutionEndEvent,
@@ -87,6 +89,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     // No-op if view is not resolved yet
     if (!this.view) return;
     this.view.webview.postMessage(msg);
+  }
+
+  /**
+   * Convert AgentMessage[] from pi get_messages RPC into ChatHistoryItem[]
+   * for webview display.
+   */
+  convertAgentMessages(messages: AgentMessage[]): ChatHistoryItem[] {
+    const items: ChatHistoryItem[] = [];
+    for (const msg of messages) {
+      const ts = msg.timestamp ?? Date.now();
+      const text = extractTextContent(msg.content);
+
+      if (msg.role === 'user') {
+        if (text) items.push({ role: 'user', content: text, timestamp: ts });
+      } else if (msg.role === 'assistant') {
+        if (text) items.push({ role: 'assistant', content: text, timestamp: ts });
+      } else if (msg.role === 'toolResult') {
+        if (text) {
+          items.push({
+            role: 'tool',
+            content: text.slice(0, MAX_TOOL_HISTORY_LENGTH),
+            toolName: msg.toolName,
+            isError: msg.isError,
+            timestamp: ts,
+          });
+        }
+      }
+      // bashExecution: skipped (pi includes it in next user prompt context)
+    }
+    return items;
   }
 
   dispose(): void {
@@ -224,12 +256,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
     // Handle 'ready' before rpcClient guard — history must load even if pi isn't running yet
     if (msg.type === 'ready') {
-      const history = this.historyStore.getAll();
-      if (history.length > 0) {
-        this.postToWebview({ type: 'loadHistory', messages: history });
-      }
-      // If pi is running, also fetch current state
       if (this.rpcClient?.isRunning()) {
+        // Primary: fetch actual conversation from pi via get_messages
+        this.rpcClient
+          .getMessages()
+          .then((resp) => {
+            const data = resp.data as
+              | { messages?: AgentMessage[] }
+              | undefined;
+            const agentMessages = data?.messages ?? [];
+            const items = this.convertAgentMessages(agentMessages);
+            // Always send — empty array clears stale DOM, no local store fallback
+            this.postToWebview({ type: 'loadHistory', messages: items });
+          })
+          .catch(() => {
+            // Fallback to local store on error
+            const history = this.historyStore.getAll();
+            if (history.length > 0) {
+              this.postToWebview({ type: 'loadHistory', messages: history });
+            }
+          });
+        // Fetch current state in parallel
         this.rpcClient
           .getState()
           .then((resp) => {
@@ -248,6 +295,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
             }),
           );
       } else {
+        // Pi not running — use local store
+        const history = this.historyStore.getAll();
+        if (history.length > 0) {
+          this.postToWebview({ type: 'loadHistory', messages: history });
+        }
         this.postToWebview({ type: 'stateUpdate', isStreaming: false });
       }
       return;
@@ -320,6 +372,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 }
 
 // ── Helpers ──────────────────────────────────────────────────
+
+/** Extract text from AgentMessage content (string or content block array). */
+function extractTextContent(
+  content: AgentMessage['content'],
+): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(
+      (c): c is { type: string; text: string } =>
+        c.type === 'text' && typeof c.text === 'string',
+    )
+    .map((c) => c.text)
+    .join('\n');
+}
 
 function extractText(result: {
   content: Array<{ type: string; text?: string }>;

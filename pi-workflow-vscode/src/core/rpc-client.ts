@@ -144,6 +144,10 @@ export class PiRpcClient extends EventEmitter {
     return this.sendCommand({ type: 'get_state' });
   }
 
+  getMessages(): Promise<RpcResponse> {
+    return this.sendCommand({ type: 'get_messages' });
+  }
+
   setModel(provider: string, modelId: string): Promise<RpcResponse> {
     return this.sendCommand({ type: 'set_model', provider, modelId });
   }
