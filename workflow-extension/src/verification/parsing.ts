@@ -62,7 +62,7 @@ export function parseStructuredFindings(output: string): {
     const text = bullet[1].trim();
     // Skip "None", "N/A", "No critical issues", etc.
     if (
-      /^(?:none|n\/a|na|null|0|no\s+\w+\s+(?:issues?|findings?|items?))/i.test(
+      /^(?:none\.?|n\/a|na|null|0|no\s+\w+\s+(?:issues?|findings?|items?|concerns?|problems?|violations?)|nothing\s+(?:found|to\s+report|critical|notable)|all\s+(?:good|clear|correct|pass)|no\s+(?:issues?|concerns?|problems?|findings?))\s*\.?$/i.test(
         text,
       )
     ) {

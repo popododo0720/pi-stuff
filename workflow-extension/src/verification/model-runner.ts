@@ -90,7 +90,7 @@ export async function runSingleModel(
         // Trust PASS, but override if model contradicts itself (listed criticals but said PASS)
         passed = !hasCritical;
       } else if (verdict === 'FAIL') {
-        passed = !hasCritical;
+        passed = false;
       } else {
         // No verdict — try keyword fallback if structured parsing also found nothing
         if (

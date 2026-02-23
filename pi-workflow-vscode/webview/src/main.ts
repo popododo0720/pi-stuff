@@ -525,6 +525,11 @@ window.addEventListener('message', (event: MessageEvent) => {
       currentToolGroup = null;
       assistantRawBuffer = '';
       renderPending = false;
+      isStreaming = false;
+      abortBtn.classList.add('hidden');
+      toolGroupCount = 0;
+      if (verifyContainer) { verifyContainer.remove(); verifyContainer = null; }
+      userScrolledUp = false;
       break;
     case 'loadHistory': {
       messagesEl.innerHTML = '';

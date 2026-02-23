@@ -487,8 +487,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (currentClient?.isRunning()) {
         try {
           await currentClient.newSession();
-          // Resume workflow in new pi session (fire-and-forget)
-          currentClient.prompt('/workflow').catch(() => {});
+          // Session is already active via setActiveId.
+          // syncUI handles tree/status/history update.
+          // Next user message triggers before_agent_start which loads the session.
         } catch { /* pi may not be running */ }
       }
     }),
