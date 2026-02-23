@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { getNonce } from './html-utils';
+import type { PiRpcClient } from '../core/rpc-client';
 
 const SETTINGS_REL = '.pi/workflow-settings.json';
 const PI_DIR = '.pi';
@@ -45,16 +46,23 @@ const DOMAIN_IDS = ['security', 'performance', 'architecture', 'data-integrity',
 
 export class SettingsPanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
+  private rpcClient: PiRpcClient | null = null;
 
   constructor(
     private readonly workspaceRoot: string,
     private readonly extensionUri: vscode.Uri,
   ) {}
 
-  show(): void {
+  setRpcClient(client: PiRpcClient | null): void {
+    this.rpcClient = client;
+  }
+
+  async show(): Promise<void> {
+    const models = await this.fetchAvailableModels();
+
     if (this.panel) {
       this.panel.reveal();
-      this.panel.webview.html = this.getHtml(this.panel.webview);
+      this.panel.webview.html = this.getHtml(this.panel.webview, models);
       return;
     }
 
@@ -65,16 +73,31 @@ export class SettingsPanel implements vscode.Disposable {
       { enableScripts: true, retainContextWhenHidden: true },
     );
 
-    this.panel.webview.html = this.getHtml(this.panel.webview);
+    this.panel.webview.html = this.getHtml(this.panel.webview, models);
 
-    this.panel.webview.onDidReceiveMessage((msg: { type: string; settings?: unknown }) => {
+    this.panel.webview.onDidReceiveMessage(async (msg: { type: string; settings?: unknown }) => {
       if (msg.type === 'save' && msg.settings) {
         this.saveSettings(msg.settings as Settings);
         vscode.window.showInformationMessage('Pi settings saved.');
+      } else if (msg.type === 'refreshModels') {
+        const fresh = await this.fetchAvailableModels();
+        this.panel?.webview.postMessage({ type: 'modelsUpdate', models: fresh });
       }
     });
 
     this.panel.onDidDispose(() => { this.panel = undefined; });
+  }
+
+  private async fetchAvailableModels(): Promise<string[]> {
+    if (!this.rpcClient?.isRunning()) return [];
+    try {
+      const resp = await this.rpcClient.getAvailableModels();
+      if (resp.success && resp.data?.models) {
+        const raw = resp.data.models as Array<{ provider?: string; id?: string } | string>;
+        return raw.map(m => typeof m === 'string' ? m : `${m.provider}/${m.id}`);
+      }
+    } catch { /* ignore */ }
+    return [];
   }
 
   private loadSettings(): Settings {
@@ -128,7 +151,7 @@ export class SettingsPanel implements vscode.Disposable {
     }
   }
 
-  private getHtml(webview: vscode.Webview): string {
+  private getHtml(webview: vscode.Webview, availableModels: string[] = []): string {
     const nonce = getNonce();
     const settings = this.loadSettings();
     const settingsJson = JSON.stringify(settings)
@@ -137,6 +160,8 @@ export class SettingsPanel implements vscode.Disposable {
 
     const thinkingOpts = THINKING_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
     const detailOpts = DETAIL_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+    const modelOpts = availableModels.map(m => `<option value="${m}">${m}</option>`).join('');
+    const modelsJson = JSON.stringify(availableModels).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -172,6 +197,17 @@ export class SettingsPanel implements vscode.Disposable {
       border: 1px solid var(--vscode-dropdown-border, transparent);
       border-radius: 4px; padding: 4px 8px; font-size: 13px;
       outline: none;
+    }
+    .field select[multiple] {
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+    }
+    .field select[multiple] option {
+      padding: 2px 4px;
+    }
+    .field select:focus, .field select[multiple]:focus {
+      border-color: var(--vscode-focusBorder, #007fd4);
     }
     .field-check { margin: 6px 0; display: flex; align-items: center; gap: 8px; }
     .field-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--vscode-checkbox-background); }
@@ -247,7 +283,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Plan</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="plan-model" placeholder="e.g. anthropic/claude-opus-4-6">
+      <select id="plan-model"><option value="">(default)</option>${modelOpts}</select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -257,7 +293,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Implement</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="impl-model" placeholder="e.g. anthropic/claude-opus-4-6">
+      <select id="impl-model"><option value="">(default)</option>${modelOpts}</select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -267,7 +303,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Compound</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="compound-model" placeholder="">
+      <select id="compound-model"><option value="">(default)</option>${modelOpts}</select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -276,9 +312,10 @@ export class SettingsPanel implements vscode.Disposable {
 
     <h2>Verify</h2>
     <div class="field">
-      <label>Models (comma-sep)</label>
-      <input type="text" id="verify-models" placeholder="model1, model2" style="width:300px">
+      <label>Models</label>
+      <select id="verify-models" multiple style="width:300px;min-height:80px">${modelOpts}</select>
     </div>
+    <p class="desc" style="margin-left:0">Ctrl/Cmd+Click to select multiple models</p>
     <div class="field">
       <label>Thinking</label>
       <select id="verify-thinking"><option value="">(default)</option>${thinkingOpts}</select>
@@ -290,7 +327,7 @@ export class SettingsPanel implements vscode.Disposable {
     <details style="margin:8px 0;border:1px solid var(--vscode-panel-border,#333);border-radius:4px;padding:4px 8px;">
       <summary style="cursor:pointer;font-size:13px;font-weight:500;padding:4px 0;">${d}</summary>
       <div class="field-check" style="margin-top:6px;"><input type="checkbox" id="domain-${d}-enabled" checked><label for="domain-${d}-enabled">Enabled</label></div>
-      <div class="field"><label>Models (comma-sep)</label><input type="text" id="domain-${d}-models" placeholder="(inherit)" style="width:280px"></div>
+      <div class="field"><label>Models</label><select id="domain-${d}-models" multiple style="width:280px;min-height:60px"><option value="">(inherit)</option>${modelOpts}</select></div>
       <div class="field"><label>Thinking</label><select id="domain-${d}-thinking"><option value="">(inherit)</option>${thinkingOpts}</select></div>
     </details>`).join('')}
 
@@ -298,7 +335,7 @@ export class SettingsPanel implements vscode.Disposable {
     <p class="desc" style="margin-left:0">Lightweight model for parallel codebase search. Use a cheap/fast model to reduce costs.</p>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="search-model" placeholder="e.g. anthropic/claude-haiku-4-5">
+      <select id="search-model"><option value="">(default)</option>${modelOpts}</select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -348,12 +385,14 @@ export class SettingsPanel implements vscode.Disposable {
   </div>
 
   <div class="save-bar">
+    <button class="save-btn" id="refresh-models-btn" style="margin-right:8px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);">🔄 Refresh Models</button>
     <button class="save-btn" id="save-btn">Save Settings</button>
   </div>
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const settings = ${settingsJson};
+    let availableModels = ${modelsJson};
 
     // ── Tab switching ──
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -367,10 +406,51 @@ export class SettingsPanel implements vscode.Disposable {
       });
     });
 
-    // ── Populate ──
+    // ── Helpers ──
     function val(id, v) { const el = document.getElementById(id); if (el && v != null) el.value = v; }
     function chk(id, v) { const el = document.getElementById(id); if (el) el.checked = !!v; }
+    function setMultiSelect(id, values) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      for (const opt of el.options) {
+        opt.selected = values.includes(opt.value);
+      }
+    }
+    function getMultiSelect(id) {
+      const el = document.getElementById(id);
+      if (!el) return [];
+      return Array.from(el.selectedOptions).map(o => o.value).filter(v => v !== '');
+    }
+    function rebuildModelSelects(models) {
+      const singleIds = ['plan-model', 'impl-model', 'compound-model', 'search-model'];
+      const multiIds = ['verify-models', ...domainIds.map(d => 'domain-' + d + '-models')];
+      for (const id of singleIds) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const cur = el.value;
+        el.innerHTML = '<option value="">(default)</option>' + models.map(m => '<option value="' + m + '">' + m + '</option>').join('');
+        el.value = cur;
+      }
+      for (const id of multiIds) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const cur = getMultiSelect(id);
+        const hasInherit = id.startsWith('domain-');
+        el.innerHTML = (hasInherit ? '<option value="">(inherit)</option>' : '') + models.map(m => '<option value="' + m + '">' + m + '</option>').join('');
+        setMultiSelect(id, cur);
+      }
+    }
 
+    // ── Listen for model updates ──
+    window.addEventListener('message', e => {
+      const msg = e.data;
+      if (msg.type === 'modelsUpdate' && msg.models) {
+        availableModels = msg.models;
+        rebuildModelSelects(availableModels);
+      }
+    });
+
+    // ── Populate ──
     val('verifyTimeout', settings.verifyTimeout || 120000);
     val('maxRetries', settings.maxRetries || 5);
     val('detailLevel', settings.detailLevel || '');
@@ -382,7 +462,7 @@ export class SettingsPanel implements vscode.Disposable {
     val('impl-thinking', stages.implement?.thinking || '');
     val('compound-model', stages.compound?.model || '');
     val('compound-thinking', stages.compound?.thinking || '');
-    val('verify-models', (stages.verify?.models || []).join(', '));
+    setMultiSelect('verify-models', stages.verify?.models || []);
     val('verify-thinking', stages.verify?.thinking || '');
 
     // Verify domains
@@ -391,7 +471,7 @@ export class SettingsPanel implements vscode.Disposable {
     for (const d of domainIds) {
       const dc = domains[d] || {};
       chk('domain-' + d + '-enabled', dc.enabled !== false);
-      val('domain-' + d + '-models', (dc.models || []).join(', '));
+      setMultiSelect('domain-' + d + '-models', dc.models || []);
       val('domain-' + d + '-thinking', dc.thinking || '');
     }
 
@@ -433,9 +513,13 @@ export class SettingsPanel implements vscode.Disposable {
       return Object.keys(c).length ? c : undefined;
     }
 
+    // ── Refresh models button ──
+    document.getElementById('refresh-models-btn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'refreshModels' });
+    });
+
     document.getElementById('save-btn').addEventListener('click', () => {
-      const verifyModelsRaw = getVal('verify-models');
-      const verifyModels = verifyModelsRaw.split(',').map(s => s.trim()).filter(Boolean);
+      const verifyModels = getMultiSelect('verify-models');
       const verifyThinking = getVal('verify-thinking');
       const verifyStage = {};
       if (verifyModels.length) verifyStage.models = verifyModels;
@@ -447,7 +531,7 @@ export class SettingsPanel implements vscode.Disposable {
         const dc = {};
         const enabled = getChk('domain-' + d + '-enabled');
         if (!enabled) dc.enabled = false;
-        const dModels = getVal('domain-' + d + '-models').split(',').map(s => s.trim()).filter(Boolean);
+        const dModels = getMultiSelect('domain-' + d + '-models');
         if (dModels.length) dc.models = dModels;
         const dThinking = getVal('domain-' + d + '-thinking');
         if (dThinking) dc.thinking = dThinking;

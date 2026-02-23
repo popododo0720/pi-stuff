@@ -101,10 +101,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Phase 2: Cleanup helper ──────────────────────────────────
   function cleanupChat(): void {
     chatViewProvider.setRpcClient(null);
+    settingsPanel?.setRpcClient(null);
     currentBridge?.dispose();
     currentClient = null;
     currentBridge = null;
   }
+  // settingsPanel is assigned later in activate(), but cleanupChat is only called at runtime
+  let settingsPanel: InstanceType<typeof SettingsPanel> | null = null;
 
   // ── Phase 2: Start pi process (extracted for auto-start) ─────
   function startPi(): void {
@@ -152,6 +155,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const bridge = new ExtensionUIBridge(client);
     bridge.bind();
     chatViewProvider.setRpcClient(client);
+    settingsPanel?.setRpcClient(client);
 
     currentClient = client;
     currentBridge = bridge;
@@ -309,7 +313,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Webview Panels ───────────────────────────────────────────
   const planPanel = new PlanPanel();
   const verifyPanel = new VerifyPanel();
-  const settingsPanel = new SettingsPanel(workspaceRoot, context.extensionUri);
+  settingsPanel = new SettingsPanel(workspaceRoot, context.extensionUri);
   context.subscriptions.push(planPanel, verifyPanel, settingsPanel);
 
   // Track last auto-opened plan to avoid reopening after user closes

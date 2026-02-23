@@ -133,6 +133,7 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           `🔍 Verify (models: ${s.verify?.models?.join(', ') || 'none'}, thinking: ${s.verify?.thinking || '(current)'})`,
           `🔨 Implement (model: ${s.implement?.model || '(current)'}, thinking: ${s.implement?.thinking || '(current)'})`,
           `🧠 Compound (model: ${s.compound?.model || '(current)'}, thinking: ${s.compound?.thinking || '(current)'})`,
+          `🔎 Search (model: ${s.search?.model || '(none)'}, thinking: ${s.search?.thinking || '(current)'}, parallel: ${s.search?.maxParallel ?? 3})`,
           `⏱️ Verify timeout (${settings.verifyTimeout / 1000}s)`,
           `🗺️ Repo Map (${rm?.enabled === false ? 'off' : 'on'}, budget: ${rm?.tokenBudget ?? 2048})`,
           `🧬 Git Automation (${g?.enabled === false ? 'off' : 'on'}, commit/todo: ${g?.commitPerTodo === false ? 'off' : 'on'}, push/todo: ${g?.pushPerTodo === true ? 'on' : 'off'})`,
@@ -309,6 +310,68 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
               }
             } else if (thinking) {
               s.compound = { ...s.compound, thinking };
+            }
+          }
+        } else if (choice.startsWith('🔎')) {
+          // ── Search stage config ──────────────────────────────────
+          const searchCfg = s.search ?? {};
+          const sub = await ctx.ui.select('Search settings', [
+            `Model (${searchCfg.model || 'none'})`,
+            `Thinking (${searchCfg.thinking || 'default'})`,
+            `Max Parallel (${searchCfg.maxParallel ?? 3})`,
+            `Timeout (${(searchCfg.timeout ?? 60000) / 1000}s)`,
+          ]);
+          if (sub?.startsWith('Model')) {
+            const model = await pickModel(ctx, searchCfg.model);
+            if (model !== undefined) {
+              s.search = { ...searchCfg, model: model || undefined };
+              if (
+                !s.search.model &&
+                !s.search.thinking &&
+                !s.search.maxParallel &&
+                !s.search.timeout
+              )
+                delete s.search;
+            }
+          } else if (sub?.startsWith('Thinking')) {
+            const thinking = await pickThinking(
+              ctx,
+              searchCfg.thinking as ThinkingLevel | undefined,
+            );
+            if (thinking === '') {
+              if (s.search) {
+                delete s.search.thinking;
+                if (!s.search.model && !s.search.maxParallel && !s.search.timeout)
+                  delete s.search;
+              }
+            } else if (thinking) {
+              s.search = { ...searchCfg, thinking };
+            }
+          } else if (sub?.startsWith('Max Parallel')) {
+            const input = await ctx.ui.input(
+              'Max parallel queries (1–10):',
+              String(searchCfg.maxParallel ?? 3),
+            );
+            if (input) {
+              const val = Number.parseInt(input, 10);
+              if (!Number.isNaN(val) && val >= 1 && val <= 10) {
+                s.search = { ...searchCfg, maxParallel: val };
+              } else {
+                ctx.ui.notify('Enter a number between 1 and 10.', 'error');
+              }
+            }
+          } else if (sub?.startsWith('Timeout')) {
+            const input = await ctx.ui.input(
+              'Search timeout (seconds, 10–300):',
+              String((searchCfg.timeout ?? 60000) / 1000),
+            );
+            if (input) {
+              const seconds = Number.parseInt(input, 10);
+              if (!Number.isNaN(seconds) && seconds >= 10 && seconds <= 300) {
+                s.search = { ...searchCfg, timeout: seconds * 1000 };
+              } else {
+                ctx.ui.notify('Enter a number between 10 and 300.', 'error');
+              }
             }
           }
         } else if (choice.startsWith('⏱️')) {
