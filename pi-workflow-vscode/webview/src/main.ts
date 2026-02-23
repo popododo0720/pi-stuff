@@ -187,6 +187,10 @@ function finalizeAssistantText(fullText: string): void {
 
 function createThinkingBlock(): void {
   if (!currentAssistantEl) return;
+  // Finalize previous thinking block if orphaned (e.g. back-to-back thinkingStart)
+  if (currentThinkingPre) {
+    currentThinkingPre = null;
+  }
   const details = document.createElement('details');
   details.className = 'thinking-block';
   const summary = document.createElement('summary');
@@ -206,7 +210,11 @@ function appendToThinking(delta: string): void {
 
 function finalizeThinking(fullThinking: string): void {
   if (!currentThinkingPre) return;
-  currentThinkingPre.textContent = fullThinking;
+  // Only replace streamed content if fullThinking is non-empty;
+  // backends may send empty thinking on end event, which would wipe streamed deltas
+  if (fullThinking) {
+    currentThinkingPre.textContent = fullThinking;
+  }
   currentThinkingPre = null;
 }
 
@@ -511,6 +519,12 @@ window.addEventListener('message', (event: MessageEvent) => {
       break;
     case 'clear':
       messagesEl.innerHTML = '';
+      currentAssistantEl = null;
+      currentAssistantContent = null;
+      currentThinkingPre = null;
+      currentToolGroup = null;
+      assistantRawBuffer = '';
+      renderPending = false;
       break;
     case 'loadHistory': {
       messagesEl.innerHTML = '';

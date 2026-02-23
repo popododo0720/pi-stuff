@@ -50,6 +50,10 @@ export async function handleApprovePlan(
       pi,
       ctx.cwd,
       signal,
+      undefined, // implNotes
+      undefined, // todoContext
+      undefined, // onProgress
+      session.id, // workflowId
     );
 
     // Infrastructure error → stay in verifyPlan (allow skipVerification)

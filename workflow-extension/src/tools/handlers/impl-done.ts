@@ -133,6 +133,7 @@ export async function handleImplDone(
           content: [{ type: 'text' as const, text: JSON.stringify(event) }],
         });
       },
+      session.id, // workflowId for learnings injection
     );
 
     // Save verification result to current TODO

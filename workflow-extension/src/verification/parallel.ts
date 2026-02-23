@@ -5,6 +5,8 @@
 
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
 import { loadCustomChecks } from '../storage/checks';
+import { loadCriticalPatterns } from '../storage/critical-patterns';
+import { loadMemory, loadWorkflowMemory } from '../storage/memory';
 import type {
   ModelVerificationResult,
   VerificationResult,
@@ -52,6 +54,7 @@ export async function runParallelVerification(
       | VerifyProgressEvent
       | { __verifyStart: true; tasks: VerifyTaskInfo[] },
   ) => void,
+  workflowId?: string,
 ): Promise<VerificationResult> {
   const verifyConfig = settings.stages.verify;
   const verifyModels = verifyConfig?.models ?? [];
@@ -60,6 +63,26 @@ export async function runParallelVerification(
   const stackHint = getStackHint(stacks);
   const checks = loadCustomChecks(cwd);
   const customChecks = checks.length > 0 ? checks : undefined;
+
+  // Load project learnings for verification context
+  const learningParts: string[] = [];
+  try {
+    const criticalPatterns = loadCriticalPatterns(cwd);
+    if (criticalPatterns) learningParts.push(criticalPatterns);
+  } catch { /* graceful */ }
+  try {
+    const memory = loadMemory(cwd);
+    if (memory.gotchas.length > 0) {
+      learningParts.push('Past gotchas:\n' + memory.gotchas.map((g) => `- ${g}`).join('\n'));
+    }
+    if (workflowId) {
+      const wfMem = loadWorkflowMemory(cwd, workflowId);
+      if (wfMem.gotchas.length > 0) {
+        learningParts.push('Workflow gotchas:\n' + wfMem.gotchas.map((g) => `- ${g}`).join('\n'));
+      }
+    }
+  } catch { /* graceful */ }
+  const projectLearnings = learningParts.length > 0 ? learningParts.join('\n\n') : undefined;
 
   if (type === 'plan') {
     // ── Plan: existing multi-model structure, no domain checks ──
@@ -73,6 +96,7 @@ export async function runParallelVerification(
       planContent,
       stackHint,
       customChecks,
+      projectLearnings,
     });
     const promises = verifyModels.map((model) =>
       runSingleModel(
@@ -99,6 +123,7 @@ export async function runParallelVerification(
     todoContext,
     stackHint,
     customChecks,
+    projectLearnings,
   });
 
   // ── Build domain task descriptors (stable index for retry) ──
@@ -127,6 +152,7 @@ export async function runParallelVerification(
       planContent,
       todoContext,
       stackHint,
+      projectLearnings,
     });
     for (const model of models) {
       domainTasks.push({ domain, model, prompt, thinking });

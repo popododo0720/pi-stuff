@@ -571,7 +571,7 @@ async function advanceToNextTodo(
       `Refer to the TODO #${p.nextIndex + 1} section in the approved plan above.`,
     stageConfig: settings.stages.implement,
     compact:
-      `${RESET_MARKER} Workflow "${session.description}" — TODO #${p.nextIndex} completed. ` +
+      `${RESET_MARKER} Workflow "${session.description}" — TODO #${p.completedIndex + 1} completed. ` +
       `Preserve: unified plan, TODO list progress, key decisions. ` +
       `Previous TODO learning: "${compactSummary}". ` +
       `Discard: implementation details, verification output, code diffs.`,
@@ -609,9 +609,8 @@ async function finalizeWorkflow(
       ? `**TODOs completed:** ${completedTodoCount}/${completedTodoCount}\n`
       : '';
 
-  // Session cleanup — preserve todos/gitBranch for done-state review
+  // Session cleanup — preserve todos/gitBranch/planContent for done-state review
   session.activeTodoIndex = -1;
-  session.planContent = '';
   session.verifyPlanResult = '';
   session.retryCount = 0;
   session.startupPrepRequired = false;

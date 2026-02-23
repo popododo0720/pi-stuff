@@ -275,11 +275,14 @@ export async function buildSystemPromptInjection(
     );
   }
 
-  // Done state — show status indicator
+  // Done state — show status indicator + preserved plan for review
   if (session.state === 'done' || session.completed) {
     const status =
       '\n\nWorkflow Status: 🎉 COMPLETED — use /workflow to start a new task\n';
-    return basePrompt + workflowFlag + status + memoryContext;
+    const donePlan = session.planContent
+      ? `\n\n### Completed Plan (read-only reference)\n<plan_content>\n${session.planContent}\n</plan_content>`
+      : '';
+    return basePrompt + workflowFlag + status + donePlan + memoryContext;
   }
 
   // Onboarding guide for first-time users (no conventions set yet)

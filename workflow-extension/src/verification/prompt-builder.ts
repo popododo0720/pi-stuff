@@ -17,6 +17,14 @@ export function xmlTag(
   return `<${name}${attrStr}>\n${content}\n</${name}>`;
 }
 
+/** General rules to prevent common false positives across all verification */
+const GENERAL_VERIFICATION_RULES =
+  '\n**General Rules:**\n' +
+  '- Do NOT flag missing config files (tsconfig.json, eslint.config, etc.) as CRITICAL. ' +
+  'Projects have varied build setups — some use tsx/tsgo direct execution, bundlers, or runtime transpilation.\n' +
+  '- Evaluate the project\'s actual build/run mechanism (package.json scripts, tool configs) before judging setup.\n' +
+  '- Focus on actual code defects, not tooling preferences.\n\n';
+
 /** Protected artifacts — included in all verification prompts */
 const PROTECTED_ARTIFACTS = xmlTag(
   'critical_requirement',
@@ -77,11 +85,14 @@ function appendOptional(
   prompt: string,
   stackHint?: string,
   customChecks?: string[],
+  projectLearnings?: string,
 ): string {
   let result = prompt;
   if (stackHint) result += `\n\n**Tech Stack:**\n${stackHint}`;
   if (customChecks?.length)
     result += `\n\nProject-specific checks:\n${customChecks.join('\n\n')}`;
+  if (projectLearnings)
+    result += `\n\n**Project Learnings (from past verifications):**\n${projectLearnings}`;
   return result;
 }
 
@@ -92,6 +103,7 @@ export function buildCorePlanPrompt(opts: {
   planContent: string;
   stackHint?: string;
   customChecks?: string[];
+  projectLearnings?: string;
 }): string {
   let prompt =
     'You are a senior architect reviewing a PLAN before implementation begins.\n\n' +
@@ -111,8 +123,9 @@ export function buildCorePlanPrompt(opts: {
     'Plans describe WHAT to do, not every implementation detail. ' +
     'Do NOT fail for: missing exact line numbers, minor wording, ' +
     'or things a competent developer would naturally handle.\n\n' +
+    GENERAL_VERIFICATION_RULES +
     PROTECTED_ARTIFACTS;
-  prompt = appendOptional(prompt, opts.stackHint, opts.customChecks);
+  prompt = appendOptional(prompt, opts.stackHint, opts.customChecks, opts.projectLearnings);
   prompt += `\n\n${STRUCTURED_FORMAT}`;
   return prompt;
 }
@@ -126,6 +139,7 @@ export function buildCoreImplPrompt(opts: {
   todoContext?: TodoContext;
   stackHint?: string;
   customChecks?: string[];
+  projectLearnings?: string;
 }): string {
   let prompt =
     'You are a strict code verifier AND adversarial code breaker.\n\n' +
@@ -155,6 +169,7 @@ export function buildCoreImplPrompt(opts: {
     '- WARNING: Violation in EXISTING code or requiring structural change beyond current scope\n' +
     '  (e.g. legacy patterns, cross-cutting concerns, existing tight coupling)\n' +
     '  Warnings are recorded and addressed in future planning cycles.\n\n' +
+    GENERAL_VERIFICATION_RULES +
     PROTECTED_ARTIFACTS;
 
   prompt = appendTodoScope(prompt, opts.todoContext);
@@ -163,7 +178,7 @@ export function buildCoreImplPrompt(opts: {
     prompt += `\n\n## Implementation Notes (from developer)\n${opts.implNotes.trim()}`;
   }
 
-  prompt = appendOptional(prompt, opts.stackHint, opts.customChecks);
+  prompt = appendOptional(prompt, opts.stackHint, opts.customChecks, opts.projectLearnings);
   prompt += `\n\n${STRUCTURED_FORMAT}`;
   return prompt;
 }
@@ -177,6 +192,7 @@ export function buildDomainPrompt(
     planContent: string;
     todoContext?: TodoContext;
     stackHint?: string;
+    projectLearnings?: string;
   },
 ): string {
   let prompt =
@@ -187,10 +203,12 @@ export function buildDomainPrompt(
     domain.implPrompt +
     '\n' +
     'Classification: CRITICAL = fixable in current scope. WARNING = needs broader change.\n\n' +
+    GENERAL_VERIFICATION_RULES +
     PROTECTED_ARTIFACTS;
 
   prompt = appendTodoScope(prompt, opts.todoContext);
   if (opts.stackHint) prompt += `\n\n**Tech Stack:**\n${opts.stackHint}`;
+  if (opts.projectLearnings) prompt += `\n\n**Project Learnings (from past verifications):**\n${opts.projectLearnings}`;
   prompt += `\n\n${STRUCTURED_FORMAT}`;
   return prompt;
 }
