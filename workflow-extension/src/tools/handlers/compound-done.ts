@@ -97,7 +97,7 @@ async function validateGitCommit(hctx: HandlerContext): Promise<string | null> {
 async function validateGitPushBranch(
   hctx: HandlerContext,
 ): Promise<string | null> {
-  const { session } = hctx;
+  const { session, settings } = hctx;
   if (!session.gitBranch) return null;
   const gitCwd = getGitCwd(hctx.ctx.cwd);
   const log = await runGit(
@@ -106,12 +106,20 @@ async function validateGitPushBranch(
     gitCwd,
   );
   if (!log.ok) {
+    if (settings.git?.pushOnComplete) {
+      const push = await autoPush(hctx.pi, session.gitBranch, gitCwd);
+      return push.ok ? null : `❌ Auto-push failed: ${push.message}`;
+    }
     return (
       `❌ git log failed: ${log.stderr || `exit ${log.code}`}\n` +
       `Run: git push origin ${session.gitBranch}`
     );
   }
   if (log.stdout.length > 0) {
+    if (settings.git?.pushOnComplete) {
+      const push = await autoPush(hctx.pi, session.gitBranch, gitCwd);
+      return push.ok ? null : `❌ Auto-push failed: ${push.message}`;
+    }
     return (
       `❌ Unpushed commits on branch:\n${log.stdout}\n` +
       `Run: git push origin ${session.gitBranch}`
@@ -145,16 +153,25 @@ async function validateGitMerge(hctx: HandlerContext): Promise<string | null> {
 async function validateGitPushMain(
   hctx: HandlerContext,
 ): Promise<string | null> {
+  const { settings, pi } = hctx;
   const gitCwd = getGitCwd(hctx.ctx.cwd);
   const log = await runGit(
-    hctx.pi,
+    pi,
     ['log', 'origin/main..main', '--oneline'],
     gitCwd,
   );
   if (!log.ok) {
+    if (settings.git?.pushOnComplete) {
+      const push = await autoPush(pi, 'main', gitCwd);
+      return push.ok ? null : `❌ Auto-push failed: ${push.message}`;
+    }
     return `❌ git log failed: ${log.stderr || `exit ${log.code}`}\nRun: git push origin main`;
   }
   if (log.stdout.length > 0) {
+    if (settings.git?.pushOnComplete) {
+      const push = await autoPush(pi, 'main', gitCwd);
+      return push.ok ? null : `❌ Auto-push failed: ${push.message}`;
+    }
     return `❌ Main not pushed:\n${log.stdout}\nRun: git push origin main`;
   }
   return null;
