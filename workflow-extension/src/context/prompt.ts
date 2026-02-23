@@ -276,11 +276,9 @@ export async function buildSystemPromptInjection(
   }
 
   // Done state — show status indicator
-  // completed=true overrides state for backward compat
   if (session.state === 'done' || session.completed) {
-    const status = session.completed
-      ? '\n\nWorkflow Status: 🎉 COMPLETED — send a message to start a new plan cycle\n'
-      : '\n\nWorkflow Status: ⏸️ PAUSED — send a message to return to planning\n';
+    const status =
+      '\n\nWorkflow Status: 🎉 COMPLETED — use /workflow to start a new task\n';
     return basePrompt + workflowFlag + status + memoryContext;
   }
 

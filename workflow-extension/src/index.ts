@@ -22,7 +22,6 @@ import { registerProjectMemoryTool } from './tools/project-memory';
 import { registerSearchTool } from './tools/search';
 import { applyStageConfig, registerTransitionTool } from './tools/transition';
 import type { StageConfig, WorkflowSession, WorkflowSettings } from './types';
-import { cleanupVerificationResults } from './verification';
 
 function getStageConfig(
   session: WorkflowSession,
@@ -77,7 +76,7 @@ export default function (pi: ExtensionAPI) {
     const session = sm.get();
     updateStatusBar(ctx, session);
 
-    if (!session) return;
+    if (!session || session.state === 'done' || session.completed) return;
     const settings = loadSettings(ctx.cwd);
     await applyStageConfig(pi, ctx, getStageConfig(session, settings));
   };
@@ -146,28 +145,14 @@ export default function (pi: ExtensionAPI) {
       });
     }
 
-    // Auto-recover: any done workflow resumes as plan on next user message
-    const session = sm.get();
-    if (session && (session.state === 'done' || session.completed)) {
-      session.state = 'plan';
-      session.completed = false;
-      session.retryCount = 0;
-      session.planContent = '';
-      session.verifyPlanResult = '';
-      session.todos = [];
-      session.activeTodoIndex = -1;
-      session.startupPrepRequired = false;
-      session.startupPrepNote = '';
-      session.startupPrepLocked = false;
-      session.gitBranch = undefined;
-      session.gitWorktreePath = undefined;
-      session.compoundStep = undefined;
-      cleanupVerificationResults(ctx.cwd);
-      sm.set(session);
-      updateStatusBar(ctx, session);
-    }
+    // Always reload fresh workflow state from disk.
+    // Prevents stale in-memory state from overwriting another instance's changes
+    // when VSCode RPC and CLI pi are both running on the same workflow.
+    sm.restore(loadSessionFromDisk(ctx.cwd));
 
-    if (session) {
+    const session = sm.get();
+
+    if (session && session.state !== 'done' && !session.completed) {
       const settings = loadSettings(ctx.cwd);
       await applyStageConfig(pi, ctx, getStageConfig(session, settings));
     }
