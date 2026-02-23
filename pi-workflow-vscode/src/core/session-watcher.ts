@@ -95,6 +95,22 @@ export class SessionWatcher implements vscode.Disposable {
     return items;
   }
 
+  /** Clear the active pointer (writes empty string, triggers reload). */
+  async clearActiveId(): Promise<void> {
+    this.selfWritePending = true;
+    try {
+      const activeUri = vscode.Uri.joinPath(
+        vscode.Uri.file(this.workspaceRoot),
+        ACTIVE_FILE,
+      );
+      await vscode.workspace.fs.writeFile(activeUri, new TextEncoder().encode(''));
+    } catch {
+      this.selfWritePending = false;
+      return;
+    }
+    void this.loadAll();
+  }
+
   /** Set active workflow ID (writes active file, triggers reload). */
   async setActiveId(id: string): Promise<void> {
     this.selfWritePending = true;

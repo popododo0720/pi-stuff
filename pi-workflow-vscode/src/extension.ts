@@ -388,6 +388,12 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(listDisposable);
 
+  // ── Clear stale active pointer from previous session ──────────
+  // The active file persists on disk, but pi chat process is not running
+  // after a VS Code restart. Clear it so no workflow appears active until
+  // the user explicitly clicks one.
+  void sessionWatcher.clearActiveId();
+
   // ── Start watcher (async load begins) ────────────────────────
   sessionWatcher.start();
 
