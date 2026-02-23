@@ -102,7 +102,7 @@
       },
       {
         "command": "pi.selectWorkflow",
-        "title": "Switch Workflow"
+        "title": "Activate Workflow"
       },
       {
         "command": "pi.deleteWorkflow",

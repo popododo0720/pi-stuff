@@ -70,13 +70,27 @@ export default function (pi: ExtensionAPI) {
   registerSearchTool(pi);
 
   // ── Session reconstruction from disk ─────────────────────────
+  const recoverFromDone = (session: WorkflowSession) => {
+    session.state = 'plan';
+    session.completed = false;
+    session.planContent = '';
+    session.todos = [];
+    session.activeTodoIndex = -1;
+    session.verifyPlanResult = '';
+    session.retryCount = 0;
+    sm.set(session);
+  };
+
   const reconstruct = async (ctx: ExtensionContext) => {
     sm.setCwd(ctx.cwd);
     sm.restore(loadSessionFromDisk(ctx.cwd));
     const session = sm.get();
     updateStatusBar(ctx, session);
 
-    if (!session || session.state === 'done' || session.completed) return;
+    if (!session) return;
+    if (session.state === 'done' || session.completed) {
+      recoverFromDone(session);
+    }
     const settings = loadSettings(ctx.cwd);
     await applyStageConfig(pi, ctx, getStageConfig(session, settings));
   };
@@ -151,6 +165,11 @@ export default function (pi: ExtensionAPI) {
     sm.restore(loadSessionFromDisk(ctx.cwd));
 
     const session = sm.get();
+
+    // Auto-recover from done → plan so the workflow continues seamlessly
+    if (session && (session.state === 'done' || session.completed)) {
+      recoverFromDone(session);
+    }
 
     if (session && session.state !== 'done' && !session.completed) {
       const settings = loadSettings(ctx.cwd);
