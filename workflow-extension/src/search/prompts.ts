@@ -1,7 +1,13 @@
 // search/prompts.ts — Search agent prompt templates
 // Lightweight read-only prompts for parallel codebase exploration.
 
-export type SearchScope = 'codebase' | 'docs' | 'both';
+export type SearchScope =
+  | 'codebase'
+  | 'docs'
+  | 'both'
+  | 'solutions'
+  | 'web'
+  | 'all';
 
 /**
  * Build a search prompt for a single query.
@@ -77,5 +83,37 @@ function getScopeInstructions(scope: SearchScope): string {
 - Documentation for context and design decisions
 - Type definitions for API surface
 - Configuration for project setup`;
+
+    case 'solutions':
+      return `Search past workflow solutions, learnings, and project memory. Focus on:
+- Solution documents in docs/solutions/ (organized by category: build-errors, runtime-errors, logic-errors, etc.)
+- Project memory at .pi/memory.json (conventions, rules, patterns, gotchas, decisions)
+- Critical patterns at .pi/critical-patterns/
+- Workflow session files in .pi/workflows/
+Look for: previous mistakes, proven patterns, root causes, prevention strategies.
+Use grep to search across all .md files in docs/solutions/ and read .pi/memory.json for structured learnings.`;
+
+    case 'web':
+      return `Search for external knowledge, best practices, and general patterns.
+You have access to installed skills (e.g., web search) in addition to read-only file tools.
+Focus on:
+- Industry best practices for the topic
+- Common patterns and anti-patterns
+- Library/framework documentation and recommendations
+- Community knowledge and proven solutions
+- Official documentation references
+If web search skills are available, USE THEM for up-to-date information.
+Otherwise, leverage your training knowledge to provide best-practice guidance.`;
+
+    case 'all':
+      return `Comprehensive search across ALL sources: codebase, documentation, past solutions, AND external knowledge.
+This is broader than 'both' (which covers only codebase+docs). 'all' includes everything:
+1. Source code files for implementations and patterns
+2. Documentation for context and design decisions
+3. docs/solutions/ for past workflow learnings and root causes
+4. .pi/memory.json for project conventions, patterns, gotchas
+5. .pi/critical-patterns/ for recurring issues
+6. External sources — use web search skills if available for best practices
+Be thorough — this is a compound search meant to gather comprehensive context from every available source.`;
   }
 }

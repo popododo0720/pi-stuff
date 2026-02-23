@@ -29,7 +29,8 @@ export function registerSearchTool(pi: ExtensionAPI): void {
       'Uses the search model configured in workflow settings (stages.search.model). ' +
       'Each query runs as an independent subprocess with read-only tools (read, grep, find, ls). ' +
       'Use this when you need to explore unfamiliar code, find patterns across files, ' +
-      'or gather context from multiple areas of the codebase at once.',
+      'or gather context from multiple areas of the codebase at once. ' +
+      'Scopes: codebase, docs, both (codebase+docs), solutions (past learnings), web (external best practices), all (codebase+docs+solutions+web).',
     parameters: Type.Object({
       queries: Type.Array(
         Type.Object({
@@ -43,10 +44,15 @@ export function registerSearchTool(pi: ExtensionAPI): void {
                 Type.Literal('codebase'),
                 Type.Literal('docs'),
                 Type.Literal('both'),
+                Type.Literal('solutions'),
+                Type.Literal('web'),
+                Type.Literal('all'),
               ],
               {
                 description:
-                  'Search scope: codebase (source files), docs (documentation), both. Default: codebase',
+                  'Search scope: codebase (source files), docs (documentation), both (codebase+docs), ' +
+                  'solutions (past learnings & memory), web (external best practices), ' +
+                  'all (comprehensive: codebase+docs+solutions+web). Default: codebase',
               },
             ),
           ),
