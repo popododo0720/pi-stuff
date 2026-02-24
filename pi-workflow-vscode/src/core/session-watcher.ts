@@ -12,6 +12,7 @@ const DEBOUNCE_MS = 500;
 
 // Safety limits
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_COMPOUND_STEPS = 20; // Safety ceiling — VSCode can't import workflow-extension constants
 const MAX_STRING_LENGTH = 500_000; // 500KB per string field
 const MAX_SHORT_STRING = 1000; // id, description, gitBranch, todo title, name
 const MAX_TODOS = 100;
@@ -33,7 +34,8 @@ export class SessionWatcher implements vscode.Disposable {
   private activeWatcher: vscode.FileSystemWatcher | undefined;
 
   // Self-write guard: prevents reload loop when VSCode writes to active file
-  private selfWritePending = false;
+  // Counter-based to handle multiple concurrent async writes correctly
+  private selfWriteCount = 0;
 
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private loadVersion = 0;
@@ -60,11 +62,11 @@ export class SessionWatcher implements vscode.Disposable {
       new vscode.RelativePattern(this.workspaceRoot, ACTIVE_FILE),
     );
     this.activeWatcher.onDidChange(() => {
-      if (this.selfWritePending) { this.selfWritePending = false; return; }
+      if (this.selfWriteCount > 0) { this.selfWriteCount--; return; }
       this.scheduleLoad();
     });
     this.activeWatcher.onDidCreate(() => {
-      if (this.selfWritePending) { this.selfWritePending = false; return; }
+      if (this.selfWriteCount > 0) { this.selfWriteCount--; return; }
       this.scheduleLoad();
     });
     this.activeWatcher.onDidDelete(() => this.scheduleLoad());
@@ -97,15 +99,16 @@ export class SessionWatcher implements vscode.Disposable {
 
   /** Clear the active pointer (writes empty string, triggers reload). */
   async clearActiveId(): Promise<void> {
-    this.selfWritePending = true;
+    this.selfWriteCount++;
     try {
       const activeUri = vscode.Uri.joinPath(
         vscode.Uri.file(this.workspaceRoot),
         ACTIVE_FILE,
       );
       await vscode.workspace.fs.writeFile(activeUri, new TextEncoder().encode(''));
-    } catch {
-      this.selfWritePending = false;
+    } catch (e) {
+      if (this.selfWriteCount > 0) this.selfWriteCount--;
+      console.warn('[watcher] clearActiveId failed:', e);
       return;
     }
     void this.loadAll();
@@ -113,15 +116,16 @@ export class SessionWatcher implements vscode.Disposable {
 
   /** Set active workflow ID (writes active file, triggers reload). */
   async setActiveId(id: string): Promise<void> {
-    this.selfWritePending = true;
+    this.selfWriteCount++;
     try {
       const activeUri = vscode.Uri.joinPath(
         vscode.Uri.file(this.workspaceRoot),
         ACTIVE_FILE,
       );
       await vscode.workspace.fs.writeFile(activeUri, new TextEncoder().encode(id));
-    } catch {
-      this.selfWritePending = false;
+    } catch (e) {
+      if (this.selfWriteCount > 0) this.selfWriteCount--;
+      console.warn('[watcher] setActiveId failed:', e);
       return;
     }
     // Trigger manual reload after self-write
@@ -149,13 +153,13 @@ export class SessionWatcher implements vscode.Disposable {
 
     // Clear active pointer if this was the active workflow
     if (this.activeId === id) {
-      this.selfWritePending = true;
+      this.selfWriteCount++;
       try {
         const activeUri = vscode.Uri.joinPath(
           vscode.Uri.file(this.workspaceRoot), ACTIVE_FILE);
         await vscode.workspace.fs.writeFile(activeUri, new TextEncoder().encode(''));
       } catch {
-        this.selfWritePending = false;
+        if (this.selfWriteCount > 0) this.selfWriteCount--;
       }
     }
 
@@ -355,7 +359,7 @@ export class SessionWatcher implements vscode.Disposable {
       r.compoundStep >= 0 &&
       Number.isInteger(r.compoundStep)
     ) {
-      compoundStep = r.compoundStep;
+      compoundStep = Math.min(r.compoundStep, MAX_COMPOUND_STEPS);
     }
 
     return {

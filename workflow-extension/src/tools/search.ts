@@ -10,6 +10,14 @@ import { runParallelSearch } from '../search/runner';
 import { loadSettings } from '../storage/settings';
 
 const MAX_QUERIES = 10;
+const VALID_SCOPES: Set<string> = new Set([
+  'codebase',
+  'docs',
+  'both',
+  'solutions',
+  'web',
+  'all',
+]);
 
 function t(text: string) {
   return { content: [{ type: 'text' as const, text }] };
@@ -89,7 +97,9 @@ export function registerSearchTool(pi: ExtensionAPI): void {
       const queries: SearchQuery[] = params.queries.map(
         (q: { query: string; scope?: string }) => ({
           query: q.query,
-          scope: (q.scope as SearchScope) ?? 'codebase',
+          scope: (q.scope && VALID_SCOPES.has(q.scope)
+            ? q.scope
+            : 'codebase') as SearchScope,
         }),
       );
 

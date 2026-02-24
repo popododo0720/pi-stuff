@@ -10,7 +10,11 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ACTIVE_WORKFLOW_FILE, WORKFLOWS_DIR } from '../constants';
+import {
+  ACTIVE_WORKFLOW_FILE,
+  COMPOUND_STEPS,
+  WORKFLOWS_DIR,
+} from '../constants';
 import type { TodoItem, WorkflowSession, WorkflowState } from '../types';
 import { atomicWriteFileSync } from './atomic-write';
 
@@ -295,7 +299,7 @@ function parseSession(raw: unknown): WorkflowSession | null {
       Number.isFinite(r.compoundStep) &&
       r.compoundStep >= 0 &&
       Number.isInteger(r.compoundStep)
-        ? Math.min(r.compoundStep, 8)
+        ? Math.min(r.compoundStep, COMPOUND_STEPS.length)
         : undefined,
   };
 }

@@ -54,6 +54,7 @@ async function detectMainBranch(cwd: string): Promise<string> {
  */
 const gitContentCache = new Map<string, string>();
 let gitContentSeq = 0;
+const GIT_CACHE_MAX_SIZE = 50;
 
 /**
  * Create a virtual URI showing file content at a specific commit.
@@ -67,6 +68,11 @@ async function gitShowUri(cwd: string, commit: string, filePath: string): Promis
   const shortRef = commit === 'HEAD' ? 'HEAD' : commit.slice(0, 7);
   const cacheKey = `${++gitContentSeq}`;
   gitContentCache.set(cacheKey, stdout);
+  // FIFO eviction — oldest-inserted entry removed when over limit
+  if (gitContentCache.size > GIT_CACHE_MAX_SIZE) {
+    const oldest = gitContentCache.keys().next().value;
+    if (oldest !== undefined) gitContentCache.delete(oldest);
+  }
   return vscode.Uri.parse(`pi-git-show:${filePath}@${shortRef}?${cacheKey}`);
 }
 
@@ -232,11 +238,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const key = uri.query;
         if (!key) return ''; // empty document (used for A/D diff sides)
         const content = gitContentCache.get(key);
-        if (content !== undefined) {
-          gitContentCache.delete(key); // one-time use, prevent memory leak
-          return content;
-        }
-        return '';
+        return content ?? '';
       },
     }),
   );

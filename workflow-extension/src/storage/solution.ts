@@ -158,9 +158,9 @@ export function saveSolution(
         const scored = allFiles
           .filter((f) => toFullPath(f) !== filePath)
           .map((f) => {
-            const content = safeRead(toFullPath(f));
+            const fileContent = safeRead(toFullPath(f));
             const title = extractTitleFromContent(
-              content,
+              fileContent,
               f.file.replace('.md', ''),
             );
             const hits = titleWords.filter((w) =>
