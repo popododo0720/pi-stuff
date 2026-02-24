@@ -94,6 +94,30 @@ export const MAX_RULE_PATTERN_LENGTH = 200;
 export const MAX_MODULES = 20;
 export const MAX_MODULE_CONVENTIONS = 30;
 
+// ── Output & truncation limits ────────────────────────────────
+export const MAX_PREFLIGHT_OUTPUT_CHARS = 2000;
+export const MAX_VERIFICATION_SUMMARY_CHARS = 1500;
+export const MAX_ERROR_PREFIX_CHARS = 500;
+/** Prompt injection 시 solution body 상한 (solution.ts의 MAX_SOLUTION_BODY=1500은 standalone 검색용) */
+export const MAX_SOLUTION_BODY_CONTEXT_CHARS = 800;
+export const MAX_MEMORY_CONTEXT_CHARS = 6000;
+
+// ── Timeout defaults ──────────────────────────────────────────
+export const DEFAULT_PREFLIGHT_TIMEOUT_SECONDS = 60;
+
+// ── Validation bounds ─────────────────────────────────────────
+export const TOKEN_BUDGET_MIN = 256;
+export const TOKEN_BUDGET_MAX = 8192;
+export const MAX_PARALLEL_MIN = 1;
+export const MAX_PARALLEL_MAX = 10;
+export const SEARCH_TIMEOUT_MIN = 10_000;
+export const SEARCH_TIMEOUT_MAX = 300_000;
+export const PREFLIGHT_TIMEOUT_MIN = 10;
+export const PREFLIGHT_TIMEOUT_MAX = 300;
+export const MAX_RETRIES_MIN = 1;
+export const MAX_RETRIES_MAX = 20;
+export const VERIFY_TIMEOUT_MAX = 600_000;
+
 /**
  * Generate a unique workflow ID based on timestamp.
  * Format: wf-YYYYMMDD-HHmmss (e.g. wf-20260212-152010)

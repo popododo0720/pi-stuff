@@ -1,12 +1,14 @@
 // verification/error-classification.ts — Error type detection
 // Classifies verification output as infrastructure error, format protocol error, or valid result.
 
+import { MAX_ERROR_PREFIX_CHARS } from '../constants';
+
 /**
  * Detect infrastructure errors (rate limit, quota, network) in output.
- * Only checks first 500 chars (error messages appear early, not in analysis).
+ * Only checks first N chars (error messages appear early, not in analysis).
  */
 export function isInfrastructureError(output: string): boolean {
-  const prefix = output.slice(0, 500).toLowerCase();
+  const prefix = output.slice(0, MAX_ERROR_PREFIX_CHARS).toLowerCase();
   return (
     /usage limit|rate limit|quota exceeded|too many requests/.test(prefix) ||
     /\b(429|503)\b.*error/i.test(prefix) ||

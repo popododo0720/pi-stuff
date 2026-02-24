@@ -1,6 +1,11 @@
 // verification/parsing.ts — Structured output parser & summarizer
 // Parses ## CRITICAL / ## WARNING / ## INFO sections from model output.
 
+import {
+  MAX_ERROR_PREFIX_CHARS,
+  MAX_VERIFICATION_SUMMARY_CHARS,
+} from '../constants';
+
 // ── Verdict parser ───────────────────────────────────────────────
 
 export function parseVerdict(output: string): 'PASS' | 'FAIL' | undefined {
@@ -145,7 +150,7 @@ export function fallbackKeywordScan(output: string): {
  * Ignores free-text analysis, only shows ## CRITICAL/WARNING/INFO sections.
  */
 export function summarizeVerificationOutput(output: string): string {
-  const MAX_LENGTH = 1500;
+  const maxLength = MAX_VERIFICATION_SUMMARY_CHARS;
   const lines = output.split('\n');
   const findings: string[] = [];
   let verdictLine = '';
@@ -179,7 +184,7 @@ export function summarizeVerificationOutput(output: string): string {
 
   // Fallback: no structured sections found
   if (findings.length === 0) {
-    const fallback = output.slice(0, 500);
+    const fallback = output.slice(0, MAX_ERROR_PREFIX_CHARS);
     const suffix = verdictLine ? `\n${verdictLine}` : '';
     return `${fallback}\n...(unstructured output, see full results)${suffix}`;
   }
@@ -188,13 +193,13 @@ export function summarizeVerificationOutput(output: string): string {
 
   // Ensure verdict at end
   if (verdictLine) {
-    const budget = MAX_LENGTH - verdictLine.length - 20;
+    const budget = maxLength - verdictLine.length - 20;
     if (summary.length > budget) {
       summary = `${summary.slice(0, budget)}\n...(truncated)`;
     }
     summary = `${summary}\n${verdictLine}`;
-  } else if (summary.length > MAX_LENGTH) {
-    summary = `${summary.slice(0, MAX_LENGTH)}\n...(truncated)`;
+  } else if (summary.length > maxLength) {
+    summary = `${summary.slice(0, maxLength)}\n...(truncated)`;
   }
 
   return summary;

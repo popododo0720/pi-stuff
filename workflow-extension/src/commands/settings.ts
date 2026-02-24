@@ -5,6 +5,17 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@mariozechner/pi-coding-agent';
+import {
+  MAX_PARALLEL_MAX,
+  MAX_PARALLEL_MIN,
+  MAX_RETRIES_MAX,
+  MAX_RETRIES_MIN,
+  SEARCH_TIMEOUT_MAX,
+  SEARCH_TIMEOUT_MIN,
+  TOKEN_BUDGET_MAX,
+  TOKEN_BUDGET_MIN,
+  VERIFY_TIMEOUT_MAX,
+} from '../constants';
 import { loadSettings, saveSettings } from '../storage/settings';
 import type { ThinkingLevel } from '../types';
 
@@ -341,7 +352,11 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             if (thinking === '') {
               if (s.search) {
                 delete s.search.thinking;
-                if (!s.search.model && !s.search.maxParallel && !s.search.timeout)
+                if (
+                  !s.search.model &&
+                  !s.search.maxParallel &&
+                  !s.search.timeout
+                )
                   delete s.search;
               }
             } else if (thinking) {
@@ -354,10 +369,17 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             );
             if (input) {
               const val = Number.parseInt(input, 10);
-              if (!Number.isNaN(val) && val >= 1 && val <= 10) {
+              if (
+                !Number.isNaN(val) &&
+                val >= MAX_PARALLEL_MIN &&
+                val <= MAX_PARALLEL_MAX
+              ) {
                 s.search = { ...searchCfg, maxParallel: val };
               } else {
-                ctx.ui.notify('Enter a number between 1 and 10.', 'error');
+                ctx.ui.notify(
+                  `Enter a number between ${MAX_PARALLEL_MIN} and ${MAX_PARALLEL_MAX}.`,
+                  'error',
+                );
               }
             }
           } else if (sub?.startsWith('Timeout')) {
@@ -367,10 +389,17 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             );
             if (input) {
               const seconds = Number.parseInt(input, 10);
-              if (!Number.isNaN(seconds) && seconds >= 10 && seconds <= 300) {
+              if (
+                !Number.isNaN(seconds) &&
+                seconds >= SEARCH_TIMEOUT_MIN / 1000 &&
+                seconds <= SEARCH_TIMEOUT_MAX / 1000
+              ) {
                 s.search = { ...searchCfg, timeout: seconds * 1000 };
               } else {
-                ctx.ui.notify('Enter a number between 10 and 300.', 'error');
+                ctx.ui.notify(
+                  `Enter a number between ${SEARCH_TIMEOUT_MIN / 1000} and ${SEARCH_TIMEOUT_MAX / 1000}.`,
+                  'error',
+                );
               }
             }
           }
@@ -382,10 +411,17 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           );
           if (input) {
             const seconds = Number.parseInt(input, 10);
-            if (!Number.isNaN(seconds) && seconds > 0 && seconds <= 600) {
+            if (
+              !Number.isNaN(seconds) &&
+              seconds > 0 &&
+              seconds <= VERIFY_TIMEOUT_MAX / 1000
+            ) {
               settings.verifyTimeout = seconds * 1000;
             } else {
-              ctx.ui.notify('Enter a number between 1 and 600.', 'error');
+              ctx.ui.notify(
+                `Enter a number between 1 and ${VERIFY_TIMEOUT_MAX / 1000}.`,
+                'error',
+              );
             }
           }
         } else if (choice.startsWith('🗺️')) {
@@ -409,10 +445,17 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
             );
             if (input) {
               const val = Number.parseInt(input, 10);
-              if (!Number.isNaN(val) && val >= 256 && val <= 8192) {
+              if (
+                !Number.isNaN(val) &&
+                val >= TOKEN_BUDGET_MIN &&
+                val <= TOKEN_BUDGET_MAX
+              ) {
                 settings.repoMap = { ...settings.repoMap, tokenBudget: val };
               } else {
-                ctx.ui.notify('Enter a number between 256 and 8192.', 'error');
+                ctx.ui.notify(
+                  `Enter a number between ${TOKEN_BUDGET_MIN} and ${TOKEN_BUDGET_MAX}.`,
+                  'error',
+                );
               }
             }
           }
@@ -465,10 +508,17 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
           );
           if (input) {
             const val = Number.parseInt(input, 10);
-            if (!Number.isNaN(val) && val >= 1 && val <= 20) {
+            if (
+              !Number.isNaN(val) &&
+              val >= MAX_RETRIES_MIN &&
+              val <= MAX_RETRIES_MAX
+            ) {
               settings.maxRetries = val;
             } else {
-              ctx.ui.notify('Enter a number between 1 and 20.', 'error');
+              ctx.ui.notify(
+                `Enter a number between ${MAX_RETRIES_MIN} and ${MAX_RETRIES_MAX}.`,
+                'error',
+              );
             }
           }
         } else if (choice.startsWith('📐')) {

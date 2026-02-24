@@ -4,6 +4,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExtensionAPI } from '@mariozechner/pi-coding-agent';
+import {
+  DEFAULT_PREFLIGHT_TIMEOUT_SECONDS,
+  MAX_PREFLIGHT_OUTPUT_CHARS,
+} from '../constants';
 
 /**
  * Auto-detect pre-flight commands from project configuration.
@@ -71,7 +75,7 @@ export interface PreflightResult {
 export async function runPreflight(
   pi: ExtensionAPI,
   commands: string[],
-  timeout = 60,
+  timeout = DEFAULT_PREFLIGHT_TIMEOUT_SECONDS,
 ): Promise<PreflightResult> {
   const results: PreflightResult['results'] = [];
   let passed = true;
@@ -83,7 +87,9 @@ export async function runPreflight(
     const args = parts.slice(1);
     try {
       const r = await pi.exec(cmd, args, { timeout: timeoutMs });
-      const output = `${r.stdout}\n${r.stderr}`.trim().slice(0, 2000);
+      const output = `${r.stdout}\n${r.stderr}`
+        .trim()
+        .slice(0, MAX_PREFLIGHT_OUTPUT_CHARS);
       const ok = r.code === 0;
       if (!ok) passed = false;
       results.push({ command, ok, output, code: r.code });
@@ -93,7 +99,7 @@ export async function runPreflight(
       results.push({
         command,
         ok: false,
-        output: `Timeout or error: ${msg}`.slice(0, 2000),
+        output: `Timeout or error: ${msg}`.slice(0, MAX_PREFLIGHT_OUTPUT_CHARS),
         code: -1,
       });
     }

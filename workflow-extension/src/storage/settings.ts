@@ -3,7 +3,22 @@
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { DEFAULT_SETTINGS, MEMORY_DIR, SETTINGS_FILE } from '../constants';
+import {
+  DEFAULT_SETTINGS,
+  MAX_PARALLEL_MAX,
+  MAX_PARALLEL_MIN,
+  MAX_RETRIES_MAX,
+  MAX_RETRIES_MIN,
+  MEMORY_DIR,
+  PREFLIGHT_TIMEOUT_MAX,
+  PREFLIGHT_TIMEOUT_MIN,
+  SEARCH_TIMEOUT_MAX,
+  SEARCH_TIMEOUT_MIN,
+  SETTINGS_FILE,
+  TOKEN_BUDGET_MAX,
+  TOKEN_BUDGET_MIN,
+  VERIFY_TIMEOUT_MAX,
+} from '../constants';
 import type {
   DetailLevel,
   DomainVerifyConfig,
@@ -70,8 +85,8 @@ function validateRepoMapConfig(raw: unknown): RepoMapConfig | undefined {
   if (typeof r.enabled === 'boolean') config.enabled = r.enabled;
   if (typeof r.tokenBudget === 'number' && Number.isFinite(r.tokenBudget)) {
     config.tokenBudget = Math.max(
-      256,
-      Math.min(8192, Math.floor(r.tokenBudget)),
+      TOKEN_BUDGET_MIN,
+      Math.min(TOKEN_BUDGET_MAX, Math.floor(r.tokenBudget)),
     );
   }
   return config.enabled !== undefined || config.tokenBudget !== undefined
@@ -137,14 +152,20 @@ function validateSearchConfig(raw: unknown): SearchStageConfig | undefined {
     Number.isFinite(r.maxParallel) &&
     r.maxParallel > 0
   ) {
-    config.maxParallel = Math.max(1, Math.min(10, Math.floor(r.maxParallel)));
+    config.maxParallel = Math.max(
+      MAX_PARALLEL_MIN,
+      Math.min(MAX_PARALLEL_MAX, Math.floor(r.maxParallel)),
+    );
   }
   if (
     typeof r.timeout === 'number' &&
     Number.isFinite(r.timeout) &&
     r.timeout > 0
   ) {
-    config.timeout = Math.max(10000, Math.min(300000, Math.floor(r.timeout)));
+    config.timeout = Math.max(
+      SEARCH_TIMEOUT_MIN,
+      Math.min(SEARCH_TIMEOUT_MAX, Math.floor(r.timeout)),
+    );
   }
   return Object.keys(config).length > 0 ? config : undefined;
 }
@@ -164,7 +185,10 @@ function validatePreflightConfig(raw: unknown): PreflightConfig | undefined {
     Number.isFinite(r.timeout) &&
     r.timeout > 0
   ) {
-    config.timeout = Math.max(10, Math.min(300, Math.floor(r.timeout)));
+    config.timeout = Math.max(
+      PREFLIGHT_TIMEOUT_MIN,
+      Math.min(PREFLIGHT_TIMEOUT_MAX, Math.floor(r.timeout)),
+    );
   }
   return Object.keys(config).length > 0 ? config : undefined;
 }
@@ -209,7 +233,7 @@ export function loadSettings(cwd: string): WorkflowSettings {
     const timeout =
       typeof raw.verifyTimeout === 'number' &&
       raw.verifyTimeout > 0 &&
-      raw.verifyTimeout <= 600_000
+      raw.verifyTimeout <= VERIFY_TIMEOUT_MAX
         ? raw.verifyTimeout
         : DEFAULT_SETTINGS.verifyTimeout;
 
@@ -218,7 +242,10 @@ export function loadSettings(cwd: string): WorkflowSettings {
     const preflight = validatePreflightConfig(raw.preflight);
     const maxRetries =
       typeof raw.maxRetries === 'number' && Number.isFinite(raw.maxRetries)
-        ? Math.max(1, Math.min(20, Math.floor(raw.maxRetries)))
+        ? Math.max(
+            MAX_RETRIES_MIN,
+            Math.min(MAX_RETRIES_MAX, Math.floor(raw.maxRetries)),
+          )
         : undefined;
 
     const VALID_DETAIL = new Set(['minimal', 'standard', 'detailed']);

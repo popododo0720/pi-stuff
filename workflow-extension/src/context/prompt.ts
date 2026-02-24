@@ -7,6 +7,8 @@ import {
   COMPOUND_STEPS,
   DEFAULT_CONVENTIONS,
   LEARNING_GUIDE,
+  MAX_MEMORY_CONTEXT_CHARS,
+  MAX_SOLUTION_BODY_CONTEXT_CHARS,
   ONBOARDING_GUIDE,
   STAGE_GUIDES,
   shouldSkipStep,
@@ -30,8 +32,6 @@ import type {
   WorkflowSettings,
 } from '../types';
 import { extractRecentFilePaths, matchesPattern } from './pattern';
-
-const MAX_MEMORY_CONTEXT_CHARS = 6000;
 
 /**
  * Convert project memory + matched modules into a prompt section.
@@ -312,7 +312,7 @@ export async function buildSystemPromptInjection(
     try {
       const relevant = findRelevantSolutions(ctx.cwd, session.description, {
         topK: 3,
-        maxBodyChars: 800,
+        maxBodyChars: MAX_SOLUTION_BODY_CONTEXT_CHARS,
         minScore: 2,
         noFallback: true,
       });
