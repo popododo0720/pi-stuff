@@ -372,7 +372,7 @@ export function extractSymptoms(content: string): string[] {
   const matches = frontmatter.match(/^symptoms:\s*\n((?:\s+-\s*.+\n?)*)/m);
   if (!matches?.[1]) return [];
   return matches[1]
-    .split('\n')
+    .split(/\r?\n/)
     .map((l) => l.replace(/^\s*-\s*"?/, '').replace(/"?\s*$/, ''))
     .filter((s) => s.length > 0);
 }

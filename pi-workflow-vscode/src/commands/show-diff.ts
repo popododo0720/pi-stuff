@@ -57,7 +57,7 @@ function getChangedFiles(cwd: string): Promise<string[]> {
             }
             // Parse porcelain: extract path from position 3+
             const files = stdout2
-              .split('\n')
+              .split(/\r?\n/)
               .filter((l) => l.length >= 4)
               .map((l) => l.slice(3).trim())
               .filter((f) => f.length > 0);
@@ -71,7 +71,7 @@ function getChangedFiles(cwd: string): Promise<string[]> {
 
 function parseLines(stdout: string): string[] {
   return stdout
-    .split('\n')
+    .split(/\r?\n/)
     .map((f) => f.trim())
     .filter((f) => f.length > 0);
 }

@@ -144,7 +144,7 @@ async function validateGitMerge(hctx: HandlerContext): Promise<string | null> {
   }
   // Check each line for exact match (strip leading * and whitespace)
   const branches = merged.stdout
-    .split('\n')
+    .split(/\r?\n/)
     .map((line) => line.replace(/^\*?\s*/, '').trim())
     .filter(Boolean);
   if (!branches.includes(session.gitBranch)) {

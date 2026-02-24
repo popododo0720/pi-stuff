@@ -148,7 +148,7 @@ export class VerifyPanel implements vscode.Disposable {
     // Fallback: summary format — [label] STATUS lines
     if (blocks.length === 0) {
       const summaryHeaderRe = /^\[([^\]]+)\]\s*(✅\s*PASS|❌\s*FAIL|⛔\s*(?:HALTED|SKIPPED)\s*(?:\([^)]*\))?)(.*?)$/;
-      const lines = text.split('\n');
+      const lines = text.split(/\r?\n/);
       let currentBlock: { label: string; statusRaw: string; suffix: string; bodyLines: string[] } | null = null;
 
       for (const line of lines) {
@@ -281,7 +281,7 @@ export class VerifyPanel implements vscode.Disposable {
     verdict: string | null;
     otherLines: string[];
   } {
-    const lines = text.split('\n');
+    const lines = text.split(/\r?\n/);
     const sections: Section[] = [];
     const otherLines: string[] = [];
     let currentSection: Section | null = null;

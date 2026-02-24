@@ -25,7 +25,7 @@ export function escapeHtml(text: string): string {
  * - Blank lines → paragraph breaks
  */
 export function markdownToHtml(md: string): string {
-  const lines = md.split('\n');
+  const lines = md.split(/\r?\n/);
   const result: string[] = [];
   let inCodeBlock = false;
   let codeBuffer: string[] = [];

@@ -64,7 +64,7 @@ export async function safeGitWorktreeList(
     if (!output) return { summary: 'No worktree info.', count: 0 };
 
     const lines = output
-      .split('\n')
+      .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean);
     const count = lines.length;
@@ -152,7 +152,7 @@ export async function safeGitWorktreePorcelain(
 
     const entries: GitWorktreeEntry[] = [];
     let current: GitWorktreeEntry | null = null;
-    const lines = result.stdout.split('\n');
+    const lines = result.stdout.split(/\r?\n/);
 
     for (const line of lines) {
       const trimmed = line.trim();

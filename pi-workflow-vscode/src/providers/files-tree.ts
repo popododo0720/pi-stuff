@@ -196,7 +196,7 @@ export class ChangedFilesTreeProvider
 
   private parseDiffNameStatus(output: string): ChangedFile[] {
     return output
-      .split('\n')
+      .split(/\r?\n/)
       .filter((l) => l.trim())
       .map((line) => {
         const parts = line.split('\t');
@@ -220,7 +220,7 @@ export class ChangedFilesTreeProvider
    */
   private parseGitStatus(output: string): ChangedFile[] {
     const files: ChangedFile[] = [];
-    const lines = output.split('\n').filter((l) => l.length >= 4);
+    const lines = output.split(/\r?\n/).filter((l) => l.length >= 4);
 
     for (const line of lines) {
       const x = line[0]; // Index status

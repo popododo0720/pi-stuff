@@ -37,7 +37,7 @@ export async function handleImplDone(
   // ── Gate 2: self-audit structure check ──
   const contentText = params.content.trim();
   // Extract self-audit section (from header to next ## or --- or end)
-  const lines = contentText.split('\n');
+  const lines = contentText.split(/\r?\n/);
   const headerLine = lines.findIndex((l) => /^## Self-Audit/i.test(l));
   let auditSection = '';
   if (headerLine >= 0) {

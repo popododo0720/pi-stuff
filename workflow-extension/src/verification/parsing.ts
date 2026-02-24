@@ -9,7 +9,7 @@ import {
 // ── Verdict parser ───────────────────────────────────────────────
 
 export function parseVerdict(output: string): 'PASS' | 'FAIL' | undefined {
-  const lines = output.split('\n');
+  const lines = output.split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim().replace(/\*{1,2}/g, '');
     const match = line.match(/^VERDICT\s*:\s*(PASS|FAIL)\s*$/i);
@@ -36,7 +36,7 @@ export function parseStructuredFindings(output: string): {
   let warning = 0;
   let info = 0;
 
-  for (const rawLine of output.split('\n')) {
+  for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim();
 
     // Section headers (#, ##, ###)
@@ -151,7 +151,7 @@ export function fallbackKeywordScan(output: string): {
  */
 export function summarizeVerificationOutput(output: string): string {
   const maxLength = MAX_VERIFICATION_SUMMARY_CHARS;
-  const lines = output.split('\n');
+  const lines = output.split(/\r?\n/);
   const findings: string[] = [];
   let verdictLine = '';
   let inSection = false;
