@@ -148,8 +148,47 @@ body {
   font-size: 10px; width: 12px; text-align: center;
   transition: transform 0.15s;
 }
-.tool-group:not(.collapsed) .tool-group-chevron { transform: rotate(90deg); }
+.tool-group.expanded .tool-group-chevron { transform: rotate(90deg); }
+
+/* ── Tool group status & count ── */
+.tool-group-status {
+  flex-shrink: 0;
+  width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+}
+.tool-group-status .spinner {
+  display: inline-block; width: 12px; height: 12px;
+  border: 2px solid var(--color-foreground-secondary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.tool-group-status.done { color: var(--color-success); font-weight: bold; }
+.tool-group-status.error { color: var(--color-error); font-weight: bold; }
+.tool-group-count {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--color-foreground) 12%, transparent);
+  color: var(--color-foreground-secondary);
+  font-size: 10px;
+  min-width: 18px; height: 18px;
+  border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 5px;
+}
+.tool-group-count:empty { display: none; }
+
+/* Compact mode (default): hide completed cards, show only active */
+.tool-group-body .tool-card.active { display: block; }
+.tool-group-body .tool-card.completed:not(.tool-error) { display: none; }
+/* Expanded: show all cards */
+.tool-group.expanded .tool-group-body .tool-card.completed { display: block; }
+
+/* Collapsed: hide body entirely */
 .tool-group.collapsed .tool-group-body { display: none; }
+/* Collapsed but user expanded: show body and all cards */
+.tool-group.collapsed.expanded .tool-group-body { display: block; }
+.tool-group.collapsed.expanded .tool-group-body .tool-card.completed { display: block; }
 
 /* ── Tool cards (inside groups) ── */
 .tool-card {

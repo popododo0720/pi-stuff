@@ -228,8 +228,10 @@ function getOrCreateToolGroup(): HTMLElement {
   header.className = 'tool-group-header';
   header.innerHTML =
     '<span class="tool-group-chevron">▶</span>' +
-    '<span class="tool-group-label">⚡ Tools</span>';
-  header.addEventListener('click', () => group.classList.toggle('collapsed'));
+    '<span class="tool-group-status"><span class="spinner"></span></span>' +
+    '<span class="tool-group-label"></span>' +
+    '<span class="tool-group-count"></span>';
+  header.addEventListener('click', () => group.classList.toggle('expanded'));
   group.appendChild(header);
   const body = document.createElement('div');
   body.className = 'tool-group-body';
@@ -241,17 +243,48 @@ function getOrCreateToolGroup(): HTMLElement {
   return group;
 }
 
-function updateToolGroupLabel(): void {
+function updateToolGroupDone(): void {
   if (!currentToolGroup) return;
+  const status = currentToolGroup.querySelector('.tool-group-status');
+  if (status) {
+    status.className = 'tool-group-status done';
+    status.innerHTML = '✓';
+  }
   const label = currentToolGroup.querySelector('.tool-group-label');
   if (label) {
     label.textContent = `⚡ ${toolGroupCount} tool${toolGroupCount > 1 ? 's' : ''} ran`;
+  }
+  const countEl = currentToolGroup.querySelector('.tool-group-count');
+  if (countEl) countEl.textContent = '';
+}
+
+function updateToolGroupProgress(
+  toolName: string,
+  args: Record<string, unknown>,
+): void {
+  if (!currentToolGroup) return;
+  // Restore spinner if returning from done state
+  const status = currentToolGroup.querySelector('.tool-group-status');
+  if (status && !status.querySelector('.spinner')) {
+    status.className = 'tool-group-status';
+    status.innerHTML = '<span class="spinner"></span>';
+  }
+  const label = currentToolGroup.querySelector('.tool-group-label');
+  if (label) {
+    const summary = getToolSummary(toolName, args);
+    label.textContent = summary ? `${toolName} ${summary}` : toolName;
+  }
+  const countEl = currentToolGroup.querySelector('.tool-group-count');
+  if (countEl) {
+    countEl.textContent = toolGroupCount > 1 ? String(toolGroupCount) : '';
   }
 }
 
 function collapseCurrentToolGroup(): void {
   if (currentToolGroup) {
+    updateToolGroupDone();
     currentToolGroup.classList.add('collapsed');
+    currentToolGroup.classList.remove('expanded');
     currentToolGroup = null;
     toolGroupCount = 0;
   }
@@ -325,9 +358,17 @@ function createToolCard(
   cardBody.appendChild(output);
   card.appendChild(cardBody);
 
+  // Mark previous active cards as completed
+  const prevActive = body.querySelectorAll('.tool-card.active');
+  prevActive.forEach(el => {
+    el.classList.remove('active');
+    el.classList.add('completed');
+  });
+
   body.appendChild(card);
+  card.classList.add('active');
   toolGroupCount++;
-  updateToolGroupLabel();
+  updateToolGroupProgress(toolName, args);
   autoScroll();
 }
 
@@ -381,6 +422,18 @@ function finalizeToolCard(
 
   if (isError) {
     card.classList.add('tool-error', 'open');
+  }
+
+  // Mark card as completed
+  card.classList.remove('active');
+  card.classList.add('completed');
+
+  // Check if all tools done (scoped to current group)
+  if (currentToolGroup) {
+    const remaining = currentToolGroup.querySelectorAll('.tool-card.active');
+    if (remaining.length === 0) {
+      updateToolGroupDone();
+    }
   }
 }
 
