@@ -113,6 +113,11 @@
         "command": "pi.openSettings",
         "title": "Pi: Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "pi.rollbackTodo",
+        "title": "Rollback TODO",
+        "icon": "$(discard)"
       }
     ],
     "menus": {
@@ -138,6 +143,11 @@
           "command": "pi.deleteWorkflow",
           "when": "view == pi.status && viewItem =~ /Workflow$/",
           "group": "2_danger"
+        },
+        {
+          "command": "pi.rollbackTodo",
+          "when": "view == pi.todos && viewItem == todoItem.done",
+          "group": "inline"
         }
       ]
     },

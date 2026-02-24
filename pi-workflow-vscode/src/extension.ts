@@ -3,6 +3,7 @@
 // Phase 2: RPC-based chat integration with pi coding agent.
 
 import { execFile as execFileCb } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
@@ -14,7 +15,7 @@ import { PiRpcClient } from './core/rpc-client';
 import { ExtensionUIBridge } from './bridge/extension-ui';
 import { ChangedFilesTreeProvider } from './providers/files-tree';
 import { WorkflowStatusBar } from './providers/status-bar';
-import { TodoTreeProvider } from './providers/todo-tree';
+import { TodoTreeItem, TodoTreeProvider } from './providers/todo-tree';
 import { WorkflowTreeProvider } from './providers/workflow-tree';
 import type { WorkflowSession } from './types/workflow';
 import { ChatHistoryStore } from './core/chat-history';
@@ -566,6 +567,80 @@ export function activate(context: vscode.ExtensionContext): void {
           `Verification: TODO #${todoIndex + 1}`,
           todo.verifyResult,
         );
+      }
+    }),
+
+    // ── Rollback TODO ────────────────────────────────────────
+    vscode.commands.registerCommand('pi.rollbackTodo', async (item: unknown) => {
+      if (!(item instanceof TodoTreeItem)) return;
+      const targetIndex = item.todoIndex;
+
+      const session = sessionWatcher.getState();
+      if (!session?.id) return;
+
+      const filePath = join(workspaceRoot, '.pi', 'workflows', `${session.id}.json`);
+      let raw: any;
+      try {
+        raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+      } catch {
+        vscode.window.showErrorMessage('Failed to read session file.');
+        return;
+      }
+
+      const commit = raw.todos?.[targetIndex]?.startCommit;
+      if (!commit || !/^[0-9a-f]{7,40}$/i.test(commit)) {
+        vscode.window.showErrorMessage('No valid commit reference found for this TODO.');
+        return;
+      }
+
+      if (currentClient?.isRunning()) {
+        vscode.window.showErrorMessage('Stop the agent before rollback.');
+        return;
+      }
+
+      let isDirty = false;
+      try {
+        await execFileAsync('git', ['diff-index', '--quiet', 'HEAD'], { cwd: workspaceRoot });
+      } catch {
+        isDirty = true;
+      }
+
+      const msg = isDirty
+        ? `Rollback to ${commit.slice(0, 7)}? Uncommitted changes AND all work since TODO #${targetIndex + 1} will be lost.`
+        : `Rollback to ${commit.slice(0, 7)}? All work since TODO #${targetIndex + 1} will be lost.`;
+      const confirm = await vscode.window.showWarningMessage(msg, { modal: true }, 'Rollback');
+      if (confirm !== 'Rollback') return;
+
+      try {
+        await execFileAsync('git', ['reset', '--hard', commit], { cwd: workspaceRoot });
+      } catch (e) {
+        vscode.window.showErrorMessage(`Git reset failed: ${e}`);
+        return;
+      }
+
+      // Modify raw JSON directly to preserve workflow-extension-only fields
+      raw.todos[targetIndex].status = 'active';
+      delete raw.todos[targetIndex].endCommit;
+      delete raw.todos[targetIndex].verifyResult;
+
+      for (let i = targetIndex + 1; i < raw.todos.length; i++) {
+        raw.todos[i].status = 'pending';
+        delete raw.todos[i].startCommit;
+        delete raw.todos[i].endCommit;
+        delete raw.todos[i].verifyResult;
+      }
+
+      raw.activeTodoIndex = targetIndex;
+      raw.state = 'implement';
+      raw.retryCount = 0;
+      raw.completed = false;
+      raw.compoundStep = 0;
+      delete raw.compoundMemorySnapshot;
+
+      try {
+        writeFileSync(filePath, JSON.stringify(raw, null, '\t'), 'utf-8');
+      } catch (e) {
+        vscode.window.showErrorMessage(`Failed to update session file after rollback: ${e}`);
       }
     }),
   );

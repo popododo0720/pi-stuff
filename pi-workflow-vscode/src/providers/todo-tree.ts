@@ -3,6 +3,16 @@
 import * as vscode from 'vscode';
 import type { WorkflowSession } from '../types/workflow';
 
+/** TreeItem subclass that carries the TODO index for context menu commands. */
+export class TodoTreeItem extends vscode.TreeItem {
+  constructor(
+    label: string,
+    public readonly todoIndex: number,
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+  }
+}
+
 const STATUS_ICONS: Record<string, { icon: string; color: string }> = {
   done: { icon: 'check', color: 'charts.green' },
   active: { icon: 'play', color: 'charts.yellow' },
@@ -50,16 +60,15 @@ export class TodoTreeProvider
     for (let i = 0; i < todos.length; i++) {
       const todo = todos[i];
       const label = `${i + 1}. ${todo.title}`;
-      const item = new vscode.TreeItem(
-        label,
-        vscode.TreeItemCollapsibleState.None,
-      );
+      const item = new TodoTreeItem(label, i);
 
       const style = STATUS_ICONS[todo.status] ?? STATUS_ICONS.pending;
       item.iconPath = new vscode.ThemeIcon(
         style.icon,
         new vscode.ThemeColor(style.color),
       );
+
+      item.contextValue = `todoItem.${todo.status}`;
 
       if (todo.status === 'active') {
         item.description = '(current)';
