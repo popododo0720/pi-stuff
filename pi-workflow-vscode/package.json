@@ -4,11 +4,18 @@
   "description": "Visual companion for pi coding agent workflows",
   "version": "0.1.0",
   "publisher": "pi-workflow",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/popododo0720/pi-stuff.git"
+  },
+  "icon": "media/pi-icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "AI",
+    "Chat"
   ],
   "activationEvents": [
     "onStartupFinished"
