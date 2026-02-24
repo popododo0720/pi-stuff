@@ -334,11 +334,29 @@ function buildTodoContext(session: WorkflowSession): string {
       `Other TODOs will be implemented in subsequent cycles.\n`;
   }
 
-  return (
+  let result =
     `\n\n### TODO Progress [${doneCount}/${session.todos.length}]\n${todoList}\n` +
     `\n**Current:** TODO #${session.activeTodoIndex + 1} — ${currentTodo.title}\n` +
-    todoConstraint
-  );
+    todoConstraint;
+
+  // Inject previous TODO implementation notes for context continuity
+  if (session.activeTodoIndex > 0) {
+    const prevNotes = session.todos
+      .map((t, idx) => ({ t, idx }))
+      .filter(
+        ({ t, idx }) => idx < session.activeTodoIndex && t.implementationNotes,
+      )
+      .map(
+        ({ t, idx }) =>
+          `#### TODO #${idx + 1}: ${t.title}\n${t.implementationNotes}`,
+      )
+      .join('\n\n');
+    if (prevNotes) {
+      result += '\n\n### Previous Implementation Context\n' + prevNotes;
+    }
+  }
+
+  return result;
 }
 
 // ── Helper: plan context ──────────────────────────────────────

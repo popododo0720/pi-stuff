@@ -622,12 +622,14 @@ export function activate(context: vscode.ExtensionContext): void {
       raw.todos[targetIndex].status = 'active';
       delete raw.todos[targetIndex].endCommit;
       delete raw.todos[targetIndex].verifyResult;
+      delete raw.todos[targetIndex].implementationNotes;
 
       for (let i = targetIndex + 1; i < raw.todos.length; i++) {
         raw.todos[i].status = 'pending';
         delete raw.todos[i].startCommit;
         delete raw.todos[i].endCommit;
         delete raw.todos[i].verifyResult;
+        delete raw.todos[i].implementationNotes;
       }
 
       raw.activeTodoIndex = targetIndex;

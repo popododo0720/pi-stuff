@@ -100,6 +100,7 @@ export const MAX_VERIFICATION_SUMMARY_CHARS = 1500;
 export const MAX_ERROR_PREFIX_CHARS = 500;
 /** Prompt injection 시 solution body 상한 (solution.ts의 MAX_SOLUTION_BODY=1500은 standalone 검색용) */
 export const MAX_SOLUTION_BODY_CONTEXT_CHARS = 800;
+export const MAX_IMPLEMENTATION_NOTES_CHARS = 2000;
 export const MAX_MEMORY_CONTEXT_CHARS = 6000;
 
 // ── Timeout defaults ──────────────────────────────────────────

@@ -20,6 +20,7 @@ export interface TodoItem {
   startCommit?: string;
   endCommit?: string;
   verifyResult?: string;
+  implementationNotes?: string;
 }
 
 export interface PatternEntry {

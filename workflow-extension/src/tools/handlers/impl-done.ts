@@ -1,7 +1,10 @@
 // tools/handlers/impl-done.ts — implDone action handler
 // Runs parallel impl verification, transitions based on result.
 
-import { SELF_AUDIT_TEMPLATE } from '../../constants';
+import {
+  MAX_IMPLEMENTATION_NOTES_CHARS,
+  SELF_AUDIT_TEMPLATE,
+} from '../../constants';
 import { loadWorkflowMemory, saveWorkflowMemory } from '../../storage/memory';
 import {
   formatVerificationSummary,
@@ -98,6 +101,15 @@ export async function handleImplDone(
         return { text: formatPreflightFailure(pfResult) };
       }
     }
+  }
+
+  // Save implementation notes before verification (preserved even on failure)
+  const currentTodo = session.todos[session.activeTodoIndex];
+  if (currentTodo && contentText) {
+    currentTodo.implementationNotes = contentText.slice(
+      0,
+      MAX_IMPLEMENTATION_NOTES_CHARS,
+    );
   }
 
   // Transition to verifyImpl and flush so status bar shows verification state
