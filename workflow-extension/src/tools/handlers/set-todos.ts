@@ -76,7 +76,8 @@ export async function handleSetTodos(
         `Structure the plan with clear sections (## TODO #1, ## TODO #2, etc.).\n` +
         `All TODOs will be planned together, then implemented sequentially.`,
     };
-  } catch {
+  } catch (e) {
+    console.warn('[set-todos] parse failed:', e);
     return {
       text: 'Failed to parse TODO list. Use JSON array format: ["item1", "item2"]',
     };

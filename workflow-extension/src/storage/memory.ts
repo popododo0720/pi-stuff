@@ -145,7 +145,8 @@ export function loadWorkflowMemory(
       gotchas: Array.isArray(raw.gotchas) ? raw.gotchas : [],
       decisions: Array.isArray(raw.decisions) ? raw.decisions : [],
     };
-  } catch {
+  } catch (e) {
+    console.warn('[memory] loadWorkflowMemory failed:', e);
     return { patterns: [], gotchas: [], decisions: [] };
   }
 }

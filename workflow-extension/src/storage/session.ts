@@ -60,7 +60,8 @@ export function getActiveWorkflowId(cwd: string): string | null {
     const id = readFileSync(path, 'utf-8').trim();
     if (!id || !SAFE_ID_RE.test(id)) return null;
     return id;
-  } catch {
+  } catch (e) {
+    console.warn('[session] getActiveWorkflowId failed:', e);
     return null;
   }
 }
@@ -72,8 +73,8 @@ export function setActiveWorkflowId(cwd: string, id: string | null): void {
   if (id === null) {
     try {
       if (existsSync(path)) unlinkSync(path);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.warn('[session] clear active id failed:', e);
     }
     return;
   }
@@ -148,8 +149,8 @@ export function listWorkflows(cwd: string): Array<{
             typeof raw.description === 'string' ? raw.description : '',
         });
       }
-    } catch {
-      /* skip invalid files */
+    } catch (e) {
+      console.warn(`[session] skip invalid workflow file ${file}:`, e);
     }
   }
   return results;
@@ -176,8 +177,8 @@ export function deleteWorkflow(cwd: string, id: string): void {
   try {
     const path = resolveWorkflowPath(cwd, id);
     if (existsSync(path)) unlinkSync(path);
-  } catch {
-    /* ignore */
+  } catch (e) {
+    console.warn(`[session] deleteWorkflow ${id} failed:`, e);
   }
 }
 
@@ -204,8 +205,8 @@ export function migrateSessionIfNeeded(cwd: string): void {
       }
       unlinkSync(oldPath);
     }
-  } catch {
-    /* migration best-effort */
+  } catch (e) {
+    console.warn('[session] migration failed:', e);
   }
 }
 

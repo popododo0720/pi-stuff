@@ -45,7 +45,8 @@ function collectFiles(cwd: string, maxFiles = MAX_FILES): string[] {
     let entries: string[];
     try {
       entries = readdirSync(dir);
-    } catch {
+    } catch (e) {
+      console.warn('[repomap] readdir failed:', dir, e);
       return;
     }
 
@@ -74,7 +75,7 @@ function collectFiles(cwd: string, maxFiles = MAX_FILES): string[] {
           }
         }
       } catch {
-        // Skip inaccessible files
+        // Skip inaccessible entries (permission denied, broken symlinks, etc.)
       }
     }
   }
@@ -188,7 +189,8 @@ export async function generateRepoMap(
     const result = renderRepoMap(ranked, tokenBudget);
     setCache(cacheKey, result);
     return result;
-  } catch {
+  } catch (e) {
+    console.warn('[repomap] generation failed:', e);
     return '';
   }
 }

@@ -225,6 +225,142 @@ function buildCompoundChecklist(session: WorkflowSession): string {
  * Build the full system prompt injection for the current workflow state.
  * Includes: workflow stage guide, plan content, failure context, memory.
  */
+// ── Helper: solution context ───────────────────────────────────
+
+function buildSolutionContext(session: WorkflowSession, cwd: string): string {
+  if (session.state === 'plan' && session.description) {
+    try {
+      const relevant = findRelevantSolutions(cwd, session.description, {
+        topK: 3,
+        maxBodyChars: MAX_SOLUTION_BODY_CONTEXT_CHARS,
+        minScore: 2,
+        noFallback: true,
+      });
+      if (relevant) {
+        return (
+          '\n\n### Relevant Past Solutions\n' +
+          'Apply documented learnings. Avoid repeated mistakes.\n' +
+          relevant
+        );
+      }
+    } catch (e) {
+      console.warn('[prompt] solution search failed:', e);
+    }
+  }
+  const solutionIdx = findSolutionIndex(cwd);
+  if (solutionIdx) {
+    return (
+      '\n\n### Past Solutions (searchable)\n' +
+      solutionIdx +
+      '\nRead specific solution files when relevant.'
+    );
+  }
+  return '';
+}
+
+// ── Helper: repo map context ──────────────────────────────────
+
+async function buildRepoMapContext(
+  cwd: string,
+  settings: WorkflowSettings | null,
+): Promise<string> {
+  try {
+    if (settings && settings.repoMap?.enabled !== false) {
+      const budget = settings.repoMap?.tokenBudget ?? 2048;
+      const map = await generateRepoMap(cwd, budget);
+      if (map) {
+        return `\n\n### Repo Map\n\`\`\`\n${map}\n\`\`\``;
+      }
+    }
+  } catch (e) {
+    console.warn('[prompt] repo map generation failed:', e);
+  }
+  return '';
+}
+
+// ── Helper: critical patterns context ─────────────────────────
+
+function buildCriticalContext(cwd: string): string {
+  try {
+    const critical = loadCriticalPatterns(cwd);
+    if (critical) {
+      return (
+        '\n\n### Critical Patterns (항상 적용)\n' +
+        `<critical_patterns>\n${critical}\n</critical_patterns>`
+      );
+    }
+  } catch (e) {
+    console.warn('[prompt] critical patterns load failed:', e);
+  }
+  return '';
+}
+
+// ── Helper: TODO progress context ─────────────────────────────
+
+function buildTodoContext(session: WorkflowSession): string {
+  if (session.activeTodoIndex < 0 || session.todos.length === 0) return '';
+
+  const doneCount = session.todos.filter((t) => t.status === 'done').length;
+  const todoList = session.todos
+    .map((t, i) => {
+      const icon =
+        t.status === 'done' ? '✅' : t.status === 'active' ? '🔨' : '⬜';
+      return `${icon} ${i + 1}. ${t.title}`;
+    })
+    .join('\n');
+
+  const currentTodo = session.todos[session.activeTodoIndex];
+
+  let todoConstraint = '';
+  if (session.state === 'plan' && !session.planContent) {
+    todoConstraint =
+      '\n\n🚨 **MANDATORY PLAN STRUCTURE**:\n' +
+      `You MUST write ONE unified plan covering ALL ${session.todos.length} TODO items.\n` +
+      'Structure your plan with clear sections:\n' +
+      '```\n' +
+      session.todos
+        .map((t, i) => `## TODO #${i + 1}: ${t.title}\n- Summary\n- Steps...`)
+        .join('\n\n') +
+      '\n```\n' +
+      'Do NOT write separate plans. Do NOT plan only TODO #1.\n' +
+      'The entire plan will be verified once, then TODOs will be implemented sequentially.\n';
+  } else if (session.state === 'implement') {
+    todoConstraint =
+      '\n\n🚨 **IMPLEMENTATION SCOPE**:\n' +
+      `You are implementing TODO #${session.activeTodoIndex + 1} ONLY.\n` +
+      `**Active TODO:** ${currentTodo.title}\n\n` +
+      `Read the "## TODO #${session.activeTodoIndex + 1}" section from the Approved Plan below.\n` +
+      `Implement ONLY those steps. Do NOT implement other TODO sections.\n` +
+      `Other TODOs will be implemented in subsequent cycles.\n`;
+  }
+
+  return (
+    `\n\n### TODO Progress [${doneCount}/${session.todos.length}]\n${todoList}\n` +
+    `\n**Current:** TODO #${session.activeTodoIndex + 1} — ${currentTodo.title}\n` +
+    todoConstraint
+  );
+}
+
+// ── Helper: plan context ──────────────────────────────────────
+
+function buildPlanContext(session: WorkflowSession): string {
+  if (!session.planContent) return '';
+  const isImplementing =
+    session.state === 'implement' || session.state === 'verifyImpl';
+  const hasTodos = session.activeTodoIndex >= 0 && session.todos.length > 0;
+  const planText =
+    isImplementing && hasTodos
+      ? extractCurrentTodoPlan(
+          session.planContent,
+          session.activeTodoIndex,
+          session.todos,
+        )
+      : session.planContent;
+  return `\n\n### Approved Plan\n<plan_content>\n${planText}\n</plan_content>`;
+}
+
+// ── Main orchestrator ─────────────────────────────────────────
+
 export async function buildSystemPromptInjection(
   session: WorkflowSession | null,
   ctx: ExtensionContext,
@@ -233,7 +369,6 @@ export async function buildSystemPromptInjection(
   let memoryContext = '';
   let needsOnboarding = false;
 
-  // Load project memory context
   try {
     const memoryPath = resolveMemoryPath(ctx.cwd);
     if (existsSync(memoryPath)) {
@@ -257,15 +392,14 @@ export async function buildSystemPromptInjection(
     } else {
       needsOnboarding = true;
     }
-  } catch {
-    // Silently ignore memory load errors
+  } catch (e) {
+    console.warn('[prompt] memory load failed:', e);
   }
 
   const workflowActive =
     !!session && session.state !== 'done' && !session.completed;
   const workflowFlag = `\n\nWORKFLOW_ACTIVE=${workflowActive ? 'true' : 'false'}`;
 
-  // No active workflow
   if (!session) {
     return (
       basePrompt +
@@ -275,7 +409,6 @@ export async function buildSystemPromptInjection(
     );
   }
 
-  // Done state — show status indicator + preserved plan for review
   if (session.state === 'done' || session.completed) {
     const status =
       '\n\nWorkflow Status: 🎉 COMPLETED — use /workflow to start a new task\n';
@@ -285,135 +418,39 @@ export async function buildSystemPromptInjection(
     return basePrompt + workflowFlag + status + donePlan + memoryContext;
   }
 
-  // Onboarding guide for first-time users (no conventions set yet)
+  let settings: WorkflowSettings | null = null;
+  try {
+    settings = loadSettings(ctx.cwd);
+  } catch (e) {
+    console.warn('[prompt] settings load failed:', e);
+  }
+
   const onboardingContext =
     needsOnboarding && session.state === 'plan' && !session.planContent
       ? `\n\n${ONBOARDING_GUIDE}`
       : '';
 
-  // Stage-specific guide (compound gets dynamic checklist)
   const stageGuide =
     session.state === 'compound'
       ? STAGE_GUIDES.compound + buildCompoundChecklist(session)
       : STAGE_GUIDES[session.state] || '';
 
-  // Load settings once (used for repoMap, detailLevel, solution search)
-  let settings: WorkflowSettings | null = null;
-  try {
-    settings = loadSettings(ctx.cwd);
-  } catch {
-    /* graceful */
-  }
+  const solutionContext = buildSolutionContext(session, ctx.cwd);
+  const repoMapContext = await buildRepoMapContext(ctx.cwd, settings);
+  const criticalContext = buildCriticalContext(ctx.cwd);
+  const todoContext = buildTodoContext(session);
+  const planContext = buildPlanContext(session);
 
-  // Past solutions — plan stage gets relevant body text, other stages get index only
-  let solutionContext = '';
-  let hasRelevantSolutions = false;
-  if (session.state === 'plan' && session.description) {
-    try {
-      const relevant = findRelevantSolutions(ctx.cwd, session.description, {
-        topK: 3,
-        maxBodyChars: MAX_SOLUTION_BODY_CONTEXT_CHARS,
-        minScore: 2,
-        noFallback: true,
-      });
-      if (relevant) {
-        solutionContext =
-          '\n\n### Relevant Past Solutions\n' +
-          'Apply documented learnings. Avoid repeated mistakes.\n' +
-          relevant;
-        hasRelevantSolutions = true;
-      }
-    } catch {
-      /* graceful */
-    }
-  }
-  if (!hasRelevantSolutions) {
-    const solutionIdx = findSolutionIndex(ctx.cwd);
-    if (solutionIdx) {
-      solutionContext =
-        '\n\n### Past Solutions (searchable)\n' +
-        solutionIdx +
-        '\nRead specific solution files when relevant.';
-    }
-  }
+  const detailLevelContext =
+    session.state === 'plan' && settings
+      ? `\n\n**Current Detail Level: ${(settings.detailLevel ?? 'standard').toUpperCase()}**\n`
+      : '';
 
-  // Detail level hint for plan stage
-  let detailLevelContext = '';
-  if (session.state === 'plan' && settings) {
-    const level = settings.detailLevel ?? 'standard';
-    detailLevelContext = `\n\n**Current Detail Level: ${level.toUpperCase()}**\n`;
-  }
-
-  // Include approved plan — full during plan/verify, current TODO section during implement
-  let planContext = '';
-  if (session.planContent) {
-    const isImplementing =
-      session.state === 'implement' || session.state === 'verifyImpl';
-    const hasTodos = session.activeTodoIndex >= 0 && session.todos.length > 0;
-    const planText =
-      isImplementing && hasTodos
-        ? extractCurrentTodoPlan(
-            session.planContent,
-            session.activeTodoIndex,
-            session.todos,
-          )
-        : session.planContent;
-    planContext = `\n\n### Approved Plan\n<plan_content>\n${planText}\n</plan_content>`;
-  }
-
-  // Include previous failure reason when retrying plan
   const failContext =
     session.verifyPlanResult && session.state === 'plan'
       ? `\n\n### Previous Verification Failure\n<verify_result>\n${session.verifyPlanResult}\n</verify_result>`
       : '';
 
-  // TODO progress section
-  let todoContext = '';
-  if (session.activeTodoIndex >= 0 && session.todos.length > 0) {
-    const doneCount = session.todos.filter((t) => t.status === 'done').length;
-    const todoList = session.todos
-      .map((t, i) => {
-        const icon =
-          t.status === 'done' ? '✅' : t.status === 'active' ? '🔨' : '⬜';
-        return `${icon} ${i + 1}. ${t.title}`;
-      })
-      .join('\n');
-
-    const currentTodo = session.todos[session.activeTodoIndex];
-
-    // ENFORCE: Plan stage with TODOs → write unified plan for ALL TODOs
-    let todoConstraint = '';
-    if (session.state === 'plan' && !session.planContent) {
-      todoConstraint =
-        '\n\n🚨 **MANDATORY PLAN STRUCTURE**:\n' +
-        `You MUST write ONE unified plan covering ALL ${session.todos.length} TODO items.\n` +
-        'Structure your plan with clear sections:\n' +
-        '```\n' +
-        session.todos
-          .map((t, i) => `## TODO #${i + 1}: ${t.title}\n- Summary\n- Steps...`)
-          .join('\n\n') +
-        '\n```\n' +
-        'Do NOT write separate plans. Do NOT plan only TODO #1.\n' +
-        'The entire plan will be verified once, then TODOs will be implemented sequentially.\n';
-    }
-    // ENFORCE: Implement stage with TODOs → implement ONLY current TODO
-    else if (session.state === 'implement') {
-      todoConstraint =
-        '\n\n🚨 **IMPLEMENTATION SCOPE**:\n' +
-        `You are implementing TODO #${session.activeTodoIndex + 1} ONLY.\n` +
-        `**Active TODO:** ${currentTodo.title}\n\n` +
-        `Read the "## TODO #${session.activeTodoIndex + 1}" section from the Approved Plan below.\n` +
-        `Implement ONLY those steps. Do NOT implement other TODO sections.\n` +
-        `Other TODOs will be implemented in subsequent cycles.\n`;
-    }
-
-    todoContext =
-      `\n\n### TODO Progress [${doneCount}/${session.todos.length}]\n${todoList}\n` +
-      `\n**Current:** TODO #${session.activeTodoIndex + 1} — ${currentTodo.title}\n` +
-      todoConstraint;
-  }
-
-  // Startup preparation enforcement context
   let startupPrepContext = '';
   if (session.startupPrepRequired) {
     startupPrepContext =
@@ -422,21 +459,6 @@ export async function buildSystemPromptInjection(
       'Complete the mandatory TODO #1 (git/worktree prep) before feature implementation.\n';
   }
 
-  // Generate repo map (opt-in, defaults to enabled)
-  let repoMapContext = '';
-  try {
-    if (settings && settings.repoMap?.enabled !== false) {
-      const budget = settings.repoMap?.tokenBudget ?? 2048;
-      const map = await generateRepoMap(ctx.cwd, budget);
-      if (map) {
-        repoMapContext = `\n\n### Repo Map\n\`\`\`\n${map}\n\`\`\``;
-      }
-    }
-  } catch {
-    // Graceful degradation — skip repo map
-  }
-
-  // Assemble workflow context block
   const workflowContext =
     '\n\n## Active Workflow\n\n' +
     `Task: <task_description>${session.description}</task_description>\n` +
@@ -450,19 +472,6 @@ export async function buildSystemPromptInjection(
     solutionContext +
     planContext +
     failContext;
-
-  // Critical patterns — always injected, separate from memory budget
-  let criticalContext = '';
-  try {
-    const critical = loadCriticalPatterns(ctx.cwd);
-    if (critical) {
-      criticalContext =
-        '\n\n### Critical Patterns (항상 적용)\n' +
-        `<critical_patterns>\n${critical}\n</critical_patterns>`;
-    }
-  } catch {
-    /* ignore */
-  }
 
   return (
     basePrompt +

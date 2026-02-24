@@ -69,9 +69,10 @@ async function ensureInit(): Promise<boolean> {
         LANGUAGE = mod.Language;
         const wasmPath = require.resolve('web-tree-sitter/tree-sitter.wasm');
         await (PARSER as any).init({ locateFile: () => wasmPath });
-      } catch {
+      } catch (e) {
         PARSER = null;
         LANGUAGE = null;
+        console.warn('[parser] web-tree-sitter init failed:', e);
         throw new Error('web-tree-sitter init failed');
       }
     })();
@@ -79,7 +80,8 @@ async function ensureInit(): Promise<boolean> {
   try {
     await initPromise;
     return PARSER !== null;
-  } catch {
+  } catch (e) {
+    console.warn('[parser] ensureInit failed:', e);
     return false;
   }
 }

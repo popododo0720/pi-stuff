@@ -30,8 +30,8 @@ export function detectPreflightCommands(cwd: string): string[] {
     ) {
       commands.push('npm test');
     }
-  } catch {
-    /* no package.json or malformed */
+  } catch (e) {
+    console.warn('[preflight] package.json read failed:', e);
   }
 
   // tsconfig.json → tsc
@@ -39,8 +39,8 @@ export function detectPreflightCommands(cwd: string): string[] {
     if (existsSync(join(cwd, 'tsconfig.json'))) {
       commands.push('npx tsc --noEmit');
     }
-  } catch {
-    /* ignore */
+  } catch (e) {
+    console.warn('[preflight] tsconfig.json check failed:', e);
   }
 
   // biome.json → biome check (only if no lint command already)
@@ -51,8 +51,8 @@ export function detectPreflightCommands(cwd: string): string[] {
     ) {
       commands.push('npx biome check .');
     }
-  } catch {
-    /* ignore */
+  } catch (e) {
+    console.warn('[preflight] biome.json check failed:', e);
   }
 
   return commands;

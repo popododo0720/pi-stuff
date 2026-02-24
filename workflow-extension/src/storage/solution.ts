@@ -81,8 +81,8 @@ function collectSolutionFiles(
           }
         }
       }
-    } catch {
-      /* skip unreadable */
+    } catch (e) {
+      console.warn(`[solution] skip unreadable dir ${entry}:`, e);
     }
   }
   return results;
@@ -180,8 +180,8 @@ export function saveSolution(
             '\n';
         }
       }
-    } catch {
-      /* cross-ref is best-effort */
+    } catch (e) {
+      console.warn('[solution] cross-ref generation failed:', e);
     }
 
     writeFileSync(filePath, frontmatter + content + crossRef, 'utf-8');

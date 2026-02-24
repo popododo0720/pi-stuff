@@ -131,7 +131,9 @@ export function registerProjectMemoryTool(
           }
 
           case 'clear': {
-            wfMem[cat] = [] as unknown as WorkflowMemory[typeof cat];
+            if (cat === 'patterns') wfMem.patterns = [];
+            else if (cat === 'gotchas') wfMem.gotchas = [];
+            else wfMem.decisions = [];
             const err = saveWorkflowMemory(ctx.cwd, workflowId, wfMem);
             if (err) return t(`Save failed: ${err}`);
             return t(`Cleared all ${params.category}.`);

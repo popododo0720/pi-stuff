@@ -234,8 +234,8 @@ export async function handleImplDone(
           wfMem.gotchas.push(`[auto] Verification failure: ${criticals}`);
           saveWorkflowMemory(ctx.cwd, session.id, wfMem);
         }
-      } catch {
-        /* ignore auto-gotcha errors */
+      } catch (e) {
+        console.warn('[impl-done] auto-gotcha save failed:', e);
       }
     }
 

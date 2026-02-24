@@ -69,20 +69,29 @@ export async function runParallelVerification(
   try {
     const criticalPatterns = loadCriticalPatterns(cwd);
     if (criticalPatterns) learningParts.push(criticalPatterns);
-  } catch { /* graceful */ }
+  } catch (e) {
+    console.warn('[verify] critical patterns load failed:', e);
+  }
   try {
     const memory = loadMemory(cwd);
     if (memory.gotchas.length > 0) {
-      learningParts.push('Past gotchas:\n' + memory.gotchas.map((g) => `- ${g}`).join('\n'));
+      learningParts.push(
+        'Past gotchas:\n' + memory.gotchas.map((g) => `- ${g}`).join('\n'),
+      );
     }
     if (workflowId) {
       const wfMem = loadWorkflowMemory(cwd, workflowId);
       if (wfMem.gotchas.length > 0) {
-        learningParts.push('Workflow gotchas:\n' + wfMem.gotchas.map((g) => `- ${g}`).join('\n'));
+        learningParts.push(
+          'Workflow gotchas:\n' + wfMem.gotchas.map((g) => `- ${g}`).join('\n'),
+        );
       }
     }
-  } catch { /* graceful */ }
-  const projectLearnings = learningParts.length > 0 ? learningParts.join('\n\n') : undefined;
+  } catch (e) {
+    console.warn('[verify] project learnings load failed:', e);
+  }
+  const projectLearnings =
+    learningParts.length > 0 ? learningParts.join('\n\n') : undefined;
 
   if (type === 'plan') {
     // ── Plan: existing multi-model structure, no domain checks ──

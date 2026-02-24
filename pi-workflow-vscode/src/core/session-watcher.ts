@@ -269,9 +269,9 @@ export class SessionWatcher implements vscode.Disposable {
 
       // Fire list change
       this._onDidChangeList.fire(this.getList());
-    } catch {
+    } catch (e) {
       if (thisVersion !== this.loadVersion) return;
-      this.log('loadAll failed');
+      this.log('loadAll failed: ' + String(e));
       this.resetState();
     }
   }
