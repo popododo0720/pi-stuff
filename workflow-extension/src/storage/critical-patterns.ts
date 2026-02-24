@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { PatternEntry } from '../types';
 import { atomicWriteFileSync } from './atomic-write';
+import { isInsideRoot } from './path-utils';
 
 export const CRITICAL_PATTERNS_DIR = 'docs/patterns';
 export const CRITICAL_PATTERNS_FILE = 'critical.md';
@@ -21,7 +22,7 @@ export function resolveCriticalPath(cwd: string): string {
     join(cwd, CRITICAL_PATTERNS_DIR, CRITICAL_PATTERNS_FILE),
   );
   const root = resolve(cwd);
-  if (!resolved.startsWith(`${root}/`) && resolved !== root) {
+  if (!isInsideRoot(resolved, root)) {
     throw new Error('Critical patterns path escapes project root');
   }
   return resolved;

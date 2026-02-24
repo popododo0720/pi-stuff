@@ -12,6 +12,7 @@ import { join, resolve } from 'node:path';
 import { CONVENTIONS_DIR, MEMORY_DIR } from '../constants';
 import type { ModuleConventions } from '../types';
 import { atomicWriteFileSync } from './atomic-write';
+import { isInsideRoot } from './path-utils';
 
 /**
  * Resolve the absolute path to the conventions directory.
@@ -20,7 +21,7 @@ import { atomicWriteFileSync } from './atomic-write';
 export function resolveConventionsDir(cwd: string): string {
   const resolved = resolve(join(cwd, MEMORY_DIR, CONVENTIONS_DIR));
   const root = resolve(cwd);
-  if (!resolved.startsWith(`${root}/`) && resolved !== root) {
+  if (!isInsideRoot(resolved, root)) {
     throw new Error('Conventions path escapes project root');
   }
   return resolved;
@@ -57,7 +58,8 @@ export function loadModule(cwd: string, name: string): ModuleConventions {
   try {
     const dir = resolveConventionsDir(cwd);
     const filePath = resolve(join(dir, `${name}.json`));
-    if (!filePath.startsWith(`${dir}/`)) throw new Error('Invalid path');
+    if (!isInsideRoot(filePath, dir) || filePath === dir)
+      throw new Error('Invalid path');
     const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
     return {
       path: raw.path ?? '',
@@ -85,7 +87,8 @@ export function saveModule(
     const dir = resolveConventionsDir(cwd);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const filePath = resolve(join(dir, `${name}.json`));
-    if (!filePath.startsWith(`${dir}/`)) return 'Invalid module name';
+    if (!isInsideRoot(filePath, dir) || filePath === dir)
+      return 'Invalid module name';
     atomicWriteFileSync(filePath, JSON.stringify(data, null, '\t'), {
       encoding: 'utf-8',
       mode: 0o600,
@@ -104,7 +107,8 @@ export function deleteModule(cwd: string, name: string): string | null {
   try {
     const dir = resolveConventionsDir(cwd);
     const filePath = resolve(join(dir, `${name}.json`));
-    if (!filePath.startsWith(`${dir}/`)) return 'Invalid module name';
+    if (!isInsideRoot(filePath, dir) || filePath === dir)
+      return 'Invalid module name';
     if (!existsSync(filePath)) return `Module '${name}' not found.`;
     unlinkSync(filePath);
     return null;

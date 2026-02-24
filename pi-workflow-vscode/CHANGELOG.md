@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — README Update
+
+- Updated README to reflect current features (RPC chat, multi-workflow, parallel search, settings UI, TODO rollback)
+- Removed outdated Phase 1/Phase 2 architecture description
+
 ## 0.1.0 — Initial Release
 
 - **Workflow Status Sidebar** — Activity bar panel showing current workflow state and stage

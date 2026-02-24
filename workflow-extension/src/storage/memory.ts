@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { MEMORY_DIR, MEMORY_FILE } from '../constants';
 import type { PatternEntry, ProjectMemory, WorkflowMemory } from '../types';
 import { atomicWriteFileSync } from './atomic-write';
+import { isInsideRoot } from './path-utils';
 
 // ── Pattern parsing helper ─────────────────────────────────────
 
@@ -51,7 +52,7 @@ export function parsePatterns(raw: unknown[]): PatternEntry[] {
 export function resolveMemoryPath(cwd: string): string {
   const resolved = resolve(join(cwd, MEMORY_DIR, MEMORY_FILE));
   const root = resolve(cwd);
-  if (!resolved.startsWith(`${root}/`) && resolved !== root) {
+  if (!isInsideRoot(resolved, root)) {
     throw new Error('Memory path escapes project root');
   }
   return resolved;
@@ -123,7 +124,7 @@ export function resolveWorkflowMemoryPath(
     join(cwd, '.pi/workflows', `${workflowId}-memory.json`),
   );
   const root = resolve(cwd);
-  if (!resolved.startsWith(`${root}/`) && resolved !== root) {
+  if (!isInsideRoot(resolved, root)) {
     throw new Error('Workflow memory path escapes project root');
   }
   return resolved;
