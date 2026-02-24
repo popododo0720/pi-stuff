@@ -108,7 +108,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Phase 2: Cleanup helper ──────────────────────────────────
   function cleanupChat(): void {
     chatViewProvider.setRpcClient(null);
-    settingsPanel?.setRpcClient(null);
     currentBridge?.dispose();
     currentClient = null;
     currentBridge = null;
@@ -162,7 +161,6 @@ export function activate(context: vscode.ExtensionContext): void {
     const bridge = new ExtensionUIBridge(client);
     bridge.bind();
     chatViewProvider.setRpcClient(client);
-    settingsPanel?.setRpcClient(client);
 
     currentClient = client;
     currentBridge = bridge;

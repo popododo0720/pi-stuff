@@ -153,3 +153,16 @@ export async function autoPush(
     message: `Pushed origin/${branch}`,
   };
 }
+
+export async function getCurrentBranch(
+  pi: ExtensionAPI,
+  gitCwd: string,
+): Promise<string | undefined> {
+  const result = await runGit(
+    pi,
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    gitCwd,
+  );
+  if (!result.ok || result.stdout === 'HEAD') return undefined;
+  return result.stdout.trim();
+}

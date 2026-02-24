@@ -183,13 +183,16 @@ function extractCurrentTodoPlan(
 /**
  * Build dynamic compound checklist showing current progress.
  */
-function buildCompoundChecklist(session: WorkflowSession): string {
+function buildCompoundChecklist(
+  session: WorkflowSession,
+  gitEnabled: boolean,
+): string {
   const currentStep = session.compoundStep ?? 0;
   const lines: string[] = [];
 
   for (let i = 0; i < COMPOUND_STEPS.length; i++) {
     const step = COMPOUND_STEPS[i];
-    const skipped = shouldSkipStep(step, session);
+    const skipped = shouldSkipStep(step, session, gitEnabled);
 
     if (skipped) {
       lines.push(`⏭️ ${i + 1}. ${step.label} (skipped)`);
@@ -450,7 +453,8 @@ export async function buildSystemPromptInjection(
 
   const stageGuide =
     session.state === 'compound'
-      ? STAGE_GUIDES.compound + buildCompoundChecklist(session)
+      ? STAGE_GUIDES.compound +
+        buildCompoundChecklist(session, settings?.git?.enabled !== false)
       : STAGE_GUIDES[session.state] || '';
 
   const solutionContext = buildSolutionContext(session, ctx.cwd);

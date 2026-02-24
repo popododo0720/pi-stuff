@@ -36,6 +36,7 @@ export interface CompoundStepDef {
   label: string;
   instruction: string;
   requiresGit: boolean;
+  requiresGitBranch: boolean;
   requiresLastTodo: boolean;
 }
 

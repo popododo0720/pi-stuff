@@ -196,6 +196,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
       '- **Symptoms:** 징후 키워드 (쉼표 구분)\n' +
       '</critical_requirement>',
     requiresGit: false,
+    requiresGitBranch: false,
     requiresLastTodo: false,
   },
   {
@@ -205,6 +206,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
       '오래된 메모리 항목 정리: project_memory(action: "remove").\n' +
       '정리할 것 없으면 바로 compoundDone 호출.',
     requiresGit: false,
+    requiresGitBranch: false,
     requiresLastTodo: false,
   },
   {
@@ -214,6 +216,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
       'git add -A && git status 확인.\n' +
       '변경사항 있으면: git commit -m "chore(workflow): final - <description>"',
     requiresGit: true,
+    requiresGitBranch: false,
     requiresLastTodo: true,
   },
   {
@@ -221,6 +224,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     label: 'Git Push Branch',
     instruction: 'git push origin <branch>',
     requiresGit: true,
+    requiresGitBranch: true,
     requiresLastTodo: true,
   },
   {
@@ -230,6 +234,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
       'Branch mode: git checkout main && git merge <branch> --no-ff\n' +
       'Worktree mode: git -C <main-repo> merge <branch> --no-ff',
     requiresGit: true,
+    requiresGitBranch: true,
     requiresLastTodo: true,
   },
   {
@@ -237,6 +242,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     label: 'Push Main',
     instruction: 'git push origin main',
     requiresGit: true,
+    requiresGitBranch: false,
     requiresLastTodo: true,
   },
   {
@@ -251,6 +257,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
       'CRITICAL: Step 2 (checkout main) MUST happen BEFORE step 3 (branch delete).\n' +
       'Skipping this causes detached HEAD.',
     requiresGit: true,
+    requiresGitBranch: true,
     requiresLastTodo: true,
   },
   {
@@ -266,6 +273,7 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
       '- **Symptoms:** 징후 키워드\n\n' +
       'workflow_transition(action: "compoundDone", content: "<summary>")',
     requiresGit: false,
+    requiresGitBranch: false,
     requiresLastTodo: false,
   },
 ];
@@ -277,8 +285,10 @@ export function shouldSkipStep(
     todos: Array<{ status: string }>;
     activeTodoIndex: number;
   },
+  gitEnabled: boolean,
 ): boolean {
-  if (step.requiresGit && !session.gitBranch) return true;
+  if (step.requiresGit && !gitEnabled) return true;
+  if (step.requiresGitBranch && !session.gitBranch) return true;
   if (
     step.requiresLastTodo &&
     session.todos.length > 0 &&

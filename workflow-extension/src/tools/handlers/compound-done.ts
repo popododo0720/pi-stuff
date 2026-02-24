@@ -11,7 +11,13 @@ import {
 } from '../../storage/memory';
 import { saveSolution } from '../../storage/solution';
 import { RESET_MARKER } from '../compact';
-import { autoCommitTodo, autoPush, getGitCwd, runGit } from '../git-automation';
+import {
+  autoCommitTodo,
+  autoPush,
+  getCurrentBranch,
+  getGitCwd,
+  runGit,
+} from '../git-automation';
 import type { HandlerContext, HandlerResult } from './types';
 
 // ── Solution metadata extraction ────────────────────────────────
@@ -360,11 +366,12 @@ function advanceToNextValidStep(
     todos: Array<{ status: string }>;
     activeTodoIndex: number;
   },
+  gitEnabled: boolean,
 ): number {
   let step = startStep;
   while (
     step < COMPOUND_STEPS.length &&
-    shouldSkipStep(COMPOUND_STEPS[step], session)
+    shouldSkipStep(COMPOUND_STEPS[step], session, gitEnabled)
   ) {
     step++;
   }
@@ -377,9 +384,14 @@ export async function handleCompoundDone(
   hctx: HandlerContext,
 ): Promise<HandlerResult> {
   const { session } = hctx;
+  const gitEnabled = hctx.settings.git?.enabled !== false;
 
   // 1. Find current valid step (skip inapplicable steps)
-  let step = advanceToNextValidStep(session.compoundStep ?? 0, session);
+  let step = advanceToNextValidStep(
+    session.compoundStep ?? 0,
+    session,
+    gitEnabled,
+  );
 
   // 2. All steps complete → finalize
   if (step >= COMPOUND_STEPS.length) {
@@ -421,7 +433,7 @@ export async function handleCompoundDone(
   }
 
   // 5. Advance to next valid step
-  step = advanceToNextValidStep(step + 1, session);
+  step = advanceToNextValidStep(step + 1, session, gitEnabled);
   session.compoundStep = step;
 
   // 6. All steps complete after advance
@@ -477,8 +489,12 @@ async function completeCompound(hctx: HandlerContext): Promise<HandlerResult> {
       if (commit.commitHash && session.todos[completedIndex]) {
         session.todos[completedIndex].endCommit = commit.commitHash;
       }
-      if (commit.ok && hctx.settings.git?.pushPerTodo && session.gitBranch) {
-        await autoPush(hctx.pi, session.gitBranch, gitCwd);
+      if (commit.ok && hctx.settings.git?.pushPerTodo) {
+        const pushBranch =
+          session.gitBranch ?? (await getCurrentBranch(hctx.pi, gitCwd));
+        if (pushBranch) {
+          await autoPush(hctx.pi, pushBranch, gitCwd);
+        }
       }
     }
     return await finalizeWorkflow(hctx, { summary, tags });
@@ -520,8 +536,12 @@ async function advanceToNextTodo(
     }
 
     if (commit.ok && settings.git?.pushPerTodo) {
-      const push = await autoPush(pi, session.gitBranch, p.gitCwd);
-      gitNotes.push(push.ok ? `🚀 ${push.message}` : `⚠️ ${push.message}`);
+      const pushBranch =
+        session.gitBranch ?? (await getCurrentBranch(pi, p.gitCwd));
+      if (pushBranch) {
+        const push = await autoPush(pi, pushBranch, p.gitCwd);
+        gitNotes.push(push.ok ? `🚀 ${push.message}` : `⚠️ ${push.message}`);
+      }
     }
   }
 
