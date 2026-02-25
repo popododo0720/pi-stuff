@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 — Cross-Platform Fixes
+
+- **CRLF newline support** — fixed `split('\n')` → `split(/\r?\n/)` across diff parsing, verification output, HTML rendering, and file tree providers
+- **Affected areas** — show-diff, files-tree, html-utils, verify-panel
+
 ## 0.1.1 — README Update
 
 - Updated README to reflect current features (RPC chat, multi-workflow, parallel search, settings UI, TODO rollback)
