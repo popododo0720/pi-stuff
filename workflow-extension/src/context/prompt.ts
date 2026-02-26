@@ -387,7 +387,7 @@ export async function buildSystemPromptInjection(
   ctx: ExtensionContext,
   basePrompt: string,
   settings?: WorkflowSettings | null,
-): Promise<string | undefined> {
+): Promise<string> {
   let memoryContext = '';
   let needsOnboarding = false;
 

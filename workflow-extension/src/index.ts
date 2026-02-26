@@ -183,10 +183,7 @@ export default function (pi: ExtensionAPI) {
       event.systemPrompt,
       settings,
     );
-    if (result) {
-      return { systemPrompt: result };
-    }
-    return undefined;
+    return { systemPrompt: result };
   });
 
   // ── Auto-save current work tracking ────────────────────────────
