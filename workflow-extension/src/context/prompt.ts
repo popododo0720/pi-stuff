@@ -20,7 +20,7 @@ import {
   loadWorkflowMemory,
   resolveMemoryPath,
 } from '../storage/memory';
-import { listModules, loadMatchingModules } from '../storage/modules';
+import { listModules, loadMatchingModulesFromList } from '../storage/modules';
 import { loadSettings } from '../storage/settings';
 import { findRelevantSolutions, findSolutionIndex } from '../storage/solution';
 import type {
@@ -386,6 +386,7 @@ export async function buildSystemPromptInjection(
   session: WorkflowSession | null,
   ctx: ExtensionContext,
   basePrompt: string,
+  settings?: WorkflowSettings | null,
 ): Promise<string | undefined> {
   let memoryContext = '';
   let needsOnboarding = false;
@@ -395,7 +396,12 @@ export async function buildSystemPromptInjection(
     if (existsSync(memoryPath)) {
       const memory = loadMemory(ctx.cwd);
       const recentFiles = extractRecentFilePaths(ctx);
-      const matchedModules = loadMatchingModules(ctx.cwd, recentFiles);
+      const moduleNames = listModules(ctx.cwd);
+      const matchedModules = loadMatchingModulesFromList(
+        ctx.cwd,
+        moduleNames,
+        recentFiles,
+      );
       const wfMem = session?.id
         ? loadWorkflowMemory(ctx.cwd, session.id)
         : undefined;
@@ -409,7 +415,7 @@ export async function buildSystemPromptInjection(
         memory.conventions.length === 0 &&
         memory.rules.length === 0 &&
         memory.workflows.length === 0 &&
-        listModules(ctx.cwd).length === 0;
+        moduleNames.length === 0;
     } else {
       needsOnboarding = true;
     }
@@ -439,11 +445,13 @@ export async function buildSystemPromptInjection(
     return basePrompt + workflowFlag + status + donePlan + memoryContext;
   }
 
-  let settings: WorkflowSettings | null = null;
-  try {
-    settings = loadSettings(ctx.cwd);
-  } catch (e) {
-    console.warn('[prompt] settings load failed:', e);
+  if (settings === undefined) {
+    try {
+      settings = loadSettings(ctx.cwd);
+    } catch (e) {
+      console.warn('[prompt] settings load failed:', e);
+      settings = null;
+    }
   }
 
   const onboardingContext =

@@ -118,16 +118,16 @@ export function deleteModule(cwd: string, name: string): string | null {
 }
 
 /**
- * Find modules whose path matches any of the recent file paths.
- * Used to inject only relevant module conventions into the prompt.
+ * Find modules from pre-loaded names list whose path matches recent files.
+ * Avoids duplicate listModules() call when caller already has the list.
  */
-export function loadMatchingModules(
+export function loadMatchingModulesFromList(
   cwd: string,
+  moduleNames: string[],
   recentFiles: string[],
 ): Array<{ name: string; data: ModuleConventions }> {
-  const modules = listModules(cwd);
   const matched: Array<{ name: string; data: ModuleConventions }> = [];
-  for (const name of modules) {
+  for (const name of moduleNames) {
     const data = loadModule(cwd, name);
     if (!data.path) continue;
     const prefix = data.path.endsWith('/') ? data.path : `${data.path}/`;
@@ -138,4 +138,15 @@ export function loadMatchingModules(
     }
   }
   return matched;
+}
+
+/**
+ * Find modules whose path matches any of the recent file paths.
+ * Used to inject only relevant module conventions into the prompt.
+ */
+export function loadMatchingModules(
+  cwd: string,
+  recentFiles: string[],
+): Array<{ name: string; data: ModuleConventions }> {
+  return loadMatchingModulesFromList(cwd, listModules(cwd), recentFiles);
 }

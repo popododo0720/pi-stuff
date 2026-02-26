@@ -171,8 +171,9 @@ export default function (pi: ExtensionAPI) {
       recoverFromDone(session);
     }
 
+    let settings: WorkflowSettings | null = null;
     if (session && session.state !== 'done' && !session.completed) {
-      const settings = loadSettings(ctx.cwd);
+      settings = loadSettings(ctx.cwd);
       await applyStageConfig(pi, ctx, getStageConfig(session, settings));
     }
 
@@ -180,6 +181,7 @@ export default function (pi: ExtensionAPI) {
       session,
       ctx,
       event.systemPrompt,
+      settings,
     );
     if (result) {
       return { systemPrompt: result };
