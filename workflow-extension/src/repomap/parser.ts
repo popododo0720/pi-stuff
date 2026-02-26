@@ -2,7 +2,7 @@
 // Parses source files and extracts top-level symbols + import specifiers.
 
 import { readFileSync, statSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -93,9 +93,7 @@ async function getLanguage(langId: string): Promise<any | null> {
   if (!LANGUAGE) return null;
   try {
     const wasmPath = join(
-      require
-        .resolve('tree-sitter-wasms/package.json')
-        .replace('/package.json', ''),
+      dirname(require.resolve('tree-sitter-wasms/package.json')),
       'out',
       `tree-sitter-${langId}.wasm`,
     );
