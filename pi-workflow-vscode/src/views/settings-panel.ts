@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { getNonce } from './html-utils';
+import type { PiRpcClient } from '../core/rpc-client';
+
 const SETTINGS_REL = '.pi/workflow-settings.json';
 const PI_DIR = '.pi';
 
@@ -44,16 +46,44 @@ const DOMAIN_IDS = ['security', 'performance', 'architecture', 'data-integrity',
 
 export class SettingsPanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
+  private rpcClient: PiRpcClient | null = null;
 
   constructor(
     private readonly workspaceRoot: string,
     private readonly extensionUri: vscode.Uri,
   ) {}
 
+  setRpcClient(client: PiRpcClient | null): void {
+    this.rpcClient = client;
+    if (this.panel) {
+      if (client) {
+        this.fetchAvailableModels().then(models => {
+          this.panel?.webview.postMessage({ type: 'modelsUpdate', models });
+        }).catch(() => { /* panel may be disposed */ });
+      } else {
+        this.panel.webview.postMessage({ type: 'modelsUpdate', models: [] });
+      }
+    }
+  }
+
+  private async fetchAvailableModels(): Promise<string[]> {
+    if (!this.rpcClient?.isRunning()) return [];
+    try {
+      const resp = await this.rpcClient.getAvailableModels();
+      if (resp.success && resp.data?.models) {
+        const raw = resp.data.models as Array<{ provider?: string; id?: string } | string>;
+        return raw.map(m => typeof m === 'string' ? m : `${m.provider}/${m.id}`);
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
   async show(): Promise<void> {
+    const models = await this.fetchAvailableModels();
+
     if (this.panel) {
       this.panel.reveal();
-      this.panel.webview.html = this.getHtml(this.panel.webview);
+      this.panel.webview.html = this.getHtml(this.panel.webview, models);
       return;
     }
 
@@ -64,7 +94,7 @@ export class SettingsPanel implements vscode.Disposable {
       { enableScripts: true, retainContextWhenHidden: true },
     );
 
-    this.panel.webview.html = this.getHtml(this.panel.webview);
+    this.panel.webview.html = this.getHtml(this.panel.webview, models);
 
     this.panel.webview.onDidReceiveMessage(async (msg: { type: string; settings?: unknown }) => {
       if (msg.type === 'save' && msg.settings) {
@@ -127,7 +157,7 @@ export class SettingsPanel implements vscode.Disposable {
     }
   }
 
-  private getHtml(webview: vscode.Webview): string {
+  private getHtml(webview: vscode.Webview, availableModels: string[] = []): string {
     const nonce = getNonce();
     const settings = this.loadSettings();
     const settingsJson = JSON.stringify(settings)
@@ -136,6 +166,7 @@ export class SettingsPanel implements vscode.Disposable {
 
     const thinkingOpts = THINKING_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
     const detailOpts = DETAIL_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+    const modelsJson = JSON.stringify(availableModels).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -218,6 +249,7 @@ export class SettingsPanel implements vscode.Disposable {
   </style>
 </head>
 <body>
+  <datalist id="model-list"></datalist>
   <h1>⚙️ Pi Workflow Settings</h1>
 
   <div class="tab-bar">
@@ -249,7 +281,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Plan</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="plan-model" placeholder="provider/model-name">
+      <input type="text" id="plan-model" list="model-list" placeholder="provider/model-name">
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -259,7 +291,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Implement</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="impl-model" placeholder="provider/model-name">
+      <input type="text" id="impl-model" list="model-list" placeholder="provider/model-name">
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -269,7 +301,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Compound</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="compound-model" placeholder="provider/model-name">
+      <input type="text" id="compound-model" list="model-list" placeholder="provider/model-name">
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -279,7 +311,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Verify</h2>
     <div class="field">
       <label>Models</label>
-      <input type="text" id="verify-models" placeholder="model1, model2" style="width:300px">
+      <input type="text" id="verify-models" list="model-list" placeholder="model1, model2" style="width:300px">
     </div>
     <p class="desc" style="margin-left:0">Comma-separated model list</p>
     <div class="field">
@@ -293,7 +325,7 @@ export class SettingsPanel implements vscode.Disposable {
     <details style="margin:8px 0;border:1px solid var(--vscode-panel-border,#333);border-radius:4px;padding:4px 8px;">
       <summary style="cursor:pointer;font-size:13px;font-weight:500;padding:4px 0;">${d}</summary>
       <div class="field-check" style="margin-top:6px;"><input type="checkbox" id="domain-${d}-enabled" checked><label for="domain-${d}-enabled">Enabled</label></div>
-      <div class="field"><label>Models</label><input type="text" id="domain-${d}-models" placeholder="(inherit)" style="width:280px"></div>
+      <div class="field"><label>Models</label><input type="text" id="domain-${d}-models" list="model-list" placeholder="(inherit)" style="width:280px"></div>
       <div class="field"><label>Thinking</label><select id="domain-${d}-thinking"><option value="">(inherit)</option>${thinkingOpts}</select></div>
     </details>`).join('')}
 
@@ -301,7 +333,7 @@ export class SettingsPanel implements vscode.Disposable {
     <p class="desc" style="margin-left:0">Lightweight model for parallel codebase search. Use a cheap/fast model to reduce costs.</p>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="search-model" placeholder="provider/model-name">
+      <input type="text" id="search-model" list="model-list" placeholder="provider/model-name">
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -357,6 +389,29 @@ export class SettingsPanel implements vscode.Disposable {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const settings = ${settingsJson};
+    let availableModels = ${modelsJson};
+
+    // ── Build datalist from models ──
+    function rebuildDatalist(models) {
+      const dl = document.getElementById('model-list');
+      if (!dl) return;
+      dl.innerHTML = '';
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m;
+        dl.appendChild(opt);
+      }
+    }
+    rebuildDatalist(availableModels);
+
+    // ── Listen for model updates from extension ──
+    window.addEventListener('message', e => {
+      const msg = e.data;
+      if (msg.type === 'modelsUpdate' && msg.models) {
+        availableModels = msg.models;
+        rebuildDatalist(availableModels);
+      }
+    });
 
     // ── Tab switching ──
     document.querySelectorAll('.tab-btn').forEach(btn => {
