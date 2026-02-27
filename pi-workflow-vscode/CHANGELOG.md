@@ -2,16 +2,16 @@
 
 ## 0.1.5 — Settings Model Select & Chip UI
 
-- **Native select dropdown** — datalist 자동완성을 표준 `<select>` 드롭다운으로 교체
-- **Multi-model chip UI** — verify/domain 복수 모델 선택을 chip/tag 패턴으로 전환
-- **커스텀 모델 보존** — available 목록에 없는 저장값도 커스텀 option으로 유지
+- **Native select dropdown** — Replaced datalist autocomplete with native `<select>` dropdown
+- **Multi-model chip UI** — Switched multi-model selection (verify/domain) to chip/tag UI pattern
+- **Custom model retention** — Preserves saved values as custom options even if not in available model list
 
 ## 0.1.4 — Solution Browser, Plan Editor & Tests
 
-- **Solution Browser Panel** — `docs/solutions/` 학습 이력을 VSCode webview에서 탐색 (카테고리/심각도/검색 필터)
-- **Interactive Plan Editor** — PlanPanel을 편집 가능한 인터랙티브 모드로 전환
-- **Unit test infrastructure** — vitest 도입, html-utils · solution-parser 테스트 82개 작성
-- **Cleanup** — self-referencing symlink 제거
+- **Solution Browser Panel** — Browse `docs/solutions/` learning history in VSCode webview (category/severity/search filters)
+- **Interactive Plan Editor** — Converted PlanPanel to editable interactive mode
+- **Unit test infrastructure** — Added vitest, 82 tests for html-utils and solution-parser
+- **Cleanup** — Removed self-referencing symlink
 
 ## 0.1.3 — Settings Model Dropdown
 
