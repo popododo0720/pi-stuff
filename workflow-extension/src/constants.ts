@@ -98,7 +98,7 @@ export const MAX_MODULE_CONVENTIONS = 30;
 export const MAX_PREFLIGHT_OUTPUT_CHARS = 2000;
 export const MAX_VERIFICATION_SUMMARY_CHARS = 1500;
 export const MAX_ERROR_PREFIX_CHARS = 500;
-/** Prompt injection 시 solution body 상한 (solution.ts의 MAX_SOLUTION_BODY=1500은 standalone 검색용) */
+/** Max solution body in prompt injection (solution.ts MAX_SOLUTION_BODY=1500 is for standalone search) */
 export const MAX_SOLUTION_BODY_CONTEXT_CHARS = 800;
 export const MAX_IMPLEMENTATION_NOTES_CHARS = 2000;
 export const MAX_MEMORY_CONTEXT_CHARS = 6000;
@@ -181,19 +181,19 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     label: 'Reflect & Capture',
     instruction:
       '<critical_requirement>\n' +
-      '워크플로우에서 배운 것을 구조화하여 저장하세요.\n\n' +
-      '**Step 1: project_memory에 최소 1개 저장 (필수)**\n' +
-      '⚠️ 저장 없이 compoundDone 호출 시 거부됩니다.\n' +
-      'Pattern 구조화: "패턴|||❌ 잘못된 예시|||✅ 올바른 예시|||이유"\n' +
-      '구분자 ||| 사용. 예시/이유 생략 가능. count ≥ 3 도달 시 Critical Patterns에 자동 승격됩니다.\n\n' +
-      '**Step 2: Documentation Review (해당 시)**\n' +
-      '문서 생성/수정했다면: 명확성, 완전성, YAGNI 점검.\n\n' +
-      '**Step 3: Compound Summary (compoundDone content에 작성)**\n' +
-      '- **Problem:** 무엇이 문제였는가\n' +
-      '- **Root Cause:** 왜 발생했는가\n' +
-      '- **Solution:** 어떻게 해결했는가\n' +
-      '- **Prevention:** 재발 방지\n' +
-      '- **Symptoms:** 징후 키워드 (쉼표 구분)\n' +
+      'Structure and save what you learned from this workflow.\n\n' +
+      '**Step 1: Save at least 1 item to project_memory (required)**\n' +
+      '⚠️ Calling compoundDone without saving will be rejected.\n' +
+      'Pattern format: "pattern|||❌ wrong example|||✅ correct example|||reason"\n' +
+      'Use ||| as delimiter. Example/reason can be omitted. Auto-promoted to Critical Patterns when count ≥ 3.\n\n' +
+      '**Step 2: Documentation Review (if applicable)**\n' +
+      'If docs were created/modified: check clarity, completeness, YAGNI.\n\n' +
+      '**Step 3: Compound Summary (write in compoundDone content)**\n' +
+      '- **Problem:** What was the problem?\n' +
+      '- **Root Cause:** Why did it happen?\n' +
+      '- **Solution:** How was it resolved?\n' +
+      '- **Prevention:** How to prevent recurrence?\n' +
+      '- **Symptoms:** Symptom keywords (comma-separated)\n' +
       '</critical_requirement>',
     requiresGit: false,
     requiresGitBranch: false,
@@ -203,8 +203,8 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     id: 'cleanup',
     label: 'Memory Cleanup',
     instruction:
-      '오래된 메모리 항목 정리: project_memory(action: "remove").\n' +
-      '정리할 것 없으면 바로 compoundDone 호출.',
+      'Clean up stale memory entries: project_memory(action: "remove").\n' +
+      'If nothing to clean, call compoundDone directly.',
     requiresGit: false,
     requiresGitBranch: false,
     requiresLastTodo: false,
@@ -213,8 +213,8 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     id: 'gitCommit',
     label: 'Git Commit',
     instruction:
-      'git add -A && git status 확인.\n' +
-      '변경사항 있으면: git commit -m "chore(workflow): final - <description>"',
+      'git add -A && git status check.\n' +
+      'If there are changes: git commit -m "chore(workflow): final - <description>"',
     requiresGit: true,
     requiresGitBranch: false,
     requiresLastTodo: true,
@@ -264,13 +264,13 @@ export const COMPOUND_STEPS: CompoundStepDef[] = [
     id: 'finalize',
     label: 'Finalize',
     instruction:
-      'compoundDone의 content에 워크플로우 요약 작성 필수.\n' +
-      '구조화 권장:\n' +
-      '- **Problem:** 무엇이 문제였는가\n' +
-      '- **Root Cause:** 왜 발생했는가\n' +
-      '- **Solution:** 어떻게 해결했는가\n' +
-      '- **Prevention:** 재발 방지\n' +
-      '- **Symptoms:** 징후 키워드\n\n' +
+      'Write a workflow summary in compoundDone content (required).\n' +
+      'Recommended structure:\n' +
+      '- **Problem:** What was the problem?\n' +
+      '- **Root Cause:** Why did it happen?\n' +
+      '- **Solution:** How was it resolved?\n' +
+      '- **Prevention:** How to prevent recurrence?\n' +
+      '- **Symptoms:** Symptom keywords\n\n' +
       'workflow_transition(action: "compoundDone", content: "<summary>")',
     requiresGit: false,
     requiresGitBranch: false,
@@ -372,9 +372,9 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '```\n\n' +
     '### Plan Detail Level\n' +
     'Match plan depth to task complexity:\n\n' +
-    '**MINIMAL** — 간단한 변경 (1-2 파일): 변경 파일과 요약만.\n' +
-    '**STANDARD** (기본): 파일별 변경사항, 시그니처, cross-file impact, verification criteria.\n' +
-    '**DETAILED** — 대규모 리팩토링: 전후 비교, Phase 분리, 롤백 계획.\n\n' +
+    '**MINIMAL** — Simple changes (1-2 files): files and summary only.\n' +
+    '**STANDARD** (default): Per-file changes, signatures, cross-file impact, verification criteria.\n' +
+    '**DETAILED** — Large refactoring: before/after comparison, phased approach, rollback plan.\n\n' +
     'The plan MUST include:\n' +
     '- **Summary** — what and why, in one paragraph.\n' +
     '- **Step-by-step tasks** — each with exact file path (from project root) and specific change description.\n' +

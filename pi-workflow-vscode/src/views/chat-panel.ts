@@ -358,7 +358,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   <div id="messages"></div>
   <div id="input-area">
     <div id="input-card">
-      <textarea id="input" rows="1" placeholder="메시지 입력... (Shift+Enter 줄바꿈)"></textarea>
+      <textarea id="input" rows="1" placeholder="Type a message... (Shift+Enter for newline)"></textarea>
       <div id="input-buttons">
         <button id="send-btn">↑</button>
         <button id="abort-btn" class="hidden">Stop</button>

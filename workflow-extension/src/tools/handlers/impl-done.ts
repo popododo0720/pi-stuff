@@ -24,7 +24,7 @@ export async function handleImplDone(
 ): Promise<HandlerResult> {
   const { session, settings, params, pi, ctx, signal, onUpdate } = hctx;
 
-  // ── Gate 1: content 필수 ──
+  // ── Gate 1: content required ──
   if (!params.content?.trim()) {
     return {
       text:
@@ -62,7 +62,7 @@ export async function handleImplDone(
     };
   }
 
-  // ── Gate 3: retry 에스컬레이션 ──
+  // ── Gate 3: retry escalation ──
   const maxRetries = settings.maxRetries ?? 5;
   if (session.retryCount >= maxRetries) {
     // Reset retryCount so the user can retry after reviewing

@@ -79,7 +79,7 @@ function sanitizeBlockContent(text: string): string {
 /**
  * Append a structured pattern block to critical patterns file.
  * Takes PatternEntry directly — same shape used in project memory.
- * Format: ## N. title (발견: X회) + optional ❌ WRONG / ✅ CORRECT / Why sections.
+ * Format: ## N. title (found: X times) + optional ❌ WRONG / ✅ CORRECT / Why sections.
  * Evicts oldest blocks (FIFO) when exceeding MAX_CRITICAL_CHARS.
  */
 export function appendCriticalPattern(
@@ -89,7 +89,7 @@ export function appendCriticalPattern(
   let content = loadCriticalPatterns(cwd);
   const nextNum = countPatternBlocks(content) + 1;
 
-  let block = `## ${nextNum}. ${sanitizeBlockContent(pattern.text)} (발견: ${pattern.count}회)`;
+  let block = `## ${nextNum}. ${sanitizeBlockContent(pattern.text)} (found: ${pattern.count} times)`;
   if (pattern.wrong) {
     block += `\n\n### ❌ WRONG\n${sanitizeBlockContent(pattern.wrong)}`;
   }

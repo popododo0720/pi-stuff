@@ -1,6 +1,6 @@
 // tools/compact.ts — Deferred compaction state management
-// Tool execution 중 ctx.compact() 직접 호출 시 race condition 발생.
-// 대신 플래그만 세팅하고, before_agent_start에서 실행.
+// Calling ctx.compact() directly during tool execution causes a race condition.
+// Instead, set a flag and execute compaction in before_agent_start.
 
 export const RESET_MARKER = '[WF_RESET]';
 

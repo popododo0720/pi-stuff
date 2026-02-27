@@ -524,9 +524,9 @@ export function registerSettingsCommand(pi: ExtensionAPI) {
         } else if (choice.startsWith('📐')) {
           // ── Detail Level ─────────────────────────────────────────
           const pick = await ctx.ui.select('Plan detail level', [
-            'minimal — 간결 (1-2 파일)',
-            'standard — 기본',
-            'detailed — 풀스펙 (대규모 리팩토링)',
+            'minimal — concise (1-2 files)',
+            'standard — default',
+            'detailed — full spec (large refactoring)',
           ]);
           if (pick) {
             const level = pick.split(' ')[0] as

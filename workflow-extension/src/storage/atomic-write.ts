@@ -19,7 +19,7 @@ export function atomicWriteFileSync(
   try {
     renameSync(tmp, path);
   } catch {
-    // Fallback: direct write (cross-device rename 실패 시)
+    // Fallback: direct write (cross-device rename failed)
     writeFileSync(path, data, options);
     try {
       unlinkSync(tmp);

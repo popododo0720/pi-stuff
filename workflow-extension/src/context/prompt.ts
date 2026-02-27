@@ -288,7 +288,7 @@ function buildCriticalContext(cwd: string): string {
     const critical = loadCriticalPatterns(cwd);
     if (critical) {
       return (
-        '\n\n### Critical Patterns (항상 적용)\n' +
+        '\n\n### Critical Patterns (always applied)\n' +
         `<critical_patterns>\n${critical}\n</critical_patterns>`
       );
     }
