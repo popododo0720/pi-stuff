@@ -206,6 +206,19 @@ export class SettingsPanel implements vscode.Disposable {
     .field select:focus {
       border-color: var(--vscode-focusBorder, #007fd4);
     }
+    .model-chips {
+      display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px;
+    }
+    .model-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-radius: 3px; padding: 2px 6px; font-size: 12px;
+    }
+    .model-chip button {
+      background: none; border: none; color: inherit;
+      cursor: pointer; font-size: 14px; padding: 0; line-height: 1;
+    }
     .field-check { margin: 6px 0; display: flex; align-items: center; gap: 8px; }
     .field-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--vscode-checkbox-background); }
     .field-check label { font-size: 13px; cursor: pointer; }
@@ -249,7 +262,6 @@ export class SettingsPanel implements vscode.Disposable {
   </style>
 </head>
 <body>
-  <datalist id="model-list"></datalist>
   <h1>⚙️ Pi Workflow Settings</h1>
 
   <div class="tab-bar">
@@ -281,7 +293,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Plan</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="plan-model" list="model-list" placeholder="provider/model-name">
+      <select id="plan-model" class="model-select"><option value="">(none)</option></select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -291,7 +303,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Implement</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="impl-model" list="model-list" placeholder="provider/model-name">
+      <select id="impl-model" class="model-select"><option value="">(none)</option></select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -301,7 +313,7 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Compound</h2>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="compound-model" list="model-list" placeholder="provider/model-name">
+      <select id="compound-model" class="model-select"><option value="">(none)</option></select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -311,9 +323,11 @@ export class SettingsPanel implements vscode.Disposable {
     <h2>Verify</h2>
     <div class="field">
       <label>Models</label>
-      <input type="text" id="verify-models" list="model-list" placeholder="model1, model2" style="width:300px">
+      <div>
+        <div class="model-chips" id="verify-models-chips"></div>
+        <select class="model-select" id="verify-models-add"><option value="">+ Add model</option></select>
+      </div>
     </div>
-    <p class="desc" style="margin-left:0">Comma-separated model list</p>
     <div class="field">
       <label>Thinking</label>
       <select id="verify-thinking"><option value="">(default)</option>${thinkingOpts}</select>
@@ -325,7 +339,7 @@ export class SettingsPanel implements vscode.Disposable {
     <details style="margin:8px 0;border:1px solid var(--vscode-panel-border,#333);border-radius:4px;padding:4px 8px;">
       <summary style="cursor:pointer;font-size:13px;font-weight:500;padding:4px 0;">${d}</summary>
       <div class="field-check" style="margin-top:6px;"><input type="checkbox" id="domain-${d}-enabled" checked><label for="domain-${d}-enabled">Enabled</label></div>
-      <div class="field"><label>Models</label><input type="text" id="domain-${d}-models" list="model-list" placeholder="(inherit)" style="width:280px"></div>
+      <div class="field"><label>Models</label><div><div class="model-chips" id="domain-${d}-models-chips"></div><select class="model-select" id="domain-${d}-models-add" style="width:280px"><option value="">(inherit)</option></select></div></div>
       <div class="field"><label>Thinking</label><select id="domain-${d}-thinking"><option value="">(inherit)</option>${thinkingOpts}</select></div>
     </details>`).join('')}
 
@@ -333,7 +347,7 @@ export class SettingsPanel implements vscode.Disposable {
     <p class="desc" style="margin-left:0">Lightweight model for parallel codebase search. Use a cheap/fast model to reduce costs.</p>
     <div class="field">
       <label>Model</label>
-      <input type="text" id="search-model" list="model-list" placeholder="provider/model-name">
+      <select id="search-model" class="model-select"><option value="">(none)</option></select>
     </div>
     <div class="field">
       <label>Thinking</label>
@@ -391,25 +405,81 @@ export class SettingsPanel implements vscode.Disposable {
     const settings = ${settingsJson};
     let availableModels = ${modelsJson};
 
-    // ── Build datalist from models ──
-    function rebuildDatalist(models) {
-      const dl = document.getElementById('model-list');
-      if (!dl) return;
-      dl.innerHTML = '';
-      for (const m of models) {
-        const opt = document.createElement('option');
-        opt.value = m;
-        dl.appendChild(opt);
-      }
+    // ── Build select options from models ──
+    function rebuildModelSelects(models) {
+      document.querySelectorAll('.model-select').forEach(sel => {
+        const current = sel.value;
+        const firstOpt = sel.options[0];
+        sel.innerHTML = '';
+        sel.appendChild(firstOpt);
+        for (const m of models) {
+          const opt = document.createElement('option');
+          opt.value = m; opt.textContent = m;
+          sel.appendChild(opt);
+        }
+        if (current && !models.includes(current)) {
+          const opt = document.createElement('option');
+          opt.value = current; opt.textContent = current;
+          sel.appendChild(opt);
+        }
+        sel.value = current;
+      });
     }
-    rebuildDatalist(availableModels);
+
+    function setSelectVal(id, v) {
+      const sel = document.getElementById(id);
+      if (!sel || !v) return;
+      if (![...sel.options].some(o => o.value === v)) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v;
+        sel.appendChild(opt);
+      }
+      sel.value = v;
+    }
+
+    // ── Chip (tag) management for multi-model selects ──
+    function addChip(containerId, model) {
+      const container = document.getElementById(containerId);
+      if (!container || !model) return;
+      if ([...container.children].some(c => c.dataset.model === model)) return;
+      const chip = document.createElement('span');
+      chip.className = 'model-chip';
+      chip.dataset.model = model;
+      const label = document.createElement('span');
+      label.textContent = model;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '×';
+      btn.addEventListener('click', () => chip.remove());
+      chip.appendChild(label);
+      chip.appendChild(btn);
+      container.appendChild(chip);
+    }
+
+    function getChips(containerId) {
+      const container = document.getElementById(containerId);
+      if (!container) return [];
+      return [...container.children].map(c => c.dataset.model).filter(Boolean);
+    }
+
+    rebuildModelSelects(availableModels);
+
+    // ── Multi-model select → chip add ──
+    document.querySelectorAll('.model-select[id$="-add"]').forEach(sel => {
+      sel.addEventListener('change', () => {
+        if (!sel.value) return;
+        const chipsId = sel.id.replace('-add', '-chips');
+        addChip(chipsId, sel.value);
+        sel.value = '';
+      });
+    });
 
     // ── Listen for model updates from extension ──
     window.addEventListener('message', e => {
       const msg = e.data;
       if (msg.type === 'modelsUpdate' && msg.models) {
         availableModels = msg.models;
-        rebuildDatalist(availableModels);
+        rebuildModelSelects(availableModels);
       }
     });
 
@@ -428,9 +498,6 @@ export class SettingsPanel implements vscode.Disposable {
     // ── Helpers ──
     function val(id, v) { const el = document.getElementById(id); if (el && v != null) el.value = v; }
     function chk(id, v) { const el = document.getElementById(id); if (el) el.checked = !!v; }
-    function splitModels(id) {
-      return (document.getElementById(id)?.value || '').split(',').map(s => s.trim()).filter(Boolean);
-    }
 
 
     // ── Populate ──
@@ -439,13 +506,13 @@ export class SettingsPanel implements vscode.Disposable {
     val('detailLevel', settings.detailLevel || '');
 
     const stages = settings.stages || {};
-    val('plan-model', stages.plan?.model || '');
+    setSelectVal('plan-model', stages.plan?.model || '');
     val('plan-thinking', stages.plan?.thinking || '');
-    val('impl-model', stages.implement?.model || '');
+    setSelectVal('impl-model', stages.implement?.model || '');
     val('impl-thinking', stages.implement?.thinking || '');
-    val('compound-model', stages.compound?.model || '');
+    setSelectVal('compound-model', stages.compound?.model || '');
     val('compound-thinking', stages.compound?.thinking || '');
-    val('verify-models', (stages.verify?.models || []).join(', '));
+    (stages.verify?.models || []).forEach(m => addChip('verify-models-chips', m));
     val('verify-thinking', stages.verify?.thinking || '');
 
     // Verify domains
@@ -454,13 +521,13 @@ export class SettingsPanel implements vscode.Disposable {
     for (const d of domainIds) {
       const dc = domains[d] || {};
       chk('domain-' + d + '-enabled', dc.enabled !== false);
-      val('domain-' + d + '-models', (dc.models || []).join(', '));
+      (dc.models || []).forEach(m => addChip('domain-' + d + '-models-chips', m));
       val('domain-' + d + '-thinking', dc.thinking || '');
     }
 
     // Search
     const searchCfg = stages.search || {};
-    val('search-model', searchCfg.model || '');
+    setSelectVal('search-model', searchCfg.model || '');
     val('search-thinking', searchCfg.thinking || '');
     val('search-maxParallel', searchCfg.maxParallel || 3);
     val('search-timeout', searchCfg.timeout || 60000);
@@ -497,7 +564,7 @@ export class SettingsPanel implements vscode.Disposable {
     }
 
     document.getElementById('save-btn').addEventListener('click', () => {
-      const verifyModels = splitModels('verify-models');
+      const verifyModels = getChips('verify-models-chips');
       const verifyThinking = getVal('verify-thinking');
       const verifyStage = {};
       if (verifyModels.length) verifyStage.models = verifyModels;
@@ -509,7 +576,7 @@ export class SettingsPanel implements vscode.Disposable {
         const dc = {};
         const enabled = getChk('domain-' + d + '-enabled');
         if (!enabled) dc.enabled = false;
-        const dModels = splitModels('domain-' + d + '-models');
+        const dModels = getChips('domain-' + d + '-models-chips');
         if (dModels.length) dc.models = dModels;
         const dThinking = getVal('domain-' + d + '-thinking');
         if (dThinking) dc.thinking = dThinking;
