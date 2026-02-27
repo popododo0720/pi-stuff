@@ -315,7 +315,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   // ── Webview Panels ───────────────────────────────────────────
-  const planPanel = new PlanPanel();
+  const planPanel = new PlanPanel(workspaceRoot);
   const verifyPanel = new VerifyPanel();
   settingsPanel = new SettingsPanel(workspaceRoot, context.extensionUri);
   const solutionPanel = new SolutionPanel(workspaceRoot);

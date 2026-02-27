@@ -115,8 +115,9 @@ function applyInlineFormatting(text: string): string {
 }
 
 /** Generate CSP meta tag for webview. */
-export function getCspMeta(nonce: string): string {
-  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}';">`;
+export function getCspMeta(nonce: string, opts?: { scripts?: boolean }): string {
+  const scriptSrc = opts?.scripts ? ` script-src 'nonce-${nonce}';` : '';
+  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}';${scriptSrc}">`;
 }
 
 /** Generate cryptographic nonce for CSP. */
