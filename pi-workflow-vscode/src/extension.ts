@@ -22,6 +22,7 @@ import { ChatHistoryStore } from './core/chat-history';
 import { ChatViewProvider } from './views/chat-panel';
 import { PlanPanel } from './views/plan-panel';
 import { SettingsPanel } from './views/settings-panel';
+import { SolutionPanel } from './views/solution-panel';
 import { VerifyPanel } from './views/verify-panel';
 
 // ── Main branch detection (async + cached) ─────────────────────
@@ -317,7 +318,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const planPanel = new PlanPanel();
   const verifyPanel = new VerifyPanel();
   settingsPanel = new SettingsPanel(workspaceRoot, context.extensionUri);
-  context.subscriptions.push(planPanel, verifyPanel, settingsPanel);
+  const solutionPanel = new SolutionPanel(workspaceRoot);
+  context.subscriptions.push(planPanel, verifyPanel, settingsPanel, solutionPanel);
 
   // Track last auto-opened plan to avoid reopening after user closes
   let lastAutoOpenPlanId = '';
@@ -416,6 +418,7 @@ export function activate(context: vscode.ExtensionContext): void {
       filesTree.refresh();
     }),
     vscode.commands.registerCommand('pi.openSettings', () => settingsPanel.show()),
+    vscode.commands.registerCommand('pi.openSolutions', () => solutionPanel.show()),
     vscode.commands.registerCommand('pi.openPlan', () => {
       const session = sessionWatcher.getState();
       if (session?.planContent) {

@@ -125,6 +125,11 @@
         "command": "pi.rollbackTodo",
         "title": "Rollback TODO",
         "icon": "$(discard)"
+      },
+      {
+        "command": "pi.openSolutions",
+        "title": "Pi: Solution Browser",
+        "icon": "$(book)"
       }
     ],
     "menus": {
@@ -136,6 +141,11 @@
         },
         {
           "command": "pi.openSettings",
+          "when": "view == pi.status",
+          "group": "navigation"
+        },
+        {
+          "command": "pi.openSolutions",
           "when": "view == pi.status",
           "group": "navigation"
         }
