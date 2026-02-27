@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 — Settings Model Dropdown
+
+- **Model datalist combobox** — Settings UI model fields now show available models as dropdown suggestions
+- **RPC integration** — model list fetched from connected pi agent; updates dynamically on connect/disconnect
+- **Graceful fallback** — when RPC is not connected, fields remain as free-text inputs
+
 ## 0.1.2 — Cross-Platform Fixes
 
 - **CRLF newline support** — fixed `split('\n')` → `split(/\r?\n/)` across diff parsing, verification output, HTML rendering, and file tree providers
