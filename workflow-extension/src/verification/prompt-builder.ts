@@ -22,7 +22,7 @@ const GENERAL_VERIFICATION_RULES =
   '\n**General Rules:**\n' +
   '- Do NOT flag missing config files (tsconfig.json, eslint.config, etc.) as CRITICAL. ' +
   'Projects have varied build setups — some use tsx/tsgo direct execution, bundlers, or runtime transpilation.\n' +
-  '- Evaluate the project\'s actual build/run mechanism (package.json scripts, tool configs) before judging setup.\n' +
+  "- Evaluate the project's actual build/run mechanism (package.json scripts, tool configs) before judging setup.\n" +
   '- Focus on actual code defects, not tooling preferences.\n\n';
 
 /** Protected artifacts — included in all verification prompts */
@@ -125,7 +125,12 @@ export function buildCorePlanPrompt(opts: {
     'or things a competent developer would naturally handle.\n\n' +
     GENERAL_VERIFICATION_RULES +
     PROTECTED_ARTIFACTS;
-  prompt = appendOptional(prompt, opts.stackHint, opts.customChecks, opts.projectLearnings);
+  prompt = appendOptional(
+    prompt,
+    opts.stackHint,
+    opts.customChecks,
+    opts.projectLearnings,
+  );
   prompt += `\n\n${STRUCTURED_FORMAT}`;
   return prompt;
 }
@@ -178,7 +183,12 @@ export function buildCoreImplPrompt(opts: {
     prompt += `\n\n## Implementation Notes (from developer)\n${opts.implNotes.trim()}`;
   }
 
-  prompt = appendOptional(prompt, opts.stackHint, opts.customChecks, opts.projectLearnings);
+  prompt = appendOptional(
+    prompt,
+    opts.stackHint,
+    opts.customChecks,
+    opts.projectLearnings,
+  );
   prompt += `\n\n${STRUCTURED_FORMAT}`;
   return prompt;
 }
@@ -208,7 +218,8 @@ export function buildDomainPrompt(
 
   prompt = appendTodoScope(prompt, opts.todoContext);
   if (opts.stackHint) prompt += `\n\n**Tech Stack:**\n${opts.stackHint}`;
-  if (opts.projectLearnings) prompt += `\n\n**Project Learnings (from past verifications):**\n${opts.projectLearnings}`;
+  if (opts.projectLearnings)
+    prompt += `\n\n**Project Learnings (from past verifications):**\n${opts.projectLearnings}`;
   prompt += `\n\n${STRUCTURED_FORMAT}`;
   return prompt;
 }

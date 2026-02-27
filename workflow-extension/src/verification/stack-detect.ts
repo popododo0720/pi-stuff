@@ -2,7 +2,7 @@
 // Detects primary tech stacks from project file markers.
 // Used by verification to inject stack-specific review hints.
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type TechStack =
@@ -97,7 +97,8 @@ function hasTsFiles(cwd: string): boolean {
     for (const dir of checkDirs) {
       if (!existsSync(dir)) continue;
       const files = readdirSync(dir);
-      if (files.some((f) => f.endsWith('.ts') || f.endsWith('.tsx'))) return true;
+      if (files.some((f) => f.endsWith('.ts') || f.endsWith('.tsx')))
+        return true;
     }
     return false;
   } catch {

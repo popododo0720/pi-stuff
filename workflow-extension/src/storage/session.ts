@@ -222,12 +222,14 @@ export function backupSession(_cwd: string): void {
 
 // ── Session parsing (shared) ───────────────────────────────────
 
-function parseSession(raw: unknown): WorkflowSession | null {
+/** @internal — exported for testing */
+export function parseSession(raw: unknown): WorkflowSession | null {
   if (raw === null || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
 
   if (
     typeof r.id !== 'string' ||
+    r.id.trim().length === 0 ||
     typeof r.state !== 'string' ||
     typeof r.description !== 'string' ||
     !VALID_STATES.has(r.state)
