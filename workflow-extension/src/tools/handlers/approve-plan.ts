@@ -15,16 +15,15 @@ export async function handleApprovePlan(
 ): Promise<HandlerResult> {
   const { session, settings, params, pi, ctx, signal, onUpdate } = hctx;
 
-  if (!params.content?.trim()) {
-    return { text: 'Plan content is empty.' };
+  const planText = params.content?.trim() || session.planContent?.trim();
+  if (!planText) {
+    return {
+      text: 'Plan content is empty. Call draftPlan first or provide content.',
+    };
   }
 
-  session.planContent = params.content;
-  const savedPath = savePlanDocument(
-    ctx.cwd,
-    session.description,
-    params.content,
-  );
+  session.planContent = planText;
+  const savedPath = savePlanDocument(ctx.cwd, session.description, planText);
 
   // Transition to verifyPlan and flush so status bar shows verification state
   session.state = 'verifyPlan';

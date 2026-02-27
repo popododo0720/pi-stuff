@@ -4,6 +4,7 @@
 
 import { handleApprovePlan } from './approve-plan';
 import { handleCompoundDone } from './compound-done';
+import { handleDraftPlan } from './draft-plan';
 import { handleImplDone } from './impl-done';
 import { handleReplan } from './replan';
 import { handleSetTodos } from './set-todos';
@@ -12,6 +13,7 @@ import type { ActionHandler } from './types';
 
 export const handlers: Record<string, ActionHandler> = {
   approvePlan: handleApprovePlan,
+  draftPlan: handleDraftPlan,
   implDone: handleImplDone,
   compoundDone: handleCompoundDone,
   setTodos: handleSetTodos,

@@ -300,6 +300,7 @@ export function shouldSkipStep(
 
 export const VALID_TRANSITIONS: Record<string, WorkflowState[]> = {
   approvePlan: ['plan', 'verifyPlan'],
+  draftPlan: ['plan'],
   implDone: ['implement', 'verifyImpl'],
   replan: ['implement', 'verifyImpl', 'verifyPlan'],
   compoundDone: ['compound'],
@@ -386,7 +387,10 @@ export const STAGE_GUIDES: Record<WorkflowState, string> = {
     '- **IMPORTANT**: The plan is the SINGLE SOURCE OF TRUTH for verification.\n' +
     '  Verifiers will ONLY check items in the plan. If something is not in the plan, it will not be verified.\n' +
     '  If something should be done, it MUST be in the plan.\n\n' +
-    'When the user approves, call workflow_transition(action: "approvePlan", content: "<full plan>").\n' +
+    'After writing the plan, call workflow_transition(action: "draftPlan", content: "<full plan>")\n' +
+    'to show it in the plan panel for user review and editing.\n' +
+    'When the user approves, call workflow_transition(action: "approvePlan") —\n' +
+    'the edited plan from the panel will be used automatically.\n' +
     'Do NOT transition until the user explicitly approves.\n' +
     'Discussing the plan is NOT approval. Wait for explicit words like "approve", "go", "submit", "승인", "ㄱㄱ", "제출해".',
 

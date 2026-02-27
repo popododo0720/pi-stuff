@@ -57,10 +57,11 @@ export function registerTransitionTool(
     label: 'Workflow Transition',
     description:
       'Transition the current workflow stage. ' +
-      'Supports: approvePlan, implDone, replan, compoundDone, setTodos, skipVerification.',
+      'Supports: approvePlan, draftPlan, implDone, replan, compoundDone, setTodos, skipVerification.',
     parameters: Type.Object({
       action: StringEnum([
         'approvePlan',
+        'draftPlan',
         'implDone',
         'replan',
         'compoundDone',

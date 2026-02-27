@@ -427,6 +427,18 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showInformationMessage('No plan available yet.');
       }
     }),
+    vscode.commands.registerCommand('pi.approvePlanFromPanel', () => {
+      if (!currentClient?.isRunning()) {
+        vscode.window.showWarningMessage('Pi is not running. Start Pi first.');
+        return;
+      }
+      currentClient.prompt(
+        'The user approved the plan from the plan panel. Call workflow_transition(action: "approvePlan") now.',
+        { streamingBehavior: 'followUp' },
+      ).catch((err: unknown) => {
+        vscode.window.showErrorMessage(`Failed to approve plan: ${err}`);
+      });
+    }),
     vscode.commands.registerCommand('pi.openVerification', () => {
       const session = sessionWatcher.getState();
       if (session?.verifyPlanResult) {

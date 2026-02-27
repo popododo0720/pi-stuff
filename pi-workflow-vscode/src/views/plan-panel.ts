@@ -1,5 +1,5 @@
 // views/plan-panel.ts — Webview panel for displaying and editing the workflow plan
-// Dual-mode: read-only view (default) + edit mode (verifyPlan state only).
+// Dual-mode: read-only view (default) + edit mode (plan & verifyPlan states).
 // Edit mode uses raw JSON pattern (like rollbackTodo) to preserve all session fields.
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -51,6 +51,12 @@ export class PlanPanel implements vscode.Disposable {
       if (msg.type === 'saveDraft' && typeof msg.content === 'string') {
         this.saveDraft(msg.content);
       }
+      if (msg.type === 'approvePlan' && typeof msg.content === 'string') {
+        const saved = this.saveDraft(msg.content);
+        if (saved) {
+          vscode.commands.executeCommand('pi.approvePlanFromPanel');
+        }
+      }
     });
 
     this.panel.onDidDispose(() => {
@@ -90,10 +96,11 @@ export class PlanPanel implements vscode.Disposable {
    * Uses raw JSON read+modify pattern (same as rollbackTodo in extension.ts)
    * to preserve workflow-extension-only fields that parseSession would drop.
    * Also checks state at write time to prevent TOCTOU race.
+   * @returns true on success, false on failure (caller can abort dependent operations)
    */
-  private saveDraft(content: string): void {
+  private saveDraft(content: string): boolean {
     if (!this.currentSessionId || !SAFE_ID_RE.test(this.currentSessionId)) {
-      return;
+      return false;
     }
 
     const filePath = join(
@@ -106,20 +113,22 @@ export class PlanPanel implements vscode.Disposable {
     try {
       const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
 
-      // TOCTOU guard: only allow save when session is still in verifyPlan state
-      if (raw.state !== 'verifyPlan') {
+      // TOCTOU guard: allow save during planning or verification stages
+      if (raw.state !== 'plan' && raw.state !== 'verifyPlan') {
         vscode.window.showWarningMessage(
-          'Plan can only be edited during verification stage.',
+          'Plan can only be edited during planning or verification stage.',
         );
-        return;
+        return false;
       }
 
       // Modify planContent only — preserve all other fields untouched
       raw.planContent = content;
       writeFileSync(filePath, JSON.stringify(raw, null, '\t'), 'utf-8');
       vscode.window.showInformationMessage('Plan draft saved.');
+      return true;
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to save plan draft: ${err}`);
+      return false;
     }
   }
 
@@ -132,7 +141,7 @@ export class PlanPanel implements vscode.Disposable {
   ): string {
     const nonce = getNonce();
     const csp = getCspMeta(nonce, { scripts: true });
-    const isEditable = state === 'verifyPlan';
+    const isEditable = state === 'plan' || state === 'verifyPlan';
 
     // TODO progress badge
     const doneCount = todos.filter((t) => t.status === 'done').length;
@@ -169,9 +178,14 @@ export class PlanPanel implements vscode.Disposable {
         </div>`
       : '';
 
+    const approveBtn = state === 'plan'
+      ? '<button class="approve-btn" id="approve-btn">✅ Approve Plan</button>'
+      : '';
+
     const saveBar = isEditable
       ? `<div class="save-bar">
           <button class="save-btn" id="save-btn">Save Draft</button>
+          ${approveBtn}
         </div>`
       : '';
 
@@ -201,6 +215,17 @@ export class PlanPanel implements vscode.Disposable {
           const editor = document.getElementById('plan-editor');
           if (editor) {
             vscode.postMessage({ type: 'saveDraft', content: editor.value });
+          }
+        });
+      }
+
+      // Approve Plan
+      const approveBtn = document.getElementById('approve-btn');
+      if (approveBtn) {
+        approveBtn.addEventListener('click', () => {
+          const editor = document.getElementById('plan-editor');
+          if (editor) {
+            vscode.postMessage({ type: 'approvePlan', content: editor.value });
           }
         });
       }
@@ -316,6 +341,18 @@ export class PlanPanel implements vscode.Disposable {
       font-weight: 500;
     }
     .save-btn:hover { opacity: 0.9; }
+    .approve-btn {
+      background: var(--vscode-testing-iconPassed, #388a34);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 24px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+    .approve-btn:hover { opacity: 0.9; }
   </style>
 </head>
 <body>
