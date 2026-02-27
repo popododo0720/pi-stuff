@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5 — Draft Plan Action & Code Quality
+
+- **draftPlan action** — New `draftPlan` workflow transition saves plan content for preview without state change
+- **approvePlan fallback** — `approvePlan` without content parameter uses existing session planContent
+- **Code quality** — Fixed 25 Biome lint diagnostics, unified all source code to English
+
 ## 0.1.4 — Unit Test Infrastructure
 
 - **vitest setup** — Added vitest unit test infrastructure

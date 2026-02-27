@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 — Plan Panel Approve & Draft Preview
+
+- **Draft plan preview** — Agent saves plan draft via `draftPlan` action, plan panel opens automatically for review
+- **Approve from panel** — "✅ Approve Plan" button in plan panel for one-click approval (no chat typing needed)
+- **Plan editing in planning stage** — Plan panel is now editable during both planning and verification stages
+
 ## 0.1.5 — Settings Model Select & Chip UI
 
 - **Native select dropdown** — Replaced datalist autocomplete with native `<select>` dropdown
