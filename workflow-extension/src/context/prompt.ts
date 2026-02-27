@@ -355,7 +355,7 @@ function buildTodoContext(session: WorkflowSession): string {
       )
       .join('\n\n');
     if (prevNotes) {
-      result += '\n\n### Previous Implementation Context\n' + prevNotes;
+      result += `\n\n### Previous Implementation Context\n${prevNotes}`;
     }
   }
 

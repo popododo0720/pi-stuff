@@ -76,14 +76,14 @@ export async function runParallelVerification(
     const memory = loadMemory(cwd);
     if (memory.gotchas.length > 0) {
       learningParts.push(
-        'Past gotchas:\n' + memory.gotchas.map((g) => `- ${g}`).join('\n'),
+        `Past gotchas:\n${memory.gotchas.map((g) => `- ${g}`).join('\n')}`,
       );
     }
     if (workflowId) {
       const wfMem = loadWorkflowMemory(cwd, workflowId);
       if (wfMem.gotchas.length > 0) {
         learningParts.push(
-          'Workflow gotchas:\n' + wfMem.gotchas.map((g) => `- ${g}`).join('\n'),
+          `Workflow gotchas:\n${wfMem.gotchas.map((g) => `- ${g}`).join('\n')}`,
         );
       }
     }

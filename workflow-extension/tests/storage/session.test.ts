@@ -21,9 +21,9 @@ describe('parseSession', () => {
   it('parses valid minimal session', () => {
     const result = parseSession(validSession());
     expect(result).not.toBeNull();
-    expect(result!.id).toBe('wf-20260220-144239');
-    expect(result!.state).toBe('plan');
-    expect(result!.description).toBe('Test workflow');
+    expect(result?.id).toBe('wf-20260220-144239');
+    expect(result?.state).toBe('plan');
+    expect(result?.description).toBe('Test workflow');
   });
 
   it('returns null for null input', () => {
@@ -72,7 +72,7 @@ describe('parseSession', () => {
     for (const state of states) {
       const result = parseSession(validSession({ state }));
       expect(result).not.toBeNull();
-      expect(result!.state).toBe(state);
+      expect(result?.state).toBe(state);
     }
   });
 
@@ -83,13 +83,13 @@ describe('parseSession', () => {
   it('defaults planContent to empty string if missing', () => {
     const result = parseSession(validSession({ planContent: undefined }));
     expect(result).not.toBeNull();
-    expect(result!.planContent).toBe('');
+    expect(result?.planContent).toBe('');
   });
 
   it('defaults retryCount to 0 if missing', () => {
     const result = parseSession(validSession({ retryCount: undefined }));
     expect(result).not.toBeNull();
-    expect(result!.retryCount).toBe(0);
+    expect(result?.retryCount).toBe(0);
   });
 
   it('defaults completed to false for non-done state', () => {
@@ -97,7 +97,7 @@ describe('parseSession', () => {
       validSession({ completed: undefined, state: 'plan' }),
     );
     expect(result).not.toBeNull();
-    expect(result!.completed).toBe(false);
+    expect(result?.completed).toBe(false);
   });
 
   it('defaults completed to true for done state', () => {
@@ -105,7 +105,7 @@ describe('parseSession', () => {
       validSession({ completed: undefined, state: 'done' }),
     );
     expect(result).not.toBeNull();
-    expect(result!.completed).toBe(true);
+    expect(result?.completed).toBe(true);
   });
 
   // ── Todos ──
@@ -123,9 +123,9 @@ describe('parseSession', () => {
     ];
     const result = parseSession(validSession({ todos }));
     expect(result).not.toBeNull();
-    expect(result!.todos).toHaveLength(3);
-    expect(result!.todos[0].title).toBe('Task 1');
-    expect(result!.todos[0].status).toBe('done');
+    expect(result?.todos).toHaveLength(3);
+    expect(result?.todos[0].title).toBe('Task 1');
+    expect(result?.todos[0].status).toBe('done');
   });
 
   it('filters out invalid todos', () => {
@@ -137,14 +137,14 @@ describe('parseSession', () => {
     ];
     const result = parseSession(validSession({ todos }));
     expect(result).not.toBeNull();
-    expect(result!.todos).toHaveLength(1);
-    expect(result!.todos[0].title).toBe('Valid');
+    expect(result?.todos).toHaveLength(1);
+    expect(result?.todos[0].title).toBe('Valid');
   });
 
   it('defaults todos to empty array when not an array', () => {
     const result = parseSession(validSession({ todos: 'invalid' }));
     expect(result).not.toBeNull();
-    expect(result!.todos).toEqual([]);
+    expect(result?.todos).toEqual([]);
   });
 
   // ── activeTodoIndex ──
@@ -153,7 +153,7 @@ describe('parseSession', () => {
     const todos = [{ title: 'A', status: 'active' }];
     const result = parseSession(validSession({ todos, activeTodoIndex: 10 }));
     expect(result).not.toBeNull();
-    expect(result!.activeTodoIndex).toBe(0); // clamped to max valid index
+    expect(result?.activeTodoIndex).toBe(0); // clamped to max valid index
   });
 
   it('sets activeTodoIndex to -1 when no todos', () => {
@@ -161,7 +161,7 @@ describe('parseSession', () => {
       validSession({ todos: [], activeTodoIndex: 5 }),
     );
     expect(result).not.toBeNull();
-    expect(result!.activeTodoIndex).toBe(-1);
+    expect(result?.activeTodoIndex).toBe(-1);
   });
 
   it('preserves valid activeTodoIndex', () => {
@@ -171,13 +171,13 @@ describe('parseSession', () => {
     ];
     const result = parseSession(validSession({ todos, activeTodoIndex: 1 }));
     expect(result).not.toBeNull();
-    expect(result!.activeTodoIndex).toBe(1);
+    expect(result?.activeTodoIndex).toBe(1);
   });
 
   it('defaults activeTodoIndex to -1 when not a number', () => {
     const result = parseSession(validSession({ activeTodoIndex: 'invalid' }));
     expect(result).not.toBeNull();
-    expect(result!.activeTodoIndex).toBe(-1);
+    expect(result?.activeTodoIndex).toBe(-1);
   });
 
   // ── Optional fields ──
@@ -185,24 +185,24 @@ describe('parseSession', () => {
   it('preserves name when present', () => {
     const result = parseSession(validSession({ name: 'My Workflow' }));
     expect(result).not.toBeNull();
-    expect(result!.name).toBe('My Workflow');
+    expect(result?.name).toBe('My Workflow');
   });
 
   it('defaults name to undefined when not a string', () => {
     const result = parseSession(validSession({ name: 42 }));
     expect(result).not.toBeNull();
-    expect(result!.name).toBeUndefined();
+    expect(result?.name).toBeUndefined();
   });
 
   it('preserves gitBranch when present', () => {
     const result = parseSession(validSession({ gitBranch: 'feature/test' }));
     expect(result).not.toBeNull();
-    expect(result!.gitBranch).toBe('feature/test');
+    expect(result?.gitBranch).toBe('feature/test');
   });
 
   it('defaults gitBranch to undefined when missing', () => {
     const result = parseSession(validSession());
     expect(result).not.toBeNull();
-    expect(result!.gitBranch).toBeUndefined();
+    expect(result?.gitBranch).toBeUndefined();
   });
 });
