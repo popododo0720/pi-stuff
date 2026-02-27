@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4 — Solution Browser, Plan Editor & Tests
+
+- **Solution Browser Panel** — `docs/solutions/` 학습 이력을 VSCode webview에서 탐색 (카테고리/심각도/검색 필터)
+- **Interactive Plan Editor** — PlanPanel을 편집 가능한 인터랙티브 모드로 전환
+- **Unit test infrastructure** — vitest 도입, html-utils · solution-parser 테스트 82개 작성
+- **Cleanup** — self-referencing symlink 제거
+
 ## 0.1.3 — Settings Model Dropdown
 
 - **Model datalist combobox** — Settings UI model fields now show available models as dropdown suggestions
