@@ -26,20 +26,23 @@ A workflow automation extension for Pi coding agent (`@mariozechner/pi-coding-ag
 
 ### Prerequisites
 
-- Pi coding agent (`@mariozechner/pi-coding-agent`) installed
+- [Pi coding agent](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) installed (`npm install -g @mariozechner/pi-coding-agent`)
 - Node.js 18+
 
-### Setup
+### Install from npm (Recommended)
 
 ```bash
-# Clone the repository
+pi install npm:workflow-extension
+```
+
+That's it! Pi automatically downloads the package and registers the extension.
+
+### Install from source (Development)
+
+```bash
 git clone https://github.com/popododo0720/pi-stuff.git
 cd pi-stuff/workflow-extension
-
-# Install dependencies
 npm install
-
-# Create symlink for pi to load the extension
 ln -s "$(pwd)" ~/.pi/agent/extensions/workflow-extension
 ```
 
