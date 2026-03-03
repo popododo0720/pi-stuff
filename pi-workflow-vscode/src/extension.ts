@@ -169,6 +169,17 @@ export function activate(context: vscode.ExtensionContext): void {
     currentBridge = bridge;
   }
 
+  // ── Phase 2: Shared helper — ensure pi is running ──────────
+  async function ensurePiRunning(): Promise<boolean> {
+    if (currentClient?.isRunning()) return true;
+    startPi();
+    for (let i = 0; i < 10; i++) {
+      if (currentClient?.isRunning()) return true;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return currentClient?.isRunning() ?? false;
+  }
+
   // ── Phase 2: Chat commands ───────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand('pi.startChat', () => startPi()),
@@ -200,13 +211,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('pi.newWorkflow', async () => {
-      if (!currentClient?.isRunning()) {
-        startPi();
-        await new Promise((r) => setTimeout(r, 1500));
-        if (!currentClient?.isRunning()) {
-          vscode.window.showErrorMessage('Pi is not running.');
-          return;
-        }
+      if (!await ensurePiRunning()) {
+        vscode.window.showErrorMessage('Pi is not running.');
+        return;
       }
       const description = await vscode.window.showInputBox({
         prompt: 'Describe the task for the new workflow',
@@ -221,6 +228,21 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showErrorMessage(`Failed to start workflow: ${err}`),
         );
       }
+    }),
+  );
+
+  // ── Phase 2: Auto-create workflow on first chat message ──────
+  context.subscriptions.push(
+    chatViewProvider.onNoWorkflowMessage(async (text) => {
+      if (!await ensurePiRunning()) {
+        vscode.window.showErrorMessage('Pi failed to start.');
+        chatViewProvider.resetCreatingWorkflow();
+        return;
+      }
+      currentClient!.prompt(`/workflow ${text}`).catch((err) => {
+        chatViewProvider.resetCreatingWorkflow();
+        vscode.window.showErrorMessage(`Failed to start workflow: ${err}`);
+      });
     }),
   );
 
@@ -327,8 +349,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── UI Sync Helper ────────────────────────────────────────────
   function syncUI(session: WorkflowSession | null): void {
+    const active = !!session && !session.completed && session.state !== 'done';
+    chatViewProvider.setHasActiveWorkflow(active);
+
+    const oldId = lastSyncedWorkflowId;
     const newId = session?.id ?? null;
-    const idChanged = newId !== lastSyncedWorkflowId;
+    const idChanged = newId !== oldId;
     lastSyncedWorkflowId = newId;
     chatHistoryStore.setWorkflowId(newId);
     statusBar.update(session);
@@ -375,10 +401,14 @@ export function activate(context: vscode.ExtensionContext): void {
     // (selectWorkflow calls newSession after syncUI fires).
     // The webview 'ready' handler uses getMessages() for accurate pi-sourced history.
     if (idChanged) {
-      chatViewProvider.postToWebview({ type: 'clear' });
-      const history = chatHistoryStore.getAll();
-      if (history.length > 0) {
-        chatViewProvider.postToWebview({ type: 'loadHistory', messages: history });
+      // Skip clear when transitioning from no-workflow to first workflow
+      // (bootstrap: user message + streaming response already visible in webview)
+      if (oldId !== null) {
+        chatViewProvider.postToWebview({ type: 'clear' });
+        const history = chatHistoryStore.getAll();
+        if (history.length > 0) {
+          chatViewProvider.postToWebview({ type: 'loadHistory', messages: history });
+        }
       }
     }
   }
@@ -392,12 +422,6 @@ export function activate(context: vscode.ExtensionContext): void {
     workflowTree.updateList(list);
   });
   context.subscriptions.push(listDisposable);
-
-  // ── Clear stale active pointer from previous session ──────────
-  // The active file persists on disk, but pi chat process is not running
-  // after a VS Code restart. Clear it so no workflow appears active until
-  // the user explicitly clicks one.
-  void sessionWatcher.clearActiveId();
 
   // ── Start watcher (async load begins) ────────────────────────
   sessionWatcher.start();

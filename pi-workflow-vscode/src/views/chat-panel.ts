@@ -31,6 +31,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private readonly _onDidResolve = new vscode.EventEmitter<void>();
   readonly onDidResolve = this._onDidResolve.event;
 
+  private _hasActiveWorkflow = false;
+  private _creatingWorkflow = false;
+  private readonly _onNoWorkflowMessage = new vscode.EventEmitter<string>();
+  readonly onNoWorkflowMessage = this._onNoWorkflowMessage.event;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly historyStore: ChatHistoryStore,
@@ -73,12 +78,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   // ── Public API ───────────────────────────────────────────────
 
+  setHasActiveWorkflow(value: boolean): void {
+    this._hasActiveWorkflow = value;
+    if (value) this._creatingWorkflow = false;
+  }
+
+  resetCreatingWorkflow(): void {
+    this._creatingWorkflow = false;
+  }
+
   setRpcClient(client: PiRpcClient | null): void {
     this.unbindRpcEvents();
     this.rpcClient = client;
     if (client) {
       this.bindRpcEvents();
     } else {
+      this._creatingWorkflow = false;
       // When transitioning to null (pi exited/stopped), reset webview state
       this.postToWebview({ type: 'agentEnd' });
       this.postToWebview({ type: 'stateUpdate', isStreaming: false });
@@ -124,6 +139,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   dispose(): void {
     this.unbindRpcEvents();
     this._onDidResolve.dispose();
+    this._onNoWorkflowMessage.dispose();
   }
 
   // ── RPC → Webview ────────────────────────────────────────────
@@ -303,6 +319,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         this.postToWebview({ type: 'stateUpdate', isStreaming: false });
       }
       return;
+    }
+
+    // Intercept: no active workflow → fire event to auto-create workflow
+    if (msg.type === 'sendMessage' && !this._hasActiveWorkflow && !this._creatingWorkflow) {
+      const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+      if (text) {
+        this._creatingWorkflow = true;
+        this.historyStore.append({ role: 'user', content: text, timestamp: Date.now() });
+        this._onNoWorkflowMessage.fire(text);
+        return;
+      }
     }
 
     if (!this.rpcClient?.isRunning()) {
